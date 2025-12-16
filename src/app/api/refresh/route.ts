@@ -14,14 +14,17 @@ function getToken(req: NextRequest): string {
 }
 
 function assertAuth(req: NextRequest) {
-  const required = process.env.REFRESH_KEY?.trim();
-  if (!required) throw new Error("Missing REFRESH_KEY in .env");
+  if (!process.env.REFRESH_KEY) return;
+
   const token = getToken(req);
-  if (!token || token !== required) throw new Error("Unauthorized");
+  if (!token || token !== process.env.REFRESH_KEY.trim()) {
+    throw new Error("Unauthorized");
+  }
 }
 
+
 async function runAction(action: Action, params: any) {
-  const force = !!params.force; 
+  const force = !!params.force;
   const cooldownMs = params.cooldownMs != null ? Number(params.cooldownMs) : undefined;
 
   if (action === "all") {

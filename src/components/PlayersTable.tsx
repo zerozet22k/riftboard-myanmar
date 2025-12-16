@@ -494,7 +494,6 @@ export default function PlayersTable({ initialRows }: { initialRows: Row[] }) {
                     <div className="font-semibold">{r.name}</div>
                   </td>
 
-                  {/* MAINS COLUMN */}
                   <td className="p-4">
                     {r.__mainsTop3.length ? (
                       <div className="flex flex-wrap items-center gap-2">

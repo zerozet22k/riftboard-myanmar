@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
-const REFRESH_KEY = process.env.NEXT_PUBLIC_REFRESH_KEY || "";
+
 
 export default function RefreshButton() {
     const router = useRouter();
@@ -15,9 +15,7 @@ export default function RefreshButton() {
 
         startTransition(async () => {
             try {
-                if (!REFRESH_KEY) throw new Error("Missing NEXT_PUBLIC_REFRESH_KEY");
-
-                const url = `/api/refresh?key=${encodeURIComponent(REFRESH_KEY)}`;
+                const url = `/api/refresh`;
                 const res = await fetch(url, { method: "GET", cache: "no-store" });
 
                 const data = await res.json().catch(() => ({}));
