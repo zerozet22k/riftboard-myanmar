@@ -24,7 +24,7 @@ function normalize(s: string) {
     return s.trim().toLowerCase();
 }
 
-// handles: "Hide on bush#KR1", "Hide on bush KR1", "Hide on bush / KR1"
+// handles: "Hide on bush#KR1", "Hide on bush KR1", "Hide on bush / KR1", "Name##TAG"
 function parseRiotId(input: string) {
     const raw = String(input || "").trim();
     if (!raw) return null;
@@ -33,6 +33,7 @@ function parseRiotId(input: string) {
         .replace(/[\u200B-\u200D\uFEFF]/g, "")
         .replace(/\s*\/\s*/g, "#")
         .replace(/\s*#\s*/g, "#")
+        .replace(/#+/g, "#") // ✅ collapse "##" -> "#"
         .trim();
 
     if (cleaned.includes("#")) {
@@ -45,6 +46,38 @@ function parseRiotId(input: string) {
     const m = cleaned.match(/^(.*\S)\s+(\S+)$/);
     if (!m) return null;
     return { gameName: m[1].trim(), tagLine: m[2].trim() };
+}
+
+const RIOT_API_KEY = process.env.RIOT_API_KEY?.trim() || "";
+const ACCOUNT_REGIONS = ["asia", "europe", "americas"] as const;
+
+type RiotAccountDto = { puuid: string; gameName: string; tagLine: string };
+
+async function resolveAccountAnyRegion(gameName: string, tagLine: string) {
+    if (!RIOT_API_KEY) throw new Error("Missing RIOT_API_KEY in .env");
+
+    const gn = encodeURIComponent(gameName);
+    const tl = encodeURIComponent(tagLine);
+
+    for (const region of ACCOUNT_REGIONS) {
+        const url = `https://${region}.api.riotgames.com/riot/account/v1/accounts/by-riot-id/${gn}/${tl}`;
+        const res = await fetch(url, {
+            method: "GET",
+            headers: { "X-Riot-Token": RIOT_API_KEY },
+            cache: "no-store",
+        });
+
+        if (res.status === 404) continue;
+        if (!res.ok) {
+            const text = await res.text().catch(() => "");
+            throw new Error(`Riot Account API ${res.status}: ${text || res.statusText}`);
+        }
+
+        const account = (await res.json()) as RiotAccountDto;
+        return { region, account };
+    }
+
+    return null;
 }
 
 export async function POST(req: NextRequest) {
@@ -82,6 +115,16 @@ export async function POST(req: NextRequest) {
         if (!gameName || !tagLine) {
             return NextResponse.json({ ok: false, error: "Missing gameName/tagLine" }, { status: 400 });
         }
+
+        // ✅ HARD GATE: don't save unless Riot confirms the account exists
+        const resolved = await resolveAccountAnyRegion(gameName, tagLine);
+        if (!resolved) {
+            return NextResponse.json({ ok: false, error: "Riot ID not found" }, { status: 404 });
+        }
+
+        // Use canonical casing from Riot (avoids duplicates like "hide on bush" vs "Hide on bush")
+        gameName = resolved.account.gameName;
+        tagLine = resolved.account.tagLine;
 
         await dbConnect();
 
