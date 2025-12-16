@@ -131,6 +131,37 @@ function prettyRank(tier?: string | null, div?: string | null) {
   return `${String(tier).toUpperCase()}${div ? ` ${String(div).toUpperCase()}` : ""}`;
 }
 
+// 1K / 100K / 1M style (rounded). Tooltip still shows exact.
+function shortNumber(n?: number | null) {
+  if (n == null) return null;
+  const v = Number(n);
+  if (!Number.isFinite(v)) return null;
+
+  const sign = v < 0 ? "-" : "";
+  let abs = Math.abs(v);
+
+  if (abs < 1000) return sign + abs.toLocaleString();
+
+  const suffixes = ["K", "M", "B"];
+  let idx = -1; // -1 means no suffix yet
+
+  while (abs >= 1000 && idx < suffixes.length - 1) {
+    abs /= 1000;
+    idx++;
+  }
+
+  let rounded = Math.round(abs);
+
+  // carry (e.g. 999.6K -> 1M)
+  if (rounded === 1000 && idx < suffixes.length - 1) {
+    rounded = 1;
+    idx++;
+  }
+
+  const suffix = suffixes[idx] ?? "";
+  return `${sign}${rounded}${suffix}`;
+}
+
 type SortCol = "soloRank" | "flexRank" | "player";
 type SortState = { col: SortCol; dir: "asc" | "desc" };
 
@@ -389,10 +420,12 @@ export default function PlayersTable({ initialRows }: { initialRows: Row[] }) {
                     const label =
                       m.name ?? fromMap ?? (m.championId != null ? `#${m.championId}` : "Unknown");
 
-                    const title =
-                      m.points != null
-                        ? `${label}: ${Number(m.points).toLocaleString()} pts`
-                        : `${label}: (points later)`;
+                    const ptsShort = shortNumber(m.points);
+                    const ptsExact = m.points != null ? Number(m.points).toLocaleString() : null;
+
+                    const title = ptsExact
+                      ? `${label}: ${ptsExact} pts`
+                      : `${label}: (points later)`;
 
                     return (
                       <span
@@ -408,7 +441,12 @@ export default function PlayersTable({ initialRows }: { initialRows: Row[] }) {
                             loading="lazy"
                           />
                         )}
-                        <span className="max-w-[170px] truncate">{label}</span>
+
+                        <span className="max-w-[140px] truncate">{label}</span>
+
+                        {ptsShort && (
+                          <span className="shrink-0 text-zinc-400 tabular-nums">{ptsShort}</span>
+                        )}
                       </span>
                     );
                   })}
@@ -507,10 +545,13 @@ export default function PlayersTable({ initialRows }: { initialRows: Row[] }) {
                             fromMap ??
                             (m.championId != null ? `#${m.championId}` : "Unknown");
 
-                          const title =
-                            m.points != null
-                              ? `${label}: ${Number(m.points).toLocaleString()} pts`
-                              : `${label}: (points later)`;
+                          const ptsShort = shortNumber(m.points);
+                          const ptsExact =
+                            m.points != null ? Number(m.points).toLocaleString() : null;
+
+                          const title = ptsExact
+                            ? `${label}: ${ptsExact} pts`
+                            : `${label}: (points later)`;
 
                           return (
                             <span
@@ -526,7 +567,14 @@ export default function PlayersTable({ initialRows }: { initialRows: Row[] }) {
                                   loading="lazy"
                                 />
                               )}
+
                               <span className="max-w-[140px] truncate">{label}</span>
+
+                              {ptsShort && (
+                                <span className="shrink-0 text-zinc-400 tabular-nums">
+                                  {ptsShort}
+                                </span>
+                              )}
                             </span>
                           );
                         })}
