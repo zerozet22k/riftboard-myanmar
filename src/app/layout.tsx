@@ -14,12 +14,12 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Burmese LP Ranking",
-    template: "%s | Burmese LP Ranking",
+    default: "RiftBoard Myanmar",
+    template: "%s | RiftBoard Myanmar",
   },
-  description: "Burmese LP ranking and mains tracker.",
+  description:
+    "RiftBoard Myanmar — a community League of Legends LP leaderboard and champion mains tracker.",
 };
-
 
 export default function RootLayout({
   children,
@@ -28,9 +28,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         {children}
       </body>
     </html>

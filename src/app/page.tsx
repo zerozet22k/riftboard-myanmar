@@ -101,20 +101,25 @@ export default async function HomePage() {
     };
   });
 
-
   const rankedCount = rows.filter((r) => r.tier).length;
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
       <AutoUIRefresh everyMs={15000} />
 
-      <div className="mx-auto max-w-full   p-6 space-y-6">
+      <div className="mx-auto max-w-full p-4 sm:p-6 space-y-6">
         <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="space-y-2">
-            <h1 className="text-3xl font-semibold tracking-tight">Burmese LP Ranking</h1>
+            <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">
+              RiftBoard Myanmar
+            </h1>
+
             <p className="text-sm text-zinc-400">
               Add yourself at{" "}
-              <Link className="font-mono underline underline-offset-4 hover:text-zinc-200" href="/submit">
+              <Link
+                className="font-mono underline underline-offset-4 hover:text-zinc-200"
+                href="/submit"
+              >
                 /submit
               </Link>
               .

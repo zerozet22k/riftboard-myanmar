@@ -40,7 +40,9 @@ type Main = {
 type Row = {
   id: string;
   name: string;
-  platform: string;
+
+  // you can still send platform from server, we just ignore it:
+  platform?: string;
 
   // SOLO
   tier: string | null;
@@ -129,7 +131,7 @@ function prettyRank(tier?: string | null, div?: string | null) {
   return `${String(tier).toUpperCase()}${div ? ` ${String(div).toUpperCase()}` : ""}`;
 }
 
-type SortCol = "soloRank" | "flexRank" | "player" | "platform";
+type SortCol = "soloRank" | "flexRank" | "player";
 type SortState = { col: SortCol; dir: "asc" | "desc" };
 
 function cmpStr(a: string, b: string) {
@@ -164,26 +166,26 @@ function QueueCell({
   const wrText = wr != null ? `${wr}%` : "-";
 
   return (
-    <div className="flex items-center gap-4">
+    <div className="flex items-center gap-3 sm:gap-4">
       <img
         src={tierToIcon(tier)}
         alt={tier ? `${tier} emblem` : "Unranked"}
-        className="h-10 w-10 shrink-0"
+        className="h-8 w-8 sm:h-10 sm:w-10 shrink-0"
         loading="lazy"
       />
 
       <div className="leading-tight">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <div className="font-semibold">{prettyRank(tier, div)}</div>
 
           {tier && hasLp && (
-            <span className="rounded-full border border-zinc-800 bg-zinc-950/40 px-2.5 py-1 text-sm text-zinc-200 tabular-nums">
+            <span className="rounded-full border border-zinc-800 bg-zinc-950/40 px-2.5 py-0.5 text-xs sm:text-sm text-zinc-200 tabular-nums">
               {Number(lp).toLocaleString()} LP
             </span>
           )}
         </div>
 
-        <div className="text-sm text-zinc-400 tabular-nums">
+        <div className="text-xs sm:text-sm text-zinc-400 tabular-nums">
           {wl} {" • "} {wrText}
         </div>
 
@@ -209,7 +211,6 @@ export default function PlayersTable({ initialRows }: { initialRows: Row[] }) {
         if (alive) setChampNames(m);
       })
       .catch((e) => {
-        // keep fallback to #id if it fails
         console.warn("Failed to load champion names:", e);
       });
 
@@ -255,9 +256,6 @@ export default function PlayersTable({ initialRows }: { initialRows: Row[] }) {
           break;
         case "player":
           c = cmpStr(a.name, b.name);
-          break;
-        case "platform":
-          c = cmpStr(a.platform, b.platform);
           break;
       }
 
@@ -319,7 +317,7 @@ export default function PlayersTable({ initialRows }: { initialRows: Row[] }) {
     <div className="space-y-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="text-sm text-zinc-400">
-          Showing <span className="text-zinc-200">{startShown}</span>–
+          Showing <span className="text-zinc-200">{startShown}</span>–{" "}
           <span className="text-zinc-200">{endShown}</span> of{" "}
           <span className="text-zinc-200">{total}</span>
         </div>
@@ -366,7 +364,100 @@ export default function PlayersTable({ initialRows }: { initialRows: Row[] }) {
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-3xl border border-zinc-800 bg-zinc-900/30">
+      {/* MOBILE (sm <): cards */}
+      <div className="sm:hidden space-y-3">
+        {slice.map((r, i) => {
+          const absoluteIndex = (safePage - 1) * pageSize + i + 1;
+
+          return (
+            <div
+              key={r.id}
+              className="rounded-3xl border border-zinc-800 bg-zinc-900/30 p-4 space-y-3"
+            >
+              <div>
+                <div className="text-xs text-zinc-500 tabular-nums">#{absoluteIndex}</div>
+                <div className="text-lg font-semibold">{r.name}</div>
+              </div>
+
+              {/* MAINS */}
+              {r.__mainsTop3.length ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  {r.__mainsTop3.map((m, idx) => {
+                    const icon = champIconUrl(m.championId);
+                    const fromMap = m.championId != null ? champNames[String(m.championId)] : null;
+
+                    const label =
+                      m.name ?? fromMap ?? (m.championId != null ? `#${m.championId}` : "Unknown");
+
+                    const title =
+                      m.points != null
+                        ? `${label}: ${Number(m.points).toLocaleString()} pts`
+                        : `${label}: (points later)`;
+
+                    return (
+                      <span
+                        key={idx}
+                        title={title}
+                        className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950/40 px-3 py-1.5 text-xs text-zinc-200"
+                      >
+                        {icon && (
+                          <img
+                            src={icon}
+                            alt={label}
+                            className="h-5 w-5 rounded-full"
+                            loading="lazy"
+                          />
+                        )}
+                        <span className="max-w-[170px] truncate">{label}</span>
+                      </span>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-xs text-zinc-500">No mains yet</div>
+              )}
+
+              {/* SOLO + FLEX */}
+              <div className="grid gap-3">
+                <div className="rounded-2xl border border-zinc-800 bg-zinc-950/20 p-3">
+                  <QueueCell
+                    tier={r.tier}
+                    div={r.div}
+                    lp={r.lp}
+                    wins={r.wins}
+                    losses={r.losses}
+                    wr={r.__soloWr}
+                    labelRanked="Ranked Solo"
+                    labelUnranked="No solo rank"
+                  />
+                </div>
+
+                <div className="rounded-2xl border border-zinc-800 bg-zinc-950/20 p-3">
+                  <QueueCell
+                    tier={r.flexTier}
+                    div={r.flexDiv}
+                    lp={r.flexLp}
+                    wins={r.flexWins}
+                    losses={r.flexLosses}
+                    wr={r.__flexWr}
+                    labelRanked="Ranked Flex"
+                    labelUnranked="No flex rank"
+                  />
+                </div>
+              </div>
+            </div>
+          );
+        })}
+
+        {slice.length === 0 && (
+          <div className="rounded-3xl border border-zinc-800 bg-zinc-900/30 p-6 text-zinc-400">
+            No players.
+          </div>
+        )}
+      </div>
+
+      {/* TABLET/DESKTOP (sm+): table */}
+      <div className="hidden sm:block overflow-x-auto rounded-3xl border border-zinc-800 bg-zinc-900/30">
         <table className="min-w-full text-base">
           <thead className="sticky top-0 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur">
             <tr className="text-zinc-300">
@@ -384,10 +475,6 @@ export default function PlayersTable({ initialRows }: { initialRows: Row[] }) {
 
               <Th col="flexRank" className="min-w-[360px]">
                 Flex
-              </Th>
-
-              <Th col="platform" className="w-28">
-                Platform
               </Th>
             </tr>
           </thead>
@@ -413,7 +500,6 @@ export default function PlayersTable({ initialRows }: { initialRows: Row[] }) {
                       <div className="flex flex-wrap items-center gap-2">
                         {r.__mainsTop3.map((m, idx) => {
                           const icon = champIconUrl(m.championId);
-
                           const fromMap =
                             m.championId != null ? champNames[String(m.championId)] : null;
 
@@ -476,19 +562,13 @@ export default function PlayersTable({ initialRows }: { initialRows: Row[] }) {
                       labelUnranked="No flex rank"
                     />
                   </td>
-
-                  <td className="p-4">
-                    <span className="inline-flex items-center rounded-full border border-zinc-800 bg-zinc-950/40 px-3 py-1.5 text-sm font-semibold">
-                      {r.platform}
-                    </span>
-                  </td>
                 </tr>
               );
             })}
 
             {slice.length === 0 && (
               <tr>
-                <td className="p-8 text-base text-zinc-400" colSpan={6}>
+                <td className="p-8 text-base text-zinc-400" colSpan={5}>
                   No players.
                 </td>
               </tr>
