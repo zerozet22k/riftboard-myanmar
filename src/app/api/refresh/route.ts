@@ -7,21 +7,6 @@ export const dynamic = "force-dynamic";
 
 type Action = "all" | "playerId" | "riotId";
 
-function getToken(req: NextRequest): string {
-  const auth = req.headers.get("authorization") || "";
-  if (auth.toLowerCase().startsWith("bearer ")) return auth.slice(7).trim();
-  return new URL(req.url).searchParams.get("key")?.trim() || "";
-}
-
-function assertAuth(req: NextRequest) {
-  if (!process.env.REFRESH_KEY) return;
-
-  const token = getToken(req);
-  if (!token || token !== process.env.REFRESH_KEY.trim()) {
-    throw new Error("Unauthorized");
-  }
-}
-
 
 async function runAction(action: Action, params: any) {
   const force = !!params.force;
@@ -55,7 +40,7 @@ async function runAction(action: Action, params: any) {
 
 export async function POST(req: NextRequest) {
   try {
-    assertAuth(req);
+
 
     const body = await req.json().catch(() => ({}));
     const action = String(body.action ?? "all") as Action;
@@ -76,7 +61,7 @@ export async function POST(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   try {
-    assertAuth(req);
+
 
     const url = new URL(req.url);
 
