@@ -3,6 +3,28 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
+
+function formatDateTime(v: unknown) {
+    if (v == null) return null;
+
+    const d =
+        typeof v === "number"
+            ? new Date(v)
+            : new Date(typeof v === "string" ? v : String(v));
+
+    if (Number.isNaN(d.getTime())) return String(v);
+
+    return new Intl.DateTimeFormat(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        timeZoneName: "short",
+    }).format(d);
+}
+
 export default function ProfileRefreshButton({
     gameName,
     tagLine,
@@ -47,8 +69,9 @@ export default function ProfileRefreshButton({
 
 
         if (j?.player?._skipped) {
+            const nextText = formatDateTime(j.player._nextRefreshAt) ?? "?";
             setErr(
-                `Cooldown: try again in ${j.player._cooldownSecondsLeft ?? "?"}s (next: ${j.player._nextRefreshAt ?? "?"})`
+                `Cooldown: try again in ${j.player._cooldownSecondsLeft ?? "?"}s (next: ${nextText})`
             );
         }
 

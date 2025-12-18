@@ -71,7 +71,29 @@ function champIconUrl(championId: number | null) {
 function playerPath(gameName: string, tagLine: string) {
     return `/p/${encodeURIComponent(gameName)}/${encodeURIComponent(String(tagLine).toLowerCase())}`;
 }
+type LastUpdated = string | null | undefined;
+function formatLastUpdatedISO(v: LastUpdated) {
+    if (!v) return null;
 
+    // Works for ISO like:
+    // 2025-12-18T17:14:03.372Z
+    // 2025-12-18T17:14:03.372+00:00
+    const ms = Date.parse(v);
+    if (!Number.isFinite(ms)) return v; // if it's already "pretty text", just show it
+
+    const d = new Date(ms);
+
+    return new Intl.DateTimeFormat(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        // add this if you want Thailand time for everyone:
+        // timeZone: "Asia/Bangkok",
+    }).format(d);
+}
 function rankLine(tier?: string | null, div?: string | null, lp?: number | null) {
     if (!tier) return "UNRANKED";
     const t = String(tier).toUpperCase();
@@ -187,7 +209,7 @@ export default async function PlayerProfilePage({
 
     const nameShown = `${player.gameName}#${player.tagLine}`;
     const lastUpdated =
-        isoOrNull(player.lastRefreshAt) ?? isoOrNull(player.solo?.fetchedAt) ?? isoOrNull(player.flex?.fetchedAt);
+        formatLastUpdatedISO(isoOrNull(player.lastRefreshAt) ?? isoOrNull(player.solo?.fetchedAt) ?? isoOrNull(player.flex?.fetchedAt));
 
     const solo = player.solo ?? {};
     const flex = player.flex ?? {};
@@ -227,11 +249,17 @@ export default async function PlayerProfilePage({
                             </div>
 
                             <div className="pt-1 flex items-center gap-3 text-sm">
-                                <Link className="underline underline-offset-4 text-zinc-300 hover:text-zinc-100" href="/leaderboard">
-                                    Leaderboard
+                                <Link
+                                    href="/leaderboard"
+                                    className="rounded-2xl border border-zinc-800 bg-zinc-900/30 px-4 py-2 text-sm hover:bg-zinc-900/60"
+                                >
+                                    Open leaderboard
                                 </Link>
-                                <Link className="underline underline-offset-4 text-zinc-300 hover:text-zinc-100" href="/submit">
-                                    Submit
+                                <Link
+                                    href="/"
+                                    className="rounded-2xl border border-zinc-800 bg-zinc-900/30 px-4 py-2 text-sm hover:bg-zinc-900/60"
+                                >
+                                    Go back to home
                                 </Link>
                             </div>
                         </div>

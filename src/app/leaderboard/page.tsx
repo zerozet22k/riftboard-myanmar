@@ -155,13 +155,22 @@ export default async function LeaderboardPage() {
                 <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                     <div className="space-y-2">
                         <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">Leaderboard</h1>
-                        <p className="text-sm text-zinc-400">
-                            Add yourself at{" "}
-                            <Link className="font-mono underline underline-offset-4 hover:text-zinc-200" href="/submit">
-                                /submit
+                        <div className="flex flex-wrap gap-2 pt-1">
+                            <Link
+                                href="/"
+                                className="rounded-2xl border border-zinc-800 bg-zinc-900/30 px-4 py-2 text-sm hover:bg-zinc-900/60"
+                            >
+                                Go back to home
                             </Link>
-                            .
-                        </p>
+
+                            <Link
+                                href="/submit"
+                                className="rounded-2xl border border-zinc-800 bg-zinc-950/40 px-4 py-2 text-sm hover:bg-zinc-900/40"
+                            >
+                                Add yourself with invite code
+                            </Link>
+
+                        </div>
                     </div>
 
                     <div className="flex flex-col sm:items-end gap-2">

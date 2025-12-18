@@ -33,7 +33,7 @@ export default async function HomePage() {
               href="/submit"
               className="rounded-2xl border border-zinc-800 bg-zinc-950/40 px-4 py-2 text-sm hover:bg-zinc-900/40"
             >
-              Add yourself
+              Add yourself with invite code
             </Link>
 
           </div>
