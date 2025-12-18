@@ -37,13 +37,11 @@ export async function GET(req: NextRequest) {
 
         const url = new URL(req.url);
 
-        // safe knobs for cron
         const limit = Math.max(1, Math.min(200, numParam(url, "limit", 20)!));
         const delayMs = Math.max(0, Math.min(5000, numParam(url, "delayMs", 900)!));
         const cooldownMs = numParam(url, "cooldownMs", undefined);
         const force = boolParam(url, "force", false);
 
-        // ✅ leaderboard-only refresh
         const result = await refreshAllPlayers({
             leaderboardOnly: true,
             leaderboardGroup: "burmese",

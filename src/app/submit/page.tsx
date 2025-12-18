@@ -1,5 +1,6 @@
 import Link from "next/link";
-import SubmitForm from "./SubmitForm";
+import SubmitForm from "../../components/SubmitForm";
+import BulkSubmitLocal from "@/components/BulkSubmitLocal";
 
 export default function SubmitPage() {
   const codeRequired = !!process.env.SUBMIT_CODE?.trim();
@@ -27,7 +28,7 @@ export default function SubmitPage() {
         </div>
 
         <SubmitForm codeRequired={codeRequired} />
-
+        {/* <BulkSubmitLocal codeRequired={codeRequired} /> */}
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/30 p-4 text-sm text-zinc-400">
           Tip: After submitting, your rank and mains may take a moment to update depending on rate
           limits.

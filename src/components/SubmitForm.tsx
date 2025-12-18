@@ -81,7 +81,6 @@ export default function SubmitForm({ codeRequired }: { codeRequired: boolean }) 
 
   const parsed = useMemo(() => parseRiotId(riotId), [riotId]);
 
-  // if paste parses cleanly, lock the lower inputs so users can't type "#"
   const lockLowerFields = !!parsed;
 
   function syncFromRiotId(v: string) {
@@ -96,7 +95,7 @@ export default function SubmitForm({ codeRequired }: { codeRequired: boolean }) 
   }
 
   async function triggerRefreshOne(gn: string, tl: string) {
-    if (!REFRESH_KEY) return; // no key, skip
+    if (!REFRESH_KEY) return; 
     const url =
       `/api/refresh?key=${encodeURIComponent(REFRESH_KEY)}` +
       `&gameName=${encodeURIComponent(gn)}` +

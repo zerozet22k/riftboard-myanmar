@@ -75,7 +75,7 @@ export async function POST(
       force,
       syncMatches,
       matchesCount,
-      fullMastery, // ✅ THIS is what writes PlayerMastery
+      fullMastery, 
     });
 
     const canonicalPath = `/p/${encodeURIComponent(String(player.gameName))}/${encodeURIComponent(

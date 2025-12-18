@@ -1,7 +1,3 @@
-// src/lib/riot.ts
-// Upgraded: better types (summonerLevel/name/revisionDate), proper 429 handling (Retry-After),
-// match-v5 helpers (ids + match), and a sane region/platform mapping.
-
 export type RiotAccount = { puuid: string; gameName?: string; tagLine?: string };
 
 export type Summoner = {
@@ -10,7 +6,7 @@ export type Summoner = {
   name: string;
   profileIconId: number;
   summonerLevel: number;
-  revisionDate: number; // unix ms
+  revisionDate: number; 
 };
 
 export type LeagueEntry = {
@@ -41,7 +37,6 @@ export type ChampionMastery = {
 
 export type MatchId = string;
 
-// Match-V5 returns a big payload. Keep it as unknown/any and you extract what you need.
 export type MatchV5 = any;
 
 function mustEnv(name: string) {
@@ -57,10 +52,6 @@ function optEnv(name: string) {
 
 const API_KEY = () => mustEnv("RIOT_API_KEY");
 
-/**
- * ACCOUNT-V1 routing values: americas | asia | europe
- * If you set RIOT_ACCOUNT_REGION=sea, we map it to asia (account lives there).
- */
 function ACCOUNT_REGION(): "americas" | "asia" | "europe" {
   const raw = mustEnv("RIOT_ACCOUNT_REGION").toLowerCase();
   if (raw === "sea") return "asia";
@@ -68,12 +59,7 @@ function ACCOUNT_REGION(): "americas" | "asia" | "europe" {
   throw new Error(`RIOT_ACCOUNT_REGION must be americas|asia|europe|sea (got: ${raw})`);
 }
 
-/**
- * MATCH-V5 routing values: americas | asia | europe | sea
- * Prefer setting RIOT_MATCH_REGION explicitly. If not set, we infer:
- * - if RIOT_ACCOUNT_REGION was "sea" => match region "sea"
- * - else use the same as account region (americas/asia/europe)
- */
+
 function MATCH_REGION_DEFAULT(): "americas" | "asia" | "europe" | "sea" {
   const rawMatch = optEnv("RIOT_MATCH_REGION")?.toLowerCase();
   if (rawMatch) {
@@ -175,7 +161,6 @@ async function riotFetch<T>(url: string, opts?: { maxRetries?: number }): Promis
     throw new RiotApiError(res.status, msg, { url, retryAfterMs: retryAfterMsFromHeaders(res) });
   }
 
-  // should never reach
   throw new RiotApiError(429, "Rate limit (retries exhausted)", { url });
 }
 
@@ -215,10 +200,6 @@ export async function getLeagueEntriesByPuuid(platform: string, puuid: string) {
   return riotFetch<LeagueEntry[]>(url);
 }
 
-/**
- * Finds the correct SEA platform by probing known SEA shards.
- * (Good enough for your Myanmar use-case.)
- */
 export async function findSeaPlatformByPuuid(puuid: string) {
   const candidates = ["sg2", "th2", "ph2", "vn2", "tw2"] as const;
 

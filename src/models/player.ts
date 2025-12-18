@@ -1,4 +1,4 @@
-// models/player.ts
+
 import mongoose, { Schema, type HydratedDocument } from "mongoose";
 
 export type RankSnapshot = {
@@ -18,7 +18,7 @@ export type MainChampion = {
 };
 
 export type LeaderboardInfo = {
-  group?: string | null; // "burmese"
+  group?: string | null;
   status?: "approved" | "pending" | "rejected" | null;
   requestedAt?: Date;
   approvedAt?: Date;
@@ -31,30 +31,30 @@ export type PlayerDoc = {
   gameNameNorm: string;
   tagLineNorm: string;
 
-  platform: string;      // sg2, etc (your routing)
-  matchRegion?: string;  // sea/asia/europe/americas (match-v5)
+  platform: string;
+  matchRegion?: string;
 
   puuid?: string;
   summonerId?: string;
   profileIconId?: number;
 
-  // full profile basics
+
   summonerName?: string;
   summonerLevel?: number;
-  revisionDate?: number; // unix ms
+  revisionDate?: number;
 
   lastRefreshAt?: Date;
 
   solo: RankSnapshot;
   flex: RankSnapshot;
 
-  // top mastery champs (store max 3)
+
   mains?: MainChampion[];
   masterySyncedAt?: Date;
 
   leaderboard?: LeaderboardInfo;
 
-  // match syncing settings (matches stored elsewhere)
+
   matchSync?: {
     enabled?: boolean;
     lastSyncAt?: Date;
@@ -146,16 +146,16 @@ PlayerSchema.pre("validate", function (this: HydratedDocument<PlayerDoc>) {
   this.tagLineNorm = String(this.tagLine ?? "").trim().toLowerCase();
 });
 
-// identity
+
 PlayerSchema.index({ gameNameNorm: 1, tagLineNorm: 1 }, { unique: true });
 
-// /leaderboard fast filter
+
 PlayerSchema.index({ "leaderboard.group": 1, "leaderboard.status": 1, updatedAt: -1 });
 
-// DB search suggestions
+
 PlayerSchema.index({ gameName: 1, tagLine: 1 });
 
-// batch refresh helper
+
 PlayerSchema.index({ lastRefreshAt: 1 });
 
 export const Player =

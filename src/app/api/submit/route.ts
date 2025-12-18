@@ -24,7 +24,6 @@ function normalize(s: string) {
   return s.trim().toLowerCase();
 }
 
-// handles: "Hide on bush#KR1", "Hide on bush KR1", "Hide on bush / KR1", "Name##TAG"
 function parseRiotId(input: string) {
   const raw = String(input || "").trim();
   if (!raw) return null;
@@ -43,7 +42,6 @@ function parseRiotId(input: string) {
     return gameName && tagLine ? { gameName, tagLine } : null;
   }
 
-  // "Name TAG"
   const m = cleaned.match(/^(.*\S)\s+(\S+)$/);
   if (!m) return null;
   return { gameName: m[1].trim(), tagLine: m[2].trim() };
@@ -119,13 +117,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Missing gameName/tagLine" }, { status: 400 });
     }
 
-    // ✅ HARD GATE: confirm account exists + grab canonical casing + puuid
     const resolved = await resolveAccountAnyRegion(gameName, tagLine);
     if (!resolved) {
       return NextResponse.json({ ok: false, error: "Riot ID not found" }, { status: 404 });
     }
 
-    // canonical casing from Riot
     gameName = resolved.account.gameName;
     tagLine = resolved.account.tagLine;
     const puuid = resolved.account.puuid;
@@ -141,8 +137,6 @@ export async function POST(req: NextRequest) {
       { _id: 1, leaderboard: 1 }
     ).lean();
 
-    // ✅ Upsert player
-    // ✅ FORCE APPROVE: set approved in $set so it upgrades existing records too
     const doc = await Player.findOneAndUpdate(
       { gameNameNorm, tagLineNorm },
       {
@@ -153,19 +147,18 @@ export async function POST(req: NextRequest) {
 
           "leaderboard.group": "burmese",
           "leaderboard.status": "approved",
-          "leaderboard.approvedAt": now, // optional, but useful
+          "leaderboard.approvedAt": now,
         },
         $setOnInsert: {
           gameNameNorm,
           tagLineNorm,
           platform: "auto",
-          "leaderboard.requestedAt": now, // optional
+          "leaderboard.requestedAt": now, 
         },
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    // ✅ Warm up profile: rank + mains + latest matches (10)
     let refreshOut: any = null;
     try {
       refreshOut = await refreshPlayerById(String(doc._id), {
@@ -178,11 +171,9 @@ export async function POST(req: NextRequest) {
       refreshOut = { _refreshError: e?.message ?? "Refresh failed" };
     }
 
-    // pages you actually show
     revalidatePath("/");
     revalidatePath("/leaderboard");
 
-    // (optional) also revalidate the new /p page
     revalidatePath(
       `/p/${encodeURIComponent(String(doc.gameName))}/${encodeURIComponent(String(doc.tagLine).toLowerCase())}`
     );
