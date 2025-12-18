@@ -66,15 +66,12 @@ export default function ProfileRefreshButton({
             setErr(j?.error ?? `Refresh failed (${res.status})`);
             return;
         }
-
-
         if (j?.player?._skipped) {
             const nextText = formatDateTime(j.player._nextRefreshAt) ?? "?";
             setErr(
                 `Cooldown: try again in ${j.player._cooldownSecondsLeft ?? "?"}s (next: ${nextText})`
             );
         }
-
         startTransition(() => router.refresh());
     }
 

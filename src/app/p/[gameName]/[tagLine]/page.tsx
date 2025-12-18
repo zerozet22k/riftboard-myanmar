@@ -37,7 +37,6 @@ function isoOrNull(d: any): string | null {
     return Number.isFinite(t) ? new Date(t).toISOString() : null;
 }
 
-// Cursor = base64url({ gc: gameCreation, id: _id })
 function cursorFromLast(last: any): string | null {
     if (!last) return null;
     const gameCreation = typeof last.gameCreation === "number" ? last.gameCreation : null;
@@ -74,12 +73,8 @@ function playerPath(gameName: string, tagLine: string) {
 type LastUpdated = string | null | undefined;
 function formatLastUpdatedISO(v: LastUpdated) {
     if (!v) return null;
-
-    // Works for ISO like:
-    // 2025-12-18T17:14:03.372Z
-    // 2025-12-18T17:14:03.372+00:00
     const ms = Date.parse(v);
-    if (!Number.isFinite(ms)) return v; // if it's already "pretty text", just show it
+    if (!Number.isFinite(ms)) return v;
 
     const d = new Date(ms);
 
@@ -90,8 +85,6 @@ function formatLastUpdatedISO(v: LastUpdated) {
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",
-        // add this if you want Thailand time for everyone:
-        // timeZone: "Asia/Bangkok",
     }).format(d);
 }
 function rankLine(tier?: string | null, div?: string | null, lp?: number | null) {
@@ -154,7 +147,6 @@ export default async function PlayerProfilePage({
             teamId: 1,
             teamPosition: 1,
 
-            // ✅ runes (you were mapping but not selecting)
             primaryStyle: 1,
             primaryRune: 1,
             subStyle: 1,
@@ -221,13 +213,11 @@ export default async function PlayerProfilePage({
                     <div className="flex items-start gap-4">
                         <div className="h-16 w-16 rounded-2xl border border-zinc-800 bg-zinc-900/40 overflow-hidden shrink-0">
                             {profileIcon ? (
-                                // eslint-disable-next-line @next/next/no-img-element
                                 <img src={profileIcon} alt="Profile icon" className="h-full w-full object-cover" />
                             ) : (
                                 <div className="h-full w-full" />
                             )}
                         </div>
-
                         <div className="space-y-1">
                             <div className="text-2xl font-semibold tracking-tight">{nameShown}</div>
 
@@ -235,7 +225,6 @@ export default async function PlayerProfilePage({
                                 <RankEmblem tier={solo.tier ?? null} className="h-5 w-5 shrink-0" alt="" />
                                 <span className="text-zinc-300">{rankLine(solo.tier ?? null, solo.division ?? null, solo.lp ?? null)}</span>
                             </div>
-
                             <div className="text-sm text-zinc-400">
                                 Level: <span className="text-zinc-200">{player.summonerLevel ?? "—"}</span>{" "}
                                 <span className="text-zinc-600">•</span>{" "}
@@ -264,7 +253,6 @@ export default async function PlayerProfilePage({
                             </div>
                         </div>
                     </div>
-
                     <ProfileRefreshButton gameName={canonicalGameName} tagLine={canonicalTagLineLower} />
                 </header>
 
