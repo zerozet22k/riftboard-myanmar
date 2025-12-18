@@ -1,5 +1,7 @@
+// components/LeaderboardTable.tsx
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -37,12 +39,21 @@ type Main = {
   points: number | null;
 };
 
-type Row = {
+export type LeaderboardRow = {
   id: string;
-  name: string;
 
-  // you can still send platform from server, we just ignore it:
+  // ✅ MUST be the real profile route: /p/[gameName]/[tagLine]
+  // Build it on the server (recommended) and just pass it through.
+  href?: string;
+
+  // Optional (if you want to build href client-side too)
+  gameName?: string;
+  tagLine?: string;
+
+  name: string;
   platform?: string;
+
+  updatedAt?: string | null;
 
   // SOLO
   tier: string | null;
@@ -66,12 +77,13 @@ type Row = {
   mains?: Main[];
 };
 
-type PreparedRow = Row & {
+type PreparedRow = LeaderboardRow & {
   __soloKey: number;
   __flexKey: number;
   __soloWr: number | null;
   __flexWr: number | null;
   __mainsTop3: Main[];
+  __updatedTs: number | null;
 };
 
 const RANK_ICON_BASE =
@@ -131,7 +143,6 @@ function prettyRank(tier?: string | null, div?: string | null) {
   return `${String(tier).toUpperCase()}${div ? ` ${String(div).toUpperCase()}` : ""}`;
 }
 
-// 1K / 100K / 1M style (rounded). Tooltip still shows exact.
 function shortNumber(n?: number | null) {
   if (n == null) return null;
   const v = Number(n);
@@ -143,7 +154,7 @@ function shortNumber(n?: number | null) {
   if (abs < 1000) return sign + abs.toLocaleString();
 
   const suffixes = ["K", "M", "B"];
-  let idx = -1; // -1 means no suffix yet
+  let idx = -1;
 
   while (abs >= 1000 && idx < suffixes.length - 1) {
     abs /= 1000;
@@ -152,7 +163,6 @@ function shortNumber(n?: number | null) {
 
   let rounded = Math.round(abs);
 
-  // carry (e.g. 999.6K -> 1M)
   if (rounded === 1000 && idx < suffixes.length - 1) {
     rounded = 1;
     idx++;
@@ -160,6 +170,24 @@ function shortNumber(n?: number | null) {
 
   const suffix = suffixes[idx] ?? "";
   return `${sign}${rounded}${suffix}`;
+}
+
+function parseUpdatedTs(iso?: string | null): number | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
+function relTime(iso?: string | null) {
+  const t = parseUpdatedTs(iso);
+  if (!t) return "—";
+  const mins = Math.floor((Date.now() - t) / 60000);
+  if (mins < 1) return "now";
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d`;
 }
 
 type SortCol = "soloRank" | "flexRank" | "player";
@@ -171,6 +199,28 @@ function cmpStr(a: string, b: string) {
 
 function cmpNum(a: number, b: number) {
   return a === b ? 0 : a < b ? -1 : 1;
+}
+
+// ✅ Build /p/[gameName]/[tagLine] reliably
+function profileHref(r: LeaderboardRow) {
+  if (r.href) return r.href;
+
+  // fallback if you didn’t pass href from server:
+  const gn = String(r.gameName ?? "").trim();
+  const tl = String(r.tagLine ?? "").trim().toLowerCase();
+  if (gn && tl) return `/p/${encodeURIComponent(gn)}/${encodeURIComponent(tl)}`;
+
+  // last-resort: parse from "Name#TAG"
+  const raw = String(r.name ?? "");
+  const i = raw.lastIndexOf("#");
+  if (i > 0) {
+    const g = raw.slice(0, i).trim();
+    const t = raw.slice(i + 1).trim().toLowerCase();
+    if (g && t) return `/p/${encodeURIComponent(g)}/${encodeURIComponent(t)}`;
+  }
+
+  // worst case fallback
+  return "/leaderboard";
 }
 
 function QueueCell({
@@ -198,6 +248,7 @@ function QueueCell({
 
   return (
     <div className="flex items-center gap-3 sm:gap-4">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={tierToIcon(tier)}
         alt={tier ? `${tier} emblem` : "Unranked"}
@@ -226,12 +277,16 @@ function QueueCell({
   );
 }
 
-export default function PlayersTable({ initialRows }: { initialRows: Row[] }) {
+type RankFilter = "all" | "anyRanked" | "soloRanked" | "flexRanked";
+
+export default function LeaderboardTable({ initialRows }: { initialRows: LeaderboardRow[] }) {
   const [sort, setSort] = useState<SortState>({ col: "soloRank", dir: "desc" });
   const [pageSize, setPageSize] = useState(10);
   const [page, setPage] = useState(1);
 
-  // championId -> champion name
+  const [query, setQuery] = useState("");
+  const [rankFilter, setRankFilter] = useState<RankFilter>("all");
+
   const [champNames, setChampNames] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -266,12 +321,44 @@ export default function PlayersTable({ initialRows }: { initialRows: Row[] }) {
         __soloWr: soloWr,
         __flexWr: flexWr,
         __mainsTop3: topMains(r.mains),
+        __updatedTs: parseUpdatedTs(r.updatedAt ?? null),
       };
     });
   }, [initialRows]);
 
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+
+    return prepared.filter((r) => {
+      if (q) {
+        const hay = r.name.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+
+      const soloRanked = !!r.tier;
+      const flexRanked = !!r.flexTier;
+
+      switch (rankFilter) {
+        case "anyRanked":
+          if (!soloRanked && !flexRanked) return false;
+          break;
+        case "soloRanked":
+          if (!soloRanked) return false;
+          break;
+        case "flexRanked":
+          if (!flexRanked) return false;
+          break;
+        case "all":
+        default:
+          break;
+      }
+
+      return true;
+    });
+  }, [prepared, query, rankFilter]);
+
   const sorted = useMemo(() => {
-    const arr = prepared.map((r, idx) => ({ r, idx })); // stable sort
+    const arr = filtered.map((r, idx) => ({ r, idx })); // stable sort
 
     arr.sort((A, B) => {
       const a = A.r;
@@ -295,7 +382,7 @@ export default function PlayersTable({ initialRows }: { initialRows: Row[] }) {
     });
 
     return arr.map((x) => x.r);
-  }, [prepared, sort]);
+  }, [filtered, sort]);
 
   const total = sorted.length;
   const pages = Math.max(1, Math.ceil(total / pageSize));
@@ -346,11 +433,41 @@ export default function PlayersTable({ initialRows }: { initialRows: Row[] }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="text-sm text-zinc-400">
-          Showing <span className="text-zinc-200">{startShown}</span>–{" "}
-          <span className="text-zinc-200">{endShown}</span> of{" "}
-          <span className="text-zinc-200">{total}</span>
+      {/* Controls */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-2">
+          <div className="text-sm text-zinc-400">
+            Showing <span className="text-zinc-200">{startShown}</span>–{" "}
+            <span className="text-zinc-200">{endShown}</span> of{" "}
+            <span className="text-zinc-200">{total}</span>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+            <input
+              value={query}
+              onChange={(e) => {
+                setPage(1);
+                setQuery(e.target.value);
+              }}
+              placeholder="Search name#tag…"
+              className="w-full sm:w-72 rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-zinc-600"
+            />
+
+            <select
+              className="w-full sm:w-auto rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm"
+              value={rankFilter}
+              onChange={(e) => {
+                setPage(1);
+                setRankFilter(e.target.value as RankFilter);
+              }}
+              title="Filter ranks"
+            >
+              <option value="all">All</option>
+              <option value="anyRanked">Any ranked</option>
+              <option value="soloRanked">Solo ranked</option>
+              <option value="flexRanked">Flex ranked</option>
+            </select>
+          </div>
         </div>
 
         <div className="flex items-center gap-3">
@@ -405,9 +522,23 @@ export default function PlayersTable({ initialRows }: { initialRows: Row[] }) {
               key={r.id}
               className="rounded-3xl border border-zinc-800 bg-zinc-900/30 p-4 space-y-3"
             >
-              <div>
-                <div className="text-xs text-zinc-500 tabular-nums">#{absoluteIndex}</div>
-                <div className="text-lg font-semibold">{r.name}</div>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-xs text-zinc-500 tabular-nums">#{absoluteIndex}</div>
+
+                  <Link
+                    href={profileHref(r)}
+                    className="text-lg font-semibold hover:underline underline-offset-4"
+                  >
+                    {r.name}
+                  </Link>
+
+                  <div className="text-xs text-zinc-500 mt-0.5">
+                    {r.platform ? <span>{r.platform}</span> : null}
+                    {r.platform ? <span> • </span> : null}
+                    Updated: <span className="text-zinc-400">{relTime(r.updatedAt ?? null)}</span>
+                  </div>
+                </div>
               </div>
 
               {/* MAINS */}
@@ -423,9 +554,7 @@ export default function PlayersTable({ initialRows }: { initialRows: Row[] }) {
                     const ptsShort = shortNumber(m.points);
                     const ptsExact = m.points != null ? Number(m.points).toLocaleString() : null;
 
-                    const title = ptsExact
-                      ? `${label}: ${ptsExact} pts`
-                      : `${label}: (points later)`;
+                    const title = ptsExact ? `${label}: ${ptsExact} pts` : `${label}`;
 
                     return (
                       <span
@@ -434,6 +563,7 @@ export default function PlayersTable({ initialRows }: { initialRows: Row[] }) {
                         className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950/40 px-3 py-1.5 text-xs text-zinc-200"
                       >
                         {icon && (
+                          // eslint-disable-next-line @next/next/no-img-element
                           <img
                             src={icon}
                             alt={label}
@@ -501,7 +631,7 @@ export default function PlayersTable({ initialRows }: { initialRows: Row[] }) {
             <tr className="text-zinc-300">
               <th className="text-left p-4 w-14">#</th>
 
-              <Th col="player" className="min-w-[320px]">
+              <Th col="player" className="min-w-[360px]">
                 Player
               </Th>
 
@@ -529,7 +659,20 @@ export default function PlayersTable({ initialRows }: { initialRows: Row[] }) {
                   <td className="p-4 text-zinc-400 tabular-nums">{absoluteIndex}</td>
 
                   <td className="p-4">
-                    <div className="font-semibold">{r.name}</div>
+                    <div className="font-semibold">
+                      <Link
+                        href={profileHref(r)}
+                        className="hover:underline underline-offset-4"
+                      >
+                        {r.name}
+                      </Link>
+                    </div>
+
+                    <div className="mt-1 text-xs text-zinc-500">
+                      {r.platform ? <span>{r.platform}</span> : null}
+                      {r.platform ? <span> • </span> : null}
+                      Updated: <span className="text-zinc-400">{relTime(r.updatedAt ?? null)}</span>
+                    </div>
                   </td>
 
                   <td className="p-4">
@@ -549,9 +692,7 @@ export default function PlayersTable({ initialRows }: { initialRows: Row[] }) {
                           const ptsExact =
                             m.points != null ? Number(m.points).toLocaleString() : null;
 
-                          const title = ptsExact
-                            ? `${label}: ${ptsExact} pts`
-                            : `${label}: (points later)`;
+                          const title = ptsExact ? `${label}: ${ptsExact} pts` : `${label}`;
 
                           return (
                             <span
@@ -560,6 +701,7 @@ export default function PlayersTable({ initialRows }: { initialRows: Row[] }) {
                               className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950/40 px-3 py-1.5 text-sm text-zinc-200"
                             >
                               {icon && (
+                                // eslint-disable-next-line @next/next/no-img-element
                                 <img
                                   src={icon}
                                   alt={label}
