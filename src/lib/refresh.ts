@@ -119,6 +119,9 @@ function extractPlayerMatchSummary(match: any, puuid: string) {
 
     championId: typeof me?.championId === "number" ? me.championId : undefined,
     teamId: typeof me?.teamId === "number" ? me.teamId : undefined,
+
+    teamPosition: typeof me?.teamPosition === "string" ? me.teamPosition : undefined, // ✅ ADD
+
     win: typeof me?.win === "boolean" ? me.win : undefined,
 
     kills: typeof me?.kills === "number" ? me.kills : undefined,
@@ -254,6 +257,7 @@ async function syncRecentMatches(params: { player: any; puuid: string; matchRegi
 
             championId: summary.championId,
             teamId: summary.teamId,
+            teamPosition: summary.teamPosition,
             win: summary.win,
 
             kills: summary.kills,

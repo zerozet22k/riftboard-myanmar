@@ -1,4 +1,3 @@
-// app/p/[gameName]/[tagLine]/page.tsx
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { dbConnect } from "@/lib/mongodb";
@@ -112,7 +111,6 @@ export default async function PlayerProfilePage({
 
     if (!player) notFound();
 
-    // ✅ Canonical URL: keep DB casing for gameName, force tagline lowercase
     const canonicalGameName = String(player.gameName ?? "").trim();
     const canonicalTagLineLower = String(player.tagLine ?? "").trim().toLowerCase();
 
@@ -122,7 +120,6 @@ export default async function PlayerProfilePage({
 
     const [ddVer, champNames] = await Promise.all([getLatestDdragonVersion(), getChampNameMap()]);
 
-    // Server-side initial 10 matches (fast first paint)
     const matchDocs = await PlayerMatch.find(
         { playerId: player._id },
         {
@@ -130,7 +127,16 @@ export default async function PlayerProfilePage({
             queueId: 1,
             gameCreation: 1,
             gameDuration: 1,
+
             championId: 1,
+            teamId: 1,
+            teamPosition: 1,
+
+            // ✅ runes (you were mapping but not selecting)
+            primaryStyle: 1,
+            primaryRune: 1,
+            subStyle: 1,
+
             win: 1,
             kills: 1,
             deaths: 1,
@@ -151,7 +157,15 @@ export default async function PlayerProfilePage({
         queueId: typeof m.queueId === "number" ? m.queueId : null,
         gameCreation: typeof m.gameCreation === "number" ? m.gameCreation : null,
         gameDuration: typeof m.gameDuration === "number" ? m.gameDuration : null,
+
         championId: typeof m.championId === "number" ? m.championId : null,
+        teamId: typeof m.teamId === "number" ? m.teamId : null,
+        teamPosition: typeof m.teamPosition === "string" ? m.teamPosition : null,
+
+        primaryStyle: typeof m.primaryStyle === "number" ? m.primaryStyle : null,
+        primaryRune: typeof m.primaryRune === "number" ? m.primaryRune : null,
+        subStyle: typeof m.subStyle === "number" ? m.subStyle : null,
+
         win: typeof m.win === "boolean" ? m.win : null,
         kills: typeof m.kills === "number" ? m.kills : null,
         deaths: typeof m.deaths === "number" ? m.deaths : null,
@@ -173,9 +187,7 @@ export default async function PlayerProfilePage({
 
     const nameShown = `${player.gameName}#${player.tagLine}`;
     const lastUpdated =
-        isoOrNull(player.lastRefreshAt) ??
-        isoOrNull(player.solo?.fetchedAt) ??
-        isoOrNull(player.flex?.fetchedAt);
+        isoOrNull(player.lastRefreshAt) ?? isoOrNull(player.solo?.fetchedAt) ?? isoOrNull(player.flex?.fetchedAt);
 
     const solo = player.solo ?? {};
     const flex = player.flex ?? {};
@@ -197,22 +209,17 @@ export default async function PlayerProfilePage({
                         <div className="space-y-1">
                             <div className="text-2xl font-semibold tracking-tight">{nameShown}</div>
 
-                            {/* ✅ SOLO rank under name */}
                             <div className="flex items-center gap-2 text-sm text-zinc-400">
                                 <RankEmblem tier={solo.tier ?? null} className="h-5 w-5 shrink-0" alt="" />
-                                <span className="text-zinc-300">
-                                    {rankLine(solo.tier ?? null, solo.division ?? null, solo.lp ?? null)}
-                                </span>
+                                <span className="text-zinc-300">{rankLine(solo.tier ?? null, solo.division ?? null, solo.lp ?? null)}</span>
                             </div>
 
                             <div className="text-sm text-zinc-400">
                                 Level: <span className="text-zinc-200">{player.summonerLevel ?? "—"}</span>{" "}
                                 <span className="text-zinc-600">•</span>{" "}
-                                Platform:{" "}
-                                <span className="text-zinc-200">{String(player.platform ?? "auto").toUpperCase()}</span>{" "}
+                                Platform: <span className="text-zinc-200">{String(player.platform ?? "auto").toUpperCase()}</span>{" "}
                                 <span className="text-zinc-600">•</span>{" "}
-                                Match region:{" "}
-                                <span className="text-zinc-200">{String(player.matchRegion ?? "—").toUpperCase()}</span>
+                                Match region: <span className="text-zinc-200">{String(player.matchRegion ?? "—").toUpperCase()}</span>
                             </div>
 
                             <div className="text-xs text-zinc-500">
@@ -276,9 +283,7 @@ export default async function PlayerProfilePage({
 
                                         <span className="text-zinc-200">{name ?? (champId != null ? `#${champId}` : "—")}</span>
 
-                                        <span className="text-zinc-500 tabular-nums">
-                                            {points != null ? points.toLocaleString() : "—"} pts
-                                        </span>
+                                        <span className="text-zinc-500 tabular-nums">{points != null ? points.toLocaleString() : "—"} pts</span>
                                     </span>
                                 );
                             })
@@ -311,23 +316,8 @@ function winrate(w: number | null, l: number | null) {
     return Math.round((w / total) * 100);
 }
 
-function Pill({
-    children,
-    className = "",
-}: {
-    children: React.ReactNode;
-    className?: string;
-}) {
-    return (
-        <span
-            className={
-                "inline-flex items-center rounded-full border px-2.5 py-1 text-xs tabular-nums " +
-                className
-            }
-        >
-            {children}
-        </span>
-    );
+function Pill({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+    return <span className={"inline-flex items-center rounded-full border px-2.5 py-1 text-xs tabular-nums " + className}>{children}</span>;
 }
 
 function RankCard({
@@ -364,7 +354,9 @@ function RankCard({
 
                 <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                        <Pill className="border-zinc-800 bg-zinc-950/40 text-zinc-200">{tierText} {divText}  {lp != null ? `${Number(lp).toLocaleString()} LP` : "— LP"}</Pill>
+                        <Pill className="border-zinc-800 bg-zinc-950/40 text-zinc-200">
+                            {tierText} {divText} {lp != null ? `${Number(lp).toLocaleString()} LP` : "— LP"}
+                        </Pill>
                     </div>
 
                     <div className="mt-2 text-sm text-zinc-400 tabular-nums">

@@ -1,9 +1,9 @@
-// models/playerMatch.ts
+
 import mongoose, { Schema } from "mongoose";
 
 export type PlayerMatchDoc = {
   playerId: mongoose.Types.ObjectId;
-  matchId: string; // Match.matchId
+  matchId: string;
   region?: string;
 
   queueId?: number;
@@ -12,6 +12,7 @@ export type PlayerMatchDoc = {
 
   championId?: number;
   teamId?: number;
+  teamPosition?: string;
   win?: boolean;
 
   kills?: number;
@@ -43,6 +44,7 @@ const PlayerMatchSchema = new Schema<PlayerMatchDoc>(
 
     championId: Number,
     teamId: Number,
+    teamPosition: { type: String, trim: true, uppercase: true },
     win: Boolean,
 
     kills: Number,
