@@ -1,36 +1,36 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# RiftBoard Myanmar
+
+A Myanmar-focused League of Legends stats, rankings, and player tracking platform built with Next.js.
+
+RiftBoard Myanmar is designed to provide a localized experience for players who want to view rankings, track performance, explore match-related insights, and follow player progress in a cleaner and more accessible way.
+
+This project is intended for private development, product building, or future public deployment.
+
+## Overview
+
+RiftBoard Myanmar is a web application focused on competitive player data, rankings, and performance visibility for the Myanmar audience.
+
+The goal of the platform is to make player information easier to browse and understand through a dedicated interface built for local users.
+
+## Core Features
+
+- Player profile pages
+- Ranking and leaderboard views
+- Match and performance tracking
+- Summoner or player search
+- Localized experience for Myanmar users
+- Fast web interface built with Next.js
+
+## Tech Stack
+
+- **Frontend:** Next.js
+- **Language:** TypeScript
+- **Styling:** CSS / PostCSS
+- **Linting:** ESLint
 
 ## Getting Started
 
-First, run the development server:
+Install dependencies:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+npm install
