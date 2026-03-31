@@ -1,3 +1,12 @@
+export type RankLike = {
+    tier?: string | null;
+    division?: string | null;
+    lp?: number | null;
+    wins?: number | null;
+    losses?: number | null;
+    fetchedAt?: Date | string | null;
+};
+
 export const TIER_SCORE: Record<string, number> = {
     CHALLENGER: 900,
     GRANDMASTER: 800,
@@ -26,4 +35,20 @@ export function winrate(w?: number | null, l?: number | null) {
     const total = W + L;
     if (!total) return null;
     return Math.round((W / total) * 1000) / 10;
+}
+
+export function compareRanks(a?: RankLike | null, b?: RankLike | null) {
+    return rankScore(a?.tier, a?.division, a?.lp) - rankScore(b?.tier, b?.division, b?.lp);
+}
+
+export function bestRankSnapshot<T extends RankLike>(items: T[]) {
+    let best: T | null = null;
+
+    for (const item of items) {
+        if (!best || compareRanks(item, best) > 0) {
+            best = item;
+        }
+    }
+
+    return best;
 }

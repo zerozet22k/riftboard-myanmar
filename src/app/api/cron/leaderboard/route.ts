@@ -5,6 +5,15 @@ import { refreshAllPlayers } from "@/lib/refresh";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const DEFAULT_LIMIT = Math.max(
+    1,
+    Math.min(200, Number(process.env.LEADERBOARD_CRON_LIMIT ?? 200) || 200)
+);
+const DEFAULT_DELAY_MS = Math.max(
+    0,
+    Math.min(5000, Number(process.env.LEADERBOARD_CRON_DELAY_MS ?? 900) || 900)
+);
+
 function getToken(req: NextRequest): string {
     const auth = req.headers.get("authorization") || "";
     if (auth.toLowerCase().startsWith("bearer ")) return auth.slice(7).trim();
@@ -12,10 +21,12 @@ function getToken(req: NextRequest): string {
 }
 
 function assertCronAuth(req: NextRequest) {
-    const required = process.env.CRON_KEY?.trim();
-    if (!required) throw new Error("Missing CRON_KEY in .env");
+    const allowed = [process.env.CRON_SECRET?.trim(), process.env.CRON_KEY?.trim()].filter(
+        (value): value is string => !!value
+    );
+    if (!allowed.length) throw new Error("Missing CRON_SECRET or CRON_KEY in environment");
     const token = getToken(req);
-    if (!token || token !== required) throw new Error("Unauthorized");
+    if (!token || !allowed.includes(token)) throw new Error("Unauthorized");
 }
 
 function numParam(url: URL, key: string, def?: number) {
@@ -37,8 +48,8 @@ export async function GET(req: NextRequest) {
 
         const url = new URL(req.url);
 
-        const limit = Math.max(1, Math.min(200, numParam(url, "limit", 20)!));
-        const delayMs = Math.max(0, Math.min(5000, numParam(url, "delayMs", 900)!));
+        const limit = Math.max(1, Math.min(200, numParam(url, "limit", DEFAULT_LIMIT)!));
+        const delayMs = Math.max(0, Math.min(5000, numParam(url, "delayMs", DEFAULT_DELAY_MS)!));
         const cooldownMs = numParam(url, "cooldownMs", undefined);
         const force = boolParam(url, "force", false);
 
@@ -53,8 +64,8 @@ export async function GET(req: NextRequest) {
         });
 
         return NextResponse.json({ ok: true, result });
-    } catch (e: any) {
-        const msg = e?.message ?? "Error";
+    } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Error";
         return NextResponse.json(
             { ok: false, error: msg },
             { status: msg === "Unauthorized" ? 401 : 500 }
