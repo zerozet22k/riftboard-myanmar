@@ -470,8 +470,11 @@ export async function refreshAllPlayers(opts?: {
 
   const q: any = {};
   if (opts?.leaderboardOnly) {
-    q["leaderboard.group"] = opts?.leaderboardGroup ?? "burmese";
     q["leaderboard.status"] = opts?.leaderboardStatus ?? "approved";
+    q.$or = [
+      { "leaderboard.group": opts?.leaderboardGroup ?? "burmese" },
+      { "leaderboard.group": null },
+    ];
   }
 
   const players = await Player.find(q, { _id: 1, gameName: 1, tagLine: 1, lastRefreshAt: 1 })
