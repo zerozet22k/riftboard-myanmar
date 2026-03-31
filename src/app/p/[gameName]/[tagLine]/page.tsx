@@ -486,11 +486,22 @@ function RankCard({
             {wl} <span className="text-zinc-600">/</span> {wr != null ? `${wr}%` : "--"}
           </div>
 
-          <div className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-400">
-            <div className="uppercase tracking-wide text-zinc-500">App-tracked peak</div>
-            <div className="mt-1 text-sm text-zinc-200">{peakLine ?? "Not enough history yet"}</div>
-            <div className="mt-1 text-[11px] text-zinc-500">
-              {peakSeen ? `Seen ${peakSeen}` : "Peaks come from this app's saved rank history."}
+          <div className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-950/40 px-3 py-3">
+            <div className="text-[11px] uppercase tracking-wide text-zinc-500">Peak rank</div>
+            <div className="mt-2 flex items-center gap-3">
+              <RankEmblem
+                tier={peak?.tier ?? null}
+                className="h-10 w-10 shrink-0"
+                alt={peak?.tier ? `${peak.tier} peak emblem` : "Peak rank emblem"}
+              />
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-zinc-100">
+                  {peakLine ?? "Not enough history yet"}
+                </div>
+                <div className="mt-1 text-[11px] text-zinc-500">
+                  {peakSeen ? `Recorded ${peakSeen}` : "Saved from your profile history"}
+                </div>
+              </div>
             </div>
           </div>
         </div>

@@ -172,10 +172,12 @@ async function upsertParticipantProfile(
   puuid: string,
   updates: Partial<ParticipantProfileDoc>
 ) {
+  const safeUpdates: Partial<ParticipantProfileDoc> = { ...updates };
+  delete safeUpdates.puuid;
   await ParticipantProfile.updateOne(
     { puuid },
     {
-      $set: updates,
+      $set: safeUpdates,
       $setOnInsert: { puuid },
     },
     { upsert: true }
