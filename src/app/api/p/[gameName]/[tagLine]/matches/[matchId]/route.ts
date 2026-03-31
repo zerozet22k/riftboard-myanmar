@@ -26,6 +26,7 @@ type MatchParticipantRaw = {
   tagLine?: string;
   summonerName?: string;
   championId?: number;
+  champLevel?: number;
   teamId?: number;
   teamPosition?: string;
   win?: boolean;
@@ -33,6 +34,10 @@ type MatchParticipantRaw = {
   deaths?: number;
   assists?: number;
   goldEarned?: number;
+  totalDamageDealtToChampions?: number;
+  visionScore?: number;
+  wardsPlaced?: number;
+  wardsKilled?: number;
   totalMinionsKilled?: number;
   neutralMinionsKilled?: number;
   summoner1Id?: number;
@@ -174,6 +179,7 @@ function participantSummary(participant: MatchParticipantRaw, mePuuidLower: stri
     riotId: buildRiotId(participant),
     summonerName: safeStr(participant.summonerName),
     championId: safeNum(participant.championId),
+    champLevel: safeNum(participant.champLevel),
     teamId: safeNum(participant.teamId),
     teamPosition: safeStr(participant.teamPosition),
     primaryStyle: safeNum(styles[0]?.style),
@@ -185,6 +191,10 @@ function participantSummary(participant: MatchParticipantRaw, mePuuidLower: stri
     assists: safeNum(participant.assists),
     cs: Number.isFinite(cs) ? cs : null,
     gold: safeNum(participant.goldEarned),
+    damage: safeNum(participant.totalDamageDealtToChampions),
+    visionScore: safeNum(participant.visionScore),
+    wardsPlaced: safeNum(participant.wardsPlaced),
+    wardsKilled: safeNum(participant.wardsKilled),
     summonerSpells: [participant.summoner1Id, participant.summoner2Id].filter(
       (value): value is number => typeof value === "number"
     ),

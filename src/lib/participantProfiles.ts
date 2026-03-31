@@ -18,6 +18,7 @@ export type MatchParticipantSeed = {
   riotId: string | null;
   summonerName: string | null;
   championId: number | null;
+  champLevel?: number | null;
   teamId: number | null;
   teamPosition: string | null;
   win: boolean | null;
@@ -26,6 +27,10 @@ export type MatchParticipantSeed = {
   assists: number | null;
   cs: number | null;
   gold: number | null;
+  damage?: number | null;
+  visionScore?: number | null;
+  wardsPlaced?: number | null;
+  wardsKilled?: number | null;
   summonerSpells: number[];
   items: number[];
 };
