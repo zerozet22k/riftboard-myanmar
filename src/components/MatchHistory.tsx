@@ -421,7 +421,136 @@ export default function MatchHistory({
                   `${win ? "bg-blue-500/[0.04]" : "bg-red-500/[0.04]"}`
                 }
               >
-                <div className="grid gap-4 p-4 sm:p-5 xl:grid-cols-[150px_260px_150px_170px_minmax(0,200px)_170px] xl:items-center">
+                <div className="space-y-4 p-4 sm:p-5 lg:hidden">
+                  <div
+                    className={
+                      "rounded-[22px] px-3 py-3 ring-1 ring-inset " +
+                      (win
+                        ? "bg-blue-500/10 ring-blue-400/20"
+                        : "bg-red-500/10 ring-red-400/20")
+                    }
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                      <span className={win ? "font-semibold text-blue-300" : "font-semibold text-red-300"}>
+                        {win ? "Victory" : "Defeat"}
+                      </span>
+                      <span className="text-zinc-400">{duration}</span>
+                    </div>
+                    <div className="mt-2 text-sm text-zinc-200">{queueName(match.queueId)}</div>
+                    <div className="mt-1 text-xs text-zinc-500">{ago ?? "Unknown time"}</div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    {champIcon ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={champIcon}
+                        alt={champName ?? "Champion"}
+                        className="h-16 w-16 rounded-[22px] bg-zinc-900/40 ring-1 ring-white/6"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="h-16 w-16 rounded-[22px] bg-zinc-900/40 ring-1 ring-white/6" />
+                    )}
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="truncate text-lg font-semibold tracking-tight text-zinc-50">
+                          {champName ?? "Unknown champion"}
+                        </div>
+                        {position ? (
+                          <Pill className="border-transparent bg-zinc-900/60 text-zinc-300">{position}</Pill>
+                        ) : null}
+                        {side ? (
+                          <Pill className="border-transparent bg-zinc-900/60 text-zinc-400">{side}</Pill>
+                        ) : null}
+                      </div>
+
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        {spellAInfo ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={`https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/spell/${spellAInfo.iconFull}`}
+                            alt={spellAInfo.name}
+                            title={spellAInfo.name}
+                            className="h-8 w-8 rounded-xl bg-zinc-900/30 ring-1 ring-white/6"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="h-8 w-8 rounded-xl bg-zinc-900/30 ring-1 ring-white/6" />
+                        )}
+                        {spellBInfo ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={`https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/spell/${spellBInfo.iconFull}`}
+                            alt={spellBInfo.name}
+                            title={spellBInfo.name}
+                            className="h-8 w-8 rounded-xl bg-zinc-900/30 ring-1 ring-white/6"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="h-8 w-8 rounded-xl bg-zinc-900/30 ring-1 ring-white/6" />
+                        )}
+                        <RuneIcon rune={primaryRune} title="Primary rune" />
+                        <RuneIcon rune={subStyle} title="Secondary style" />
+                      </div>
+
+                      <div className="mt-3 text-lg font-semibold tabular-nums text-zinc-100">
+                        {kills} / {deaths} / {assists}
+                      </div>
+                      <div className="mt-1 text-sm tabular-nums text-zinc-400">{kda} KDA</div>
+                      <div className="mt-1 text-xs text-zinc-500">{playedStr}</div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <MetricTile label="Score" value={`${kills}/${deaths}/${assists}`} />
+                    <MetricTile label="KDA" value={kda} />
+                    <MetricTile label="CS" value={match.cs ?? "--"} />
+                    <MetricTile
+                      label="Gold"
+                      value={match.gold != null ? match.gold.toLocaleString() : "--"}
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5">
+                    {match.items.length ? (
+                      match.items.slice(0, 7).map((id, index) => {
+                        const url = `https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/item/${id}.png`;
+                        return (
+                          <ItemIcon
+                            key={`${match._id}-${id}-${index}`}
+                            id={id}
+                            url={url}
+                            info={itemMap[String(id)] ?? null}
+                          />
+                        );
+                      })
+                    ) : (
+                      <div className="text-xs text-zinc-500">No items captured.</div>
+                    )}
+                  </div>
+
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() => toggleDetails(match.matchId)}
+                      className="rounded-2xl bg-zinc-900/80 px-4 py-3 text-sm font-medium text-zinc-100 ring-1 ring-white/8 transition hover:bg-white/5"
+                    >
+                      {isOpen ? "Hide details" : "Open details"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => copy(match.matchId)}
+                      className="rounded-2xl bg-zinc-950/60 px-4 py-3 text-sm text-zinc-300 ring-1 ring-white/5 transition hover:bg-white/5"
+                    >
+                      Copy match ID
+                    </button>
+                  </div>
+                </div>
+
+                <div className="hidden gap-4 p-4 sm:p-5 lg:grid xl:grid-cols-[150px_260px_150px_170px_minmax(0,200px)_170px] xl:items-center">
                   <div
                     className={
                       "min-w-0 rounded-[22px] px-3 py-3 ring-1 ring-inset " +

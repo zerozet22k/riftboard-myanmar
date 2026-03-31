@@ -225,7 +225,7 @@ function PlayerSummaryCell({
 }) {
   const position = prettyPos(participant.teamPosition);
   return (
-    <div className="flex min-w-[270px] items-start gap-3">
+    <div className="flex min-w-0 items-start gap-3">
       <div className="relative shrink-0">
         {championIcon ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -305,6 +305,218 @@ function PlayerSummaryCell({
   );
 }
 
+function ParticipantStat({
+  label,
+  value,
+  subvalue,
+}: {
+  label: string;
+  value: ReactNode;
+  subvalue?: ReactNode;
+}) {
+  return (
+    <div className="rounded-xl bg-zinc-950/40 px-3 py-2 ring-1 ring-white/5">
+      <div className="text-[10px] uppercase tracking-[0.16em] text-zinc-500">{label}</div>
+      <div className="mt-1 text-sm font-medium tabular-nums text-zinc-100">{value}</div>
+      {subvalue ? <div className="mt-0.5 text-[11px] text-zinc-500">{subvalue}</div> : null}
+    </div>
+  );
+}
+
+function MobileParticipantCard({
+  participant,
+  ddragonVersion,
+  itemMap,
+  spellMap,
+  champMap,
+  runeMap,
+  styleMap,
+  matchDuration,
+  tone,
+}: {
+  participant: MatchParticipant;
+  ddragonVersion: string;
+  itemMap: Record<string, ItemInfo>;
+  spellMap: Record<string, SpellInfo>;
+  champMap: Record<string, string>;
+  runeMap: Record<string, RuneInfo>;
+  styleMap: Record<string, RuneInfo>;
+  matchDuration: number | null | undefined;
+  tone: "blue" | "red";
+}) {
+  const championName =
+    participant.championId != null ? champMap[String(participant.championId)] : null;
+  const championIcon =
+    participant.championId != null ? `${CHAMP_ICON_BASE}/${participant.championId}.png` : null;
+  const profileIcon =
+    participant.profileIconId != null
+      ? `https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/profileicon/${participant.profileIconId}.png`
+      : null;
+  const spellA = participant.summonerSpells[0] ?? null;
+  const spellB = participant.summonerSpells[1] ?? null;
+  const spellAInfo = spellA != null ? spellMap[String(spellA)] ?? null : null;
+  const spellBInfo = spellB != null ? spellMap[String(spellB)] ?? null : null;
+  const primaryRune =
+    participant.primaryRune != null ? runeMap[String(participant.primaryRune)] ?? null : null;
+  const subStyle =
+    participant.subStyle != null ? styleMap[String(participant.subStyle)] ?? null : null;
+  const kills = participant.kills ?? 0;
+  const deaths = participant.deaths ?? 0;
+  const assists = participant.assists ?? 0;
+  const kda = deaths === 0 ? `${kills + assists}.00` : ((kills + assists) / deaths).toFixed(2);
+  const csPm = csPerMinute(participant.cs, matchDuration);
+  const rowTone =
+    participant.isMe && tone === "blue"
+      ? "bg-blue-500/8 ring-blue-400/20"
+      : participant.isMe && tone === "red"
+        ? "bg-red-500/8 ring-red-400/20"
+        : "bg-zinc-950/20 ring-white/6";
+  const position = prettyPos(participant.teamPosition);
+
+  return (
+    <div className={`rounded-[22px] p-3 ring-1 ${rowTone}`}>
+      <div className="flex items-start gap-3">
+        <div className="relative shrink-0">
+          {championIcon ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={championIcon}
+              alt={championName ?? "Champion"}
+              className="h-12 w-12 rounded-[16px] bg-zinc-900/30 ring-1 ring-white/6"
+              loading="lazy"
+            />
+          ) : (
+            <div className="h-12 w-12 rounded-[16px] bg-zinc-900/30 ring-1 ring-white/6" />
+          )}
+          {profileIcon ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={profileIcon}
+              alt="Profile icon"
+              className="absolute -bottom-1 -right-1 h-5 w-5 rounded-full bg-zinc-950 ring-1 ring-black/30"
+              loading="lazy"
+            />
+          ) : null}
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="truncate text-sm font-semibold text-zinc-100">
+              {participantName(participant)}
+            </div>
+            {participant.isMe ? (
+              <Pill className="border-blue-500/30 bg-blue-500/10 text-blue-100">YOU</Pill>
+            ) : null}
+            {position ? (
+              <Pill className="border-transparent bg-zinc-900/60 text-zinc-300">{position}</Pill>
+            ) : null}
+            {participant.champLevel != null ? (
+              <Pill className="border-transparent bg-zinc-900/60 text-zinc-400">
+                Lv {participant.champLevel}
+              </Pill>
+            ) : participant.summonerLevel != null ? (
+              <Pill className="border-transparent bg-zinc-900/60 text-zinc-400">
+                Lv {participant.summonerLevel}
+              </Pill>
+            ) : null}
+          </div>
+
+          <div className="mt-1 text-xs text-zinc-500">{championName ?? "Unknown champion"}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        {spellAInfo ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={`https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/spell/${spellAInfo.iconFull}`}
+            alt={spellAInfo.name}
+            title={spellAInfo.name}
+            className="h-7 w-7 rounded-lg bg-zinc-900/30 ring-1 ring-white/6"
+            loading="lazy"
+          />
+        ) : (
+          <div className="h-7 w-7 rounded-lg bg-zinc-900/30 ring-1 ring-white/6" />
+        )}
+        {spellBInfo ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={`https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/spell/${spellBInfo.iconFull}`}
+            alt={spellBInfo.name}
+            title={spellBInfo.name}
+            className="h-7 w-7 rounded-lg bg-zinc-900/30 ring-1 ring-white/6"
+            loading="lazy"
+          />
+        ) : (
+          <div className="h-7 w-7 rounded-lg bg-zinc-900/30 ring-1 ring-white/6" />
+        )}
+        <RuneIcon rune={primaryRune} title="Primary rune" />
+        <RuneIcon rune={subStyle} title="Secondary style" />
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <ParticipantStat label="KDA" value={`${kills}/${deaths}/${assists}`} subvalue={`${kda} KDA`} />
+        <ParticipantStat
+          label="Damage"
+          value={participant.damage != null ? participant.damage.toLocaleString() : "--"}
+          subvalue={`Gold ${participant.gold != null ? participant.gold.toLocaleString() : "--"}`}
+        />
+        <ParticipantStat
+          label="Vision"
+          value={participant.visionScore != null ? participant.visionScore.toLocaleString() : "--"}
+          subvalue={`${participant.wardsPlaced ?? "--"} placed / ${participant.wardsKilled ?? "--"} killed`}
+        />
+        <ParticipantStat
+          label="CS"
+          value={participant.cs != null ? participant.cs.toLocaleString() : "--"}
+          subvalue={csPm ? `${csPm}/m` : "--"}
+        />
+      </div>
+
+      <div className="mt-3 grid gap-2">
+        <RankLine label="Solo" snapshot={participant.solo} />
+        <RankLine label="Flex" snapshot={participant.flex} />
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {participant.items.length ? (
+          participant.items.slice(0, 7).map((id, itemIndex) => {
+            const url = `https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/item/${id}.png`;
+            return (
+              <ItemIcon
+                key={`${participant.puuid ?? participant.riotId ?? participant.summonerName ?? "mobile"}-${id}-${itemIndex}`}
+                id={id}
+                url={url}
+                info={itemMap[String(id)] ?? null}
+              />
+            );
+          })
+        ) : (
+          <div className="text-xs text-zinc-500">No items</div>
+        )}
+      </div>
+
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-xs text-zinc-500">{participantRankStatus(participant)}</div>
+        {!participant.isMe && participant.opggUrl ? (
+          <a
+            href={participant.opggUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center justify-center rounded-2xl bg-zinc-950/40 px-3 py-2 text-sm text-zinc-300 ring-1 ring-white/5 transition hover:bg-white/5 hover:text-white"
+          >
+            Open on OP.GG
+          </a>
+        ) : (
+          <div className="rounded-2xl bg-zinc-950/30 px-3 py-2 text-center text-xs text-zinc-600 ring-1 ring-white/5">
+            Tracked player
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TeamTable({
   title,
   participants,
@@ -346,7 +558,24 @@ function TeamTable({
         </Pill>
       </div>
 
-      <div className="mt-3 overflow-x-auto">
+      <div className="mt-3 space-y-3 lg:hidden">
+        {participants.map((participant, index) => (
+          <MobileParticipantCard
+            key={`${participant.puuid ?? participant.riotId ?? participant.summonerName ?? title}-mobile-${index}`}
+            participant={participant}
+            ddragonVersion={ddragonVersion}
+            itemMap={itemMap}
+            spellMap={spellMap}
+            champMap={champMap}
+            runeMap={runeMap}
+            styleMap={styleMap}
+            matchDuration={matchDuration}
+            tone={tone}
+          />
+        ))}
+      </div>
+
+      <div className="mt-3 hidden overflow-x-auto lg:block">
         <table className="min-w-[980px] w-full border-separate border-spacing-0 text-sm">
           <thead>
             <tr className="border-b border-white/8 text-left text-[11px] uppercase tracking-[0.16em] text-zinc-500">
@@ -555,7 +784,7 @@ export default function MatchDetailsPanel({
       {!loading && error ? <div className="text-sm text-red-300">{error}</div> : null}
 
       {!loading && !error && details?.teams ? (
-        <div className="grid gap-4 2xl:grid-cols-2">
+        <div className="grid gap-4 xl:grid-cols-2">
           <TeamTable
             title="Blue side"
             participants={details.teams.blue}

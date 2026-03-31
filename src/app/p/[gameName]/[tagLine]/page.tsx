@@ -282,25 +282,25 @@ export default async function PlayerProfilePage({
   const initialCursor = cursorFromLast(matchDocs[matchDocs.length - 1]);
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(30,41,59,0.42),transparent_34%),radial-gradient(circle_at_18%_18%,rgba(16,185,129,0.14),transparent_22%),#09090b] text-zinc-100">
+    <main className="min-h-screen overflow-x-clip bg-[radial-gradient(circle_at_top,rgba(30,41,59,0.42),transparent_34%),radial-gradient(circle_at_18%_18%,rgba(16,185,129,0.14),transparent_22%),#09090b] text-zinc-100">
       <div className="mx-auto w-full space-y-6 px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
         <section className="relative overflow-hidden rounded-[32px] bg-zinc-950/70 p-5 shadow-[0_24px_80px_rgba(0,0,0,0.35)] ring-1 ring-white/5 sm:p-6 lg:p-8">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(16,185,129,0.16),transparent_30%),radial-gradient(circle_at_bottom_left,rgba(59,130,246,0.14),transparent_26%)]" />
 
           <div className="relative flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
-            <div className="flex flex-col gap-5 lg:flex-row lg:items-center">
+            <div className="flex w-full flex-col gap-5 lg:flex-row lg:items-center">
               <ProfileAvatar
                 iconId={player.profileIconId ?? null}
                 ddragonVersion={ddVer}
                 alt={`${nameShown} profile icon`}
-                className="h-24 w-24 shrink-0 sm:h-28 sm:w-28 lg:h-32 lg:w-32"
+                className="h-20 w-20 shrink-0 sm:h-28 sm:w-28 lg:h-32 lg:w-32"
                 level={player.summonerLevel ?? null}
               />
 
               <div className="min-w-0 space-y-4">
                 <div>
                   <div className="flex flex-wrap items-center gap-3">
-                    <h1 className="text-3xl font-semibold tracking-tight text-zinc-50 sm:text-4xl">
+                    <h1 className="text-2xl font-semibold tracking-tight text-zinc-50 sm:text-4xl">
                       {nameShown}
                     </h1>
                     <Pill className="border-zinc-700 bg-zinc-900/70 text-zinc-300">
@@ -346,7 +346,7 @@ export default async function PlayerProfilePage({
               </div>
             </div>
 
-            <div className="flex w-full max-w-sm flex-col gap-3 xl:w-[380px] xl:max-w-none">
+            <div className="flex w-full flex-col gap-3 xl:w-[380px] xl:max-w-none">
               <div className="flex justify-start xl:justify-end">
                 <ProfileRefreshButton gameName={canonicalGameName} tagLine={canonicalTagLineLower} />
               </div>

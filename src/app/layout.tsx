@@ -50,7 +50,7 @@ export default function RootLayout({
         className={[
           geistSans.variable,
           geistMono.variable,
-          "min-h-screen antialiased",
+          "min-h-screen overflow-x-hidden antialiased",
           "bg-zinc-950 text-zinc-100",
         ].join(" ")}
       >
@@ -62,7 +62,7 @@ export default function RootLayout({
         </div>
 
         {/* App frame */}
-        <div className="mx-auto w-full">
+        <div className="mx-auto w-full overflow-x-clip">
           {children}
           <footer className="px-4 sm:px-6 py-10 text-center text-xs text-zinc-500">
             Not affiliated with Riot Games. League of Legends is a trademark of Riot Games, Inc.
