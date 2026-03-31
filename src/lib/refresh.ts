@@ -6,6 +6,7 @@ import { PlayerMastery } from "@/models/playerMastery";
 import { Match } from "@/models/match";
 import { PlayerMatch } from "@/models/playerMatch";
 import {
+  getAccountByPuuid,
   findSeaPlatformByPuuid,
   getLeagueEntriesByPuuid,
   getPuuidByRiotId,
@@ -16,8 +17,9 @@ import {
   platformToMatchRegion,
   isRiot404,
   isRiot429,
-  RiotApiError,
 } from "@/lib/riot";
+import { normalizeRiotIdPart, syncCanonicalRiotId } from "@/lib/playerIdentity";
+import { mergePlayers } from "@/lib/playerMerge";
 
 const SOLO = "RANKED_SOLO_5x5";
 const FLEX = "RANKED_FLEX_SR";
@@ -303,7 +305,7 @@ export async function refreshPlayerById(
 ) {
   await dbConnect();
 
-  const player: any = await Player.findById(playerId);
+  let player: any = await Player.findById(playerId);
   if (!player) throw new Error("Player not found");
 
   const cooldownMs = opts?.cooldownMs ?? COOLDOWN_MS;
@@ -333,6 +335,28 @@ export async function refreshPlayerById(
     await player.save();
   }
 
+  const now = new Date();
+
+  try {
+    const account = await getAccountByPuuid(puuid);
+    if (account?.gameName && account?.tagLine) {
+      const currentGameNameNorm = normalizeRiotIdPart(account.gameName);
+      const currentTagLineNorm = normalizeRiotIdPart(account.tagLine);
+      const duplicate = await Player.findOne({
+        gameNameNorm: currentGameNameNorm,
+        tagLineNorm: currentTagLineNorm,
+      });
+
+      if (duplicate && String(duplicate._id) !== String(player._id)) {
+        player = await mergePlayers(String(player._id), String(duplicate._id));
+      }
+
+      syncCanonicalRiotId(player, account.gameName, account.tagLine, now);
+    }
+  } catch (e) {
+    console.error("Account sync failed:", e);
+  }
+
   let platform = String(player.platform || "auto").toLowerCase().trim();
   let summoner: any;
 
@@ -357,8 +381,6 @@ export async function refreshPlayerById(
       throw e;
     }
   }
-
-  const now = new Date();
 
   player.summonerId = summoner.id;
   player.profileIconId = summoner.profileIconId;

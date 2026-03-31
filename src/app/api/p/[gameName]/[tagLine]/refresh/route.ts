@@ -3,13 +3,10 @@ import { revalidatePath } from "next/cache";
 import { dbConnect } from "@/lib/mongodb";
 import { Player } from "@/models/player";
 import { refreshPlayerById } from "@/lib/refresh";
+import { buildPlayerLookupQuery, canonicalPlayerPath } from "@/lib/playerIdentity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function norm(s: unknown) {
-  return String(s ?? "").trim().toLowerCase();
-}
 
 function safeDecode(seg: unknown) {
   try {
@@ -42,8 +39,8 @@ export async function POST(
     const gameNameRaw = safeDecode(params?.gameName);
     const tagLineRaw = safeDecode(params?.tagLine);
 
-    const gameNameNorm = norm(gameNameRaw);
-    const tagLineNorm = norm(tagLineRaw);
+    const gameNameNorm = String(gameNameRaw ?? "").trim().toLowerCase();
+    const tagLineNorm = String(tagLineRaw ?? "").trim().toLowerCase();
 
     if (!gameNameNorm || !tagLineNorm) {
       return NextResponse.json({ ok: false, error: "Missing name/tag" }, { status: 400 });
@@ -63,7 +60,7 @@ export async function POST(
     await dbConnect();
 
     const player = await Player.findOne(
-      { gameNameNorm, tagLineNorm },
+      buildPlayerLookupQuery(gameNameRaw, tagLineRaw),
       { _id: 1, gameName: 1, tagLine: 1 }
     ).lean();
 
@@ -78,9 +75,7 @@ export async function POST(
       fullMastery, 
     });
 
-    const canonicalPath = `/p/${encodeURIComponent(String(player.gameName))}/${encodeURIComponent(
-      String(player.tagLine).toLowerCase()
-    )}`;
+    const canonicalPath = canonicalPlayerPath(player.gameName, player.tagLine);
 
     revalidatePath(canonicalPath);
     revalidatePath("/leaderboard");

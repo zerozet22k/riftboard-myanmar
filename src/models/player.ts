@@ -1,5 +1,6 @@
 
 import mongoose, { Schema, type HydratedDocument } from "mongoose";
+import type { RiotIdAliasEntry } from "@/lib/playerIdentity";
 
 export type RankSnapshot = {
   tier?: string;
@@ -25,11 +26,14 @@ export type LeaderboardInfo = {
   note?: string;
 };
 
+export type RiotIdAlias = RiotIdAliasEntry;
+
 export type PlayerDoc = {
   gameName: string;
   tagLine: string;
   gameNameNorm: string;
   tagLineNorm: string;
+  riotIdAliases?: RiotIdAlias[];
 
   platform: string;
   matchRegion?: string;
@@ -99,6 +103,17 @@ const LeaderboardSchema = new Schema<LeaderboardInfo>(
   { _id: false }
 );
 
+const RiotIdAliasSchema = new Schema<RiotIdAlias>(
+  {
+    gameName: { type: String, required: true, trim: true },
+    tagLine: { type: String, required: true, trim: true },
+    gameNameNorm: { type: String, required: true, lowercase: true, trim: true },
+    tagLineNorm: { type: String, required: true, lowercase: true, trim: true },
+    observedAt: { type: Date, required: true, default: Date.now },
+  },
+  { _id: false }
+);
+
 const PlayerSchema = new Schema<PlayerDoc>(
   {
     gameName: { type: String, required: true, trim: true },
@@ -106,6 +121,7 @@ const PlayerSchema = new Schema<PlayerDoc>(
 
     gameNameNorm: { type: String, required: true, lowercase: true, trim: true, select: false },
     tagLineNorm: { type: String, required: true, lowercase: true, trim: true, select: false },
+    riotIdAliases: { type: [RiotIdAliasSchema], default: () => [] },
 
     platform: { type: String, lowercase: true, trim: true, default: "auto" },
     matchRegion: { type: String, lowercase: true, trim: true },
@@ -148,6 +164,7 @@ PlayerSchema.pre("validate", function (this: HydratedDocument<PlayerDoc>) {
 
 
 PlayerSchema.index({ gameNameNorm: 1, tagLineNorm: 1 }, { unique: true });
+PlayerSchema.index({ "riotIdAliases.gameNameNorm": 1, "riotIdAliases.tagLineNorm": 1 });
 
 
 PlayerSchema.index({ "leaderboard.group": 1, "leaderboard.status": 1, updatedAt: -1 });

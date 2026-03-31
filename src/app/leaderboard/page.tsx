@@ -3,8 +3,6 @@ import { dbConnect } from "@/lib/mongodb";
 import { Player } from "@/models/player";
 import AutoUIRefresh from "@/components/AutoUIRefresh";
 import LeaderboardTable, { type LeaderboardRow } from "@/components/LeaderboardTable";
-import RefreshButton from "@/components/RefreshButton";
-import { refreshLeaderboardAction } from "./actions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -166,7 +164,7 @@ export default async function LeaderboardPage() {
                 href="/submit"
                 className="rounded-2xl border border-zinc-800 bg-zinc-950/40 px-4 py-2 text-sm hover:bg-zinc-900/40"
               >
-                Add yourself with invite code
+                Add or update yourself
               </Link>
             </div>
           </div>
@@ -184,7 +182,10 @@ export default async function LeaderboardPage() {
               </span>
             </div>
 
-            <RefreshButton action={refreshLeaderboardAction} />
+            <p className="text-xs text-zinc-500 sm:text-right">
+              Profiles refresh from each player page. The leaderboard syncs automatically in the
+              background.
+            </p>
           </div>
         </header>
 

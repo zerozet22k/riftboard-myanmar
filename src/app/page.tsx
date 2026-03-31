@@ -1,7 +1,6 @@
 // app/page.tsx
 import Link from "next/link";
 import { dbConnect } from "@/lib/mongodb";
-import { Player } from "@/models/player";
 import HomeSearch from "@/components/HomeSearch";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +16,7 @@ export default async function HomePage() {
           </h1>
 
           <p className="text-sm sm:text-base text-zinc-400">
-            Search players already in the leaderboard, or add yourself.
+            Search the community leaderboard, or add or update your own Riot ID.
           </p>
 
 
@@ -33,7 +32,7 @@ export default async function HomePage() {
               href="/submit"
               className="rounded-2xl border border-zinc-800 bg-zinc-950/40 px-4 py-2 text-sm hover:bg-zinc-900/40"
             >
-              Add yourself with invite code
+              Add or update yourself
             </Link>
 
           </div>
@@ -44,7 +43,7 @@ export default async function HomePage() {
           <div className="text-sm text-zinc-300 font-medium">Search</div>
           <HomeSearch />
           <div className="text-xs text-zinc-500">
-            Tip: try <span className="font-mono">name#TAG</span> or just part of the name.
+            Tip: try <span className="font-mono">name#TAG</span>, an old Riot ID, or just part of the name.
           </div>
         </section>
       </div>

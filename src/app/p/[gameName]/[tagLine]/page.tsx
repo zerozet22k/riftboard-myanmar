@@ -7,6 +7,7 @@ import MatchHistory, { type MatchRow } from "@/components/MatchHistory";
 import ProfileRefreshButton from "@/components/ProfileRefreshButton";
 import RankEmblem from "@/components/RankEmblem";
 import { getLatestDdragonVersion } from "@/lib/ddragon";
+import { buildPlayerLookupQuery, canonicalPlayerPath } from "@/lib/playerIdentity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,10 +19,6 @@ const CHAMP_ICON_BASE =
     "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-icons";
 
 type RouteParams = { gameName: string; tagLine: string };
-
-function norm(s: string) {
-    return String(s ?? "").trim().toLowerCase();
-}
 
 function safeDecode(seg: unknown) {
     try {
@@ -67,9 +64,6 @@ function champIconUrl(championId: number | null) {
     return `${CHAMP_ICON_BASE}/${String(championId)}.png`;
 }
 
-function playerPath(gameName: string, tagLine: string) {
-    return `/p/${encodeURIComponent(gameName)}/${encodeURIComponent(String(tagLine).toLowerCase())}`;
-}
 type LastUpdated = string | null | undefined;
 function formatLastUpdatedISO(v: LastUpdated) {
     if (!v) return null;
@@ -109,7 +103,7 @@ export default async function PlayerProfilePage({
     await dbConnect();
 
     const player: any = await Player.findOne(
-        { gameNameNorm: norm(gameNameRaw), tagLineNorm: norm(tagLineRaw) },
+        buildPlayerLookupQuery(gameNameRaw, tagLineRaw),
         {
             gameName: 1,
             tagLine: 1,
@@ -128,9 +122,10 @@ export default async function PlayerProfilePage({
 
     const canonicalGameName = String(player.gameName ?? "").trim();
     const canonicalTagLineLower = String(player.tagLine ?? "").trim().toLowerCase();
+    const canonicalPath = canonicalPlayerPath(canonicalGameName, canonicalTagLineLower);
 
     if (gameNameRaw !== canonicalGameName || tagLineRaw !== canonicalTagLineLower) {
-        redirect(playerPath(canonicalGameName, canonicalTagLineLower));
+        redirect(canonicalPath);
     }
 
     const [ddVer, champNames] = await Promise.all([getLatestDdragonVersion(), getChampNameMap()]);

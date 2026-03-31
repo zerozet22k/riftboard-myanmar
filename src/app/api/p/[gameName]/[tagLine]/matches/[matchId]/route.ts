@@ -5,6 +5,7 @@ import { dbConnect } from "@/lib/mongodb";
 import { Player } from "@/models/player";
 import { PlayerMatch } from "@/models/playerMatch";
 import { Match } from "@/models/match";
+import { buildPlayerLookupQuery } from "@/lib/playerIdentity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -119,7 +120,7 @@ export async function GET(
         await dbConnect();
 
         const player: any = await Player.findOne(
-            { gameNameNorm, tagLineNorm },
+            buildPlayerLookupQuery(gameNameRaw, tagLineRaw),
             { _id: 1, puuid: 1 }
         ).lean();
 

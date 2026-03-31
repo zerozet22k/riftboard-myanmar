@@ -51,6 +51,7 @@ function optEnv(name: string) {
 }
 
 const API_KEY = () => mustEnv("RIOT_API_KEY");
+const ACCOUNT_REGIONS = ["americas", "asia", "europe"] as const;
 
 function ACCOUNT_REGION(): "americas" | "asia" | "europe" {
   const raw = mustEnv("RIOT_ACCOUNT_REGION").toLowerCase();
@@ -182,6 +183,23 @@ export async function getPuuidByRiotId(gameName: string, tagLine: string) {
     `https://${region}.api.riotgames.com/riot/account/v1/accounts/by-riot-id/` +
     `${encodeURIComponent(gameName)}/${encodeURIComponent(tagLine)}`;
   return riotFetch<RiotAccount>(url);
+}
+
+export async function getAccountByPuuid(puuid: string) {
+  for (const region of ACCOUNT_REGIONS) {
+    const url =
+      `https://${region}.api.riotgames.com/riot/account/v1/accounts/by-puuid/` +
+      `${encodeURIComponent(puuid)}`;
+
+    try {
+      return await riotFetch<RiotAccount>(url);
+    } catch (e) {
+      if (isRiot404(e)) continue;
+      throw e;
+    }
+  }
+
+  throw new RiotApiError(404, "Riot account not found for puuid");
 }
 
 export async function getSummonerByPuuid(platform: string, puuid: string) {

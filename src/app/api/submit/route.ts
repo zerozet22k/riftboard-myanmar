@@ -5,6 +5,12 @@ import { dbConnect } from "@/lib/mongodb";
 import { Player } from "@/models/player";
 import { revalidatePath } from "next/cache";
 import { refreshPlayerById } from "@/lib/refresh";
+import { mergePlayers } from "@/lib/playerMerge";
+import {
+  canonicalPlayerPath,
+  normalizeRiotIdPart,
+  syncCanonicalRiotId,
+} from "@/lib/playerIdentity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,10 +25,6 @@ const SubmitSchema = z
   .refine((v) => (v.gameName && v.tagLine) || v.riotId, {
     message: "Missing Riot ID",
   });
-
-function normalize(s: string) {
-  return s.trim().toLowerCase();
-}
 
 function parseRiotId(input: string) {
   const raw = String(input || "").trim();
@@ -51,6 +53,12 @@ const RIOT_API_KEY = process.env.RIOT_API_KEY?.trim() || "";
 const ACCOUNT_REGIONS = ["asia", "europe", "americas"] as const;
 
 type RiotAccountDto = { puuid: string; gameName: string; tagLine: string };
+type RefreshResult = {
+  _skipped?: boolean;
+  _nextRefreshAt?: string;
+  _cooldownSecondsLeft?: number;
+  _refreshError?: string;
+};
 
 async function resolveAccountAnyRegion(gameName: string, tagLine: string) {
   if (!RIOT_API_KEY) throw new Error("Missing RIOT_API_KEY in .env");
@@ -128,63 +136,91 @@ export async function POST(req: NextRequest) {
 
     await dbConnect();
 
-    const gameNameNorm = normalize(gameName);
-    const tagLineNorm = normalize(tagLine);
+    const gameNameNorm = normalizeRiotIdPart(gameName);
+    const tagLineNorm = normalizeRiotIdPart(tagLine);
     const now = new Date();
 
-    const existing = await Player.findOne(
-      { gameNameNorm, tagLineNorm },
-      { _id: 1, leaderboard: 1 }
-    ).lean();
+    const [existingByPuuid, existingByRiotId] = await Promise.all([
+      Player.findOne({ puuid }),
+      Player.findOne({ gameNameNorm, tagLineNorm }),
+    ]);
 
-    const doc = await Player.findOneAndUpdate(
-      { gameNameNorm, tagLineNorm },
-      {
-        $set: {
-          gameName,
-          tagLine,
-          puuid,
+    let doc = existingByPuuid ?? existingByRiotId;
+    let mergedByPuuid = false;
 
-          "leaderboard.group": "burmese",
-          "leaderboard.status": "approved",
-          "leaderboard.approvedAt": now,
+    if (existingByPuuid && existingByRiotId && String(existingByPuuid._id) !== String(existingByRiotId._id)) {
+      doc = await mergePlayers(String(existingByPuuid._id), String(existingByRiotId._id));
+      mergedByPuuid = true;
+    } else if (existingByPuuid) {
+      mergedByPuuid = !existingByRiotId || String(existingByPuuid._id) === String(existingByRiotId._id);
+    }
+
+    const existed = !!doc;
+    const previousPath =
+      doc?.gameName && doc?.tagLine ? canonicalPlayerPath(doc.gameName, doc.tagLine) : null;
+
+    if (!doc) {
+      doc = new Player({
+        gameName,
+        tagLine,
+        platform: "auto",
+        puuid,
+        leaderboard: {
+          group: "burmese",
+          status: "approved",
+          requestedAt: now,
+          approvedAt: now,
         },
-        $setOnInsert: {
-          gameNameNorm,
-          tagLineNorm,
-          platform: "auto",
-          "leaderboard.requestedAt": now, 
-        },
-      },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
+      });
+    }
 
-    let refreshOut: any = null;
+    const { renamed } = syncCanonicalRiotId(doc, gameName, tagLine, now);
+
+    doc.puuid = puuid;
+    doc.platform = doc.platform || "auto";
+    doc.leaderboard = {
+      ...(doc.leaderboard ?? {}),
+      group: "burmese",
+      status: "approved",
+      requestedAt: doc.leaderboard?.requestedAt ?? now,
+      approvedAt: now,
+    };
+
+    await doc.save();
+
+    let refreshOut: RefreshResult | null = null;
     try {
-      refreshOut = await refreshPlayerById(String(doc._id), {
+      refreshOut = (await refreshPlayerById(String(doc._id), {
         force: true,
         fullMastery: false,
         syncMatches: true,
         matchesCount: 10,
-      });
-    } catch (e: any) {
-      refreshOut = { _refreshError: e?.message ?? "Refresh failed" };
+      })) as RefreshResult;
+    } catch (e: unknown) {
+      refreshOut = { _refreshError: e instanceof Error ? e.message : "Refresh failed" };
     }
 
     revalidatePath("/");
     revalidatePath("/leaderboard");
 
-    revalidatePath(
-      `/p/${encodeURIComponent(String(doc.gameName))}/${encodeURIComponent(String(doc.tagLine).toLowerCase())}`
-    );
+    const canonicalPath = canonicalPlayerPath(doc.gameName, doc.tagLine);
+
+    if (renamed && previousPath && previousPath !== canonicalPath) {
+      revalidatePath(previousPath);
+    }
+
+    revalidatePath(canonicalPath);
 
     return NextResponse.json({
       ok: true,
-      existed: !!existing,
+      existed,
+      renamed,
+      mergedByPuuid,
       playerId: String(doc._id),
+      canonicalPath,
       leaderboard: {
-        group: (doc as any)?.leaderboard?.group ?? "burmese",
-        status: (doc as any)?.leaderboard?.status ?? "approved",
+        group: doc.leaderboard?.group ?? "burmese",
+        status: doc.leaderboard?.status ?? "approved",
       },
       refreshed: !!refreshOut && !refreshOut._skipped && !refreshOut._refreshError,
       skipped: !!refreshOut && !!refreshOut._skipped,
@@ -192,7 +228,10 @@ export async function POST(req: NextRequest) {
       cooldownSecondsLeft: refreshOut?._cooldownSecondsLeft ?? null,
       refreshError: refreshOut?._refreshError ?? null,
     });
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message ?? "Error" }, { status: 500 });
+  } catch (e: unknown) {
+    return NextResponse.json(
+      { ok: false, error: e instanceof Error ? e.message : "Error" },
+      { status: 500 }
+    );
   }
 }

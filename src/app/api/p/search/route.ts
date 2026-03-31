@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { dbConnect } from "@/lib/mongodb";
 import { Player } from "@/models/player";
+import { buildPlayerLookupQuery } from "@/lib/playerIdentity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -109,10 +110,7 @@ export async function GET(req: NextRequest) {
 
     const parsed = parseRiotIdLoose(q);
     if (parsed) {
-        const gameNameNorm = normalize(parsed.gameName);
-        const tagLineNorm = normalize(parsed.tagLine);
-
-        const exact = await Player.find({ gameNameNorm, tagLineNorm }, projection)
+        const exact = await Player.find(buildPlayerLookupQuery(parsed.gameName, parsed.tagLine), projection)
             .limit(10)
             .lean();
 
@@ -132,6 +130,10 @@ export async function GET(req: NextRequest) {
                 { summonerName: rxRaw },
                 { gameNameNorm: rxNorm },
                 { tagLineNorm: rxNorm },
+                { "riotIdAliases.gameName": rxRaw },
+                { "riotIdAliases.tagLine": rxRaw },
+                { "riotIdAliases.gameNameNorm": rxNorm },
+                { "riotIdAliases.tagLineNorm": rxNorm },
             ],
         },
         projection

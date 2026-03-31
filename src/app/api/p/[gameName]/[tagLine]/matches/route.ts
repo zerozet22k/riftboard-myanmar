@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { dbConnect } from "@/lib/mongodb";
 import { Player } from "@/models/player";
 import { PlayerMatch } from "@/models/playerMatch";
+import { buildPlayerLookupQuery } from "@/lib/playerIdentity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -252,7 +253,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
     await dbConnect();
 
     const player: any = await Player.findOne(
-      { gameNameNorm, tagLineNorm },
+      buildPlayerLookupQuery(gameNameRaw, tagLineRaw),
       { _id: 1, puuid: 1, riotPuuid: 1, matchRegion: 1, raw: 1 }
     ).lean();
 

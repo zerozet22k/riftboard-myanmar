@@ -1,6 +1,5 @@
 import Link from "next/link";
 import SubmitForm from "../../components/SubmitForm";
-import BulkSubmitLocal from "@/components/BulkSubmitLocal";
 
 export default function SubmitPage() {
   const codeRequired = !!process.env.SUBMIT_CODE?.trim();
@@ -11,27 +10,27 @@ export default function SubmitPage() {
         <div className="space-y-2">
           <Link
             href="/"
-            className="inline-flex text-sm text-zinc-400 hover:text-zinc-200 underline underline-offset-4"
+            className="inline-flex text-sm text-zinc-400 underline underline-offset-4 hover:text-zinc-200"
           >
-            ← Back to leaderboard
+            Back to leaderboard
           </Link>
 
           <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">
-            Submit your Riot ID
+            Add or update your Riot ID
           </h1>
 
           <p className="text-sm text-zinc-400">
-            Paste your Riot ID (e.g. <span className="font-mono">Name#TAG</span>) and we’ll add you
-            to the leaderboard.
+            Paste your Riot ID (e.g. <span className="font-mono">Name#TAG</span>) and we will add
+            you to the community leaderboard or update your existing profile if you renamed.
             {codeRequired ? " A community code is required to join." : ""}
           </p>
         </div>
 
         <SubmitForm codeRequired={codeRequired} />
-        {/* <BulkSubmitLocal codeRequired={codeRequired} /> */}
+
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/30 p-4 text-sm text-zinc-400">
-          Tip: After submitting, your rank and mains may take a moment to update depending on rate
-          limits.
+          Tip: Your Riot ID updates immediately. Rank, match history, and champion data may take a
+          moment to catch up depending on Riot rate limits.
         </div>
       </div>
     </main>

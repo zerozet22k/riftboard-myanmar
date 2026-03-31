@@ -10,23 +10,21 @@ function sanitizeRiotIdPaste(v: string) {
     .replace(ZW, "")
     .replace(/\s*\/\s*/g, "#")
     .replace(/\s*#\s*/g, "#")
-    .replace(/#+/g, "#") // "##" -> "#"
+    .replace(/#+/g, "#")
     .replace(/\s+/g, " ")
     .trim();
 }
 
 function sanitizeGameName(v: string) {
-  // allow spaces + most characters, but block separators that break parsing
   return String(v || "")
     .replace(ZW, "")
-    .replace(/[#/]/g, "") // prevent "#", "/"
+    .replace(/[#/]/g, "")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 16);
 }
 
 function sanitizeTagLine(v: string) {
-  // keep it strict: alnum only, uppercase
   return String(v || "")
     .replace(ZW, "")
     .replace(/[^0-9a-zA-Z]/g, "")
@@ -46,7 +44,6 @@ function parseRiotId(input: string) {
     return gameName && tagLine ? { gameName, tagLine } : null;
   }
 
-  // "Name TAG"
   const m = cleaned.match(/^(.*\S)\s+(\S+)$/);
   if (!m) return null;
 
@@ -58,14 +55,13 @@ function parseRiotId(input: string) {
 async function safeJson(res: Response) {
   const ct = res.headers.get("content-type") || "";
   if (!ct.includes("application/json")) return null;
+
   try {
     return await res.json();
   } catch {
     return null;
   }
 }
-
-const REFRESH_KEY = process.env.NEXT_PUBLIC_REFRESH_KEY || "";
 
 export default function SubmitForm({ codeRequired }: { codeRequired: boolean }) {
   const router = useRouter();
@@ -80,7 +76,6 @@ export default function SubmitForm({ codeRequired }: { codeRequired: boolean }) 
   const [code, setCode] = useState("");
 
   const parsed = useMemo(() => parseRiotId(riotId), [riotId]);
-
   const lockLowerFields = !!parsed;
 
   function syncFromRiotId(v: string) {
@@ -94,21 +89,10 @@ export default function SubmitForm({ codeRequired }: { codeRequired: boolean }) 
     }
   }
 
-  async function triggerRefreshOne(gn: string, tl: string) {
-    if (!REFRESH_KEY) return; 
-    const url =
-      `/api/refresh?key=${encodeURIComponent(REFRESH_KEY)}` +
-      `&gameName=${encodeURIComponent(gn)}` +
-      `&tagLine=${encodeURIComponent(tl)}`;
-
-    const res = await fetch(url, { method: "GET", cache: "no-store" });
-    if (!res.ok) throw new Error("Refresh failed");
-  }
-
   function validate(gn: string, tl: string, codeVal: string) {
     if (!gn || !tl) return 'Paste like "Name#TAG" (or "Name TAG") or fill both fields.';
-    if (gn.length < 2 || gn.length > 16) return "GameName must be 2–16 characters.";
-    if (tl.length < 2 || tl.length > 10) return "TAG must be 2–10 characters.";
+    if (gn.length < 2 || gn.length > 16) return "GameName must be 2-16 characters.";
+    if (tl.length < 2 || tl.length > 10) return "TAG must be 2-10 characters.";
     if (codeRequired && !codeVal.trim()) return "Community code is required.";
     return null;
   }
@@ -118,7 +102,6 @@ export default function SubmitForm({ codeRequired }: { codeRequired: boolean }) 
     setMsg(null);
     setErr(null);
 
-    // prefer parsed (paste box) if available
     const gn = sanitizeGameName(parsed?.gameName ?? gameName);
     const tl = sanitizeTagLine(parsed?.tagLine ?? tagLine);
     const cv = code.trim();
@@ -129,7 +112,7 @@ export default function SubmitForm({ codeRequired }: { codeRequired: boolean }) 
       return;
     }
 
-    const payload: any = { gameName: gn, tagLine: tl };
+    const payload: Record<string, string> = { gameName: gn, tagLine: tl };
     if (riotId.trim()) payload.riotId = sanitizeRiotIdPaste(riotId);
     if (codeRequired) payload.code = cv;
 
@@ -148,21 +131,27 @@ export default function SubmitForm({ codeRequired }: { codeRequired: boolean }) 
           return;
         }
 
-        // best-effort refresh
-        try {
-          await triggerRefreshOne(gn, tl);
-        } catch {
-          // don't fail submit if refresh fails
-        }
+        const canonicalPath =
+          data && typeof data.canonicalPath === "string" && data.canonicalPath.startsWith("/p/")
+            ? data.canonicalPath
+            : null;
+        const renamed = !!data?.renamed;
 
-        setMsg("Submitted. Refreshing leaderboard…");
+        setMsg(renamed ? "Riot ID updated. Opening profile..." : "Saved. Opening profile...");
         setRiotId("");
         setGameName("");
         setTagLine("");
         setCode("");
+
+        if (canonicalPath) {
+          router.push(canonicalPath);
+          router.refresh();
+          return;
+        }
+
         router.refresh();
-      } catch (e: any) {
-        setErr(e?.message ?? "Submit failed");
+      } catch (e: unknown) {
+        setErr(e instanceof Error ? e.message : "Submit failed");
       }
     });
   }
@@ -173,7 +162,7 @@ export default function SubmitForm({ codeRequired }: { codeRequired: boolean }) 
       className="rounded-2xl border border-zinc-800 bg-zinc-900/30 p-4 sm:p-6 space-y-4"
     >
       <div className="space-y-2">
-        <label className="text-sm font-medium text-zinc-200">Riot ID (paste)</label>
+        <label className="text-sm font-medium text-zinc-200">Riot ID</label>
         <input
           value={riotId}
           onChange={(e) => syncFromRiotId(e.target.value)}
@@ -189,7 +178,7 @@ export default function SubmitForm({ codeRequired }: { codeRequired: boolean }) 
           <span className="font-mono">Name/TAG</span>
           {parsed ? (
             <>
-              {" — "}Parsed:{" "}
+              {" - "}Parsed:{" "}
               <span className="font-mono text-zinc-300">{parsed.gameName}</span>#
               <span className="font-mono text-zinc-300">{parsed.tagLine}</span>
             </>
@@ -246,16 +235,18 @@ export default function SubmitForm({ codeRequired }: { codeRequired: boolean }) 
         </div>
       )}
 
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <button
           type="submit"
           className="inline-flex items-center justify-center rounded-xl border border-zinc-800 bg-zinc-950/40 px-4 py-2 text-sm font-semibold text-zinc-100 hover:bg-white/5 disabled:opacity-50"
           disabled={pending}
         >
-          {pending ? "Submitting…" : "Submit"}
+          {pending ? "Submitting..." : "Add or update"}
         </button>
 
-        <div className="text-xs text-zinc-500">SEA supported. Platform is auto-detected on refresh.</div>
+        <div className="text-xs text-zinc-500">
+          SEA supported. Platform is auto-detected during refresh.
+        </div>
       </div>
 
       {msg && <p className="text-sm text-zinc-200">{msg}</p>}
