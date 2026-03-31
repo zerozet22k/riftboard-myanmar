@@ -1,6 +1,7 @@
 // app/api/cron/leaderboard/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { refreshAllPlayers } from "@/lib/refresh";
+import { getSchedulerTokens } from "@/lib/runtimeConfig";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,11 +21,18 @@ function getToken(req: NextRequest): string {
     return new URL(req.url).searchParams.get("key")?.trim() || "";
 }
 
+function isLocalDevRequest(req: NextRequest) {
+    if (process.env.NODE_ENV === "production") return false;
+
+    const hostname = req.nextUrl.hostname.toLowerCase();
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+}
+
 function assertCronAuth(req: NextRequest) {
-    const allowed = [process.env.CRON_SECRET?.trim(), process.env.CRON_KEY?.trim()].filter(
-        (value): value is string => !!value
-    );
-    if (!allowed.length) throw new Error("Missing CRON_SECRET or CRON_KEY in environment");
+    if (isLocalDevRequest(req)) return;
+
+    const allowed = getSchedulerTokens();
+    if (!allowed.length) throw new Error("Missing SCHEDULER_TOKEN, CRON_SECRET, or CRON_KEY in environment");
     const token = getToken(req);
     if (!token || !allowed.includes(token)) throw new Error("Unauthorized");
 }

@@ -93,7 +93,7 @@ export default function SubmitForm({ codeRequired }: { codeRequired: boolean }) 
     if (!gn || !tl) return 'Paste like "Name#TAG" (or "Name TAG") or fill both fields.';
     if (gn.length < 2 || gn.length > 16) return "GameName must be 2-16 characters.";
     if (tl.length < 2 || tl.length > 10) return "TAG must be 2-10 characters.";
-    if (codeRequired && !codeVal.trim()) return "Community code is required.";
+    if (codeRequired && !codeVal.trim()) return "Join code is required.";
     return null;
   }
 
@@ -222,11 +222,11 @@ export default function SubmitForm({ codeRequired }: { codeRequired: boolean }) 
 
       {codeRequired && (
         <div className="space-y-1">
-          <label className="text-xs text-zinc-500">Community code</label>
+          <label className="text-xs text-zinc-500">Join code</label>
           <input
             value={code}
             onChange={(e) => setCode(e.target.value)}
-            placeholder="Enter community code"
+            placeholder="Enter join code"
             className="w-full rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:ring-2 focus:ring-zinc-700"
             required
             disabled={pending}

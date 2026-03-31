@@ -1,8 +1,9 @@
 import Link from "next/link";
 import SubmitForm from "../../components/SubmitForm";
+import { getCommunityJoinCode } from "@/lib/runtimeConfig";
 
 export default function SubmitPage() {
-  const codeRequired = !!process.env.SUBMIT_CODE?.trim();
+  const joinCodeRequired = !!getCommunityJoinCode();
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
@@ -22,11 +23,11 @@ export default function SubmitPage() {
           <p className="text-sm text-zinc-400">
             Paste your Riot ID (e.g. <span className="font-mono">Name#TAG</span>) and we will add
             you to the community leaderboard or update your existing profile if you renamed.
-            {codeRequired ? " A community code is required to join." : ""}
+            {joinCodeRequired ? " A join code is required for this community." : ""}
           </p>
         </div>
 
-        <SubmitForm codeRequired={codeRequired} />
+        <SubmitForm codeRequired={joinCodeRequired} />
 
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/30 p-4 text-sm text-zinc-400">
           Tip: Your Riot ID updates immediately. Rank, match history, and champion data may take a

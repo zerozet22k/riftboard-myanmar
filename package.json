@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "refresh:leaderboard:local": "node scripts/refresh-leaderboard-local.mjs"
   },
   "dependencies": {
     "mongoose": "^9.0.1",

@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { dbConnect } from "@/lib/mongodb";
+import { getCommunityJoinCode } from "@/lib/runtimeConfig";
 import { Player } from "@/models/player";
 import { revalidatePath } from "next/cache";
 import { refreshPlayerById } from "@/lib/refresh";
@@ -104,9 +105,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Invalid input" }, { status: 400 });
     }
 
-    const requiredCode = process.env.SUBMIT_CODE?.trim();
+    const requiredCode = getCommunityJoinCode();
     if (requiredCode && parsed.data.code !== requiredCode) {
-      return NextResponse.json({ ok: false, error: "Wrong code" }, { status: 401 });
+      return NextResponse.json({ ok: false, error: "Wrong join code" }, { status: 401 });
     }
 
     let gameName = (parsed.data.gameName || "").trim();

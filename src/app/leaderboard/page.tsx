@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { dbConnect } from "@/lib/mongodb";
+import { bestRankSnapshot } from "@/lib/rank";
 import { Player } from "@/models/player";
+import { RankEntry } from "@/models/rankEntry";
 import AutoUIRefresh from "@/components/AutoUIRefresh";
 import LeaderboardTable, { type LeaderboardRow } from "@/components/LeaderboardTable";
 
@@ -63,6 +65,20 @@ function pHref(gameName: string, tagLine: string) {
   return `/p/${encodeURIComponent(gn)}/${encodeURIComponent(tl)}`;
 }
 
+function fallbackPeak(current: {
+  tier?: string | null;
+  division?: string | null;
+  lp?: number | null;
+}) {
+  return current?.tier
+    ? {
+        tier: current.tier ?? null,
+        division: current.division ?? null,
+        lp: current.lp ?? null,
+      }
+    : null;
+}
+
 export default async function LeaderboardPage() {
   await dbConnect();
 
@@ -81,6 +97,8 @@ export default async function LeaderboardPage() {
       gameName: 1,
       tagLine: 1,
       platform: 1,
+      profileIconId: 1,
+      summonerLevel: 1,
       solo: 1,
       flex: 1,
       mains: 1,
@@ -88,6 +106,42 @@ export default async function LeaderboardPage() {
       updatedAt: 1,
     }
   ).lean();
+
+  const playerIds = players.map((p: any) => p._id);
+  const rankHistory = await RankEntry.find(
+    {
+      playerId: { $in: playerIds },
+      queue: { $in: ["RANKED_SOLO_5x5", "RANKED_FLEX_SR"] },
+    },
+    {
+      playerId: 1,
+      queue: 1,
+      tier: 1,
+      division: 1,
+      lp: 1,
+    }
+  ).lean();
+
+  const peakMap = new Map<
+    string,
+    {
+      solo: { tier?: string | null; division?: string | null; lp?: number | null } | null;
+      flex: { tier?: string | null; division?: string | null; lp?: number | null } | null;
+    }
+  >();
+
+  for (const row of rankHistory as any[]) {
+    const playerId = String(row.playerId);
+    const current = peakMap.get(playerId) ?? { solo: null, flex: null };
+
+    if (row.queue === "RANKED_SOLO_5x5") {
+      current.solo = bestRankSnapshot([...(current.solo ? [current.solo] : []), row]);
+    } else if (row.queue === "RANKED_FLEX_SR") {
+      current.flex = bestRankSnapshot([...(current.flex ? [current.flex] : []), row]);
+    }
+
+    peakMap.set(playerId, current);
+  }
 
   const rows: LeaderboardRow[] = players.map((p: any) => {
     const gameName = String(p.gameName ?? "").trim();
@@ -105,6 +159,10 @@ export default async function LeaderboardPage() {
     const flexTier = flex.tier ?? null;
     const flexDiv = flex.division ?? null;
     const flexLp = flex.lp ?? null;
+    const peaks = peakMap.get(String(p._id)) ?? {
+      solo: fallbackPeak(solo),
+      flex: fallbackPeak(flex),
+    };
 
     return {
       id: String(p._id),
@@ -114,6 +172,8 @@ export default async function LeaderboardPage() {
 
       name: `${gameName}#${tagLineRaw}`,
       platform: String(p.platform ?? "auto").toUpperCase(),
+      profileIconId: typeof p.profileIconId === "number" ? p.profileIconId : null,
+      summonerLevel: typeof p.summonerLevel === "number" ? p.summonerLevel : null,
       updatedAt: lastUpdatedIso(p),
 
       tier: soloTier,
@@ -131,6 +191,12 @@ export default async function LeaderboardPage() {
       flexLosses: flex.losses ?? null,
       flexWr: winrate(flex.wins ?? null, flex.losses ?? null),
       flexKey: rankKey(flexTier, flexDiv, flexLp),
+      peakTier: peaks.solo?.tier ?? null,
+      peakDiv: peaks.solo?.division ?? null,
+      peakLp: peaks.solo?.lp ?? null,
+      peakFlexTier: peaks.flex?.tier ?? null,
+      peakFlexDiv: peaks.flex?.division ?? null,
+      peakFlexLp: peaks.flex?.lp ?? null,
 
       mains: topMains(p),
     };
@@ -153,13 +219,6 @@ export default async function LeaderboardPage() {
           <div className="space-y-2">
             <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">Leaderboard</h1>
             <div className="flex flex-wrap gap-2 pt-1">
-              <Link
-                href="/"
-                className="rounded-2xl border border-zinc-800 bg-zinc-900/30 px-4 py-2 text-sm hover:bg-zinc-900/60"
-              >
-                Go back to home
-              </Link>
-
               <Link
                 href="/submit"
                 className="rounded-2xl border border-zinc-800 bg-zinc-950/40 px-4 py-2 text-sm hover:bg-zinc-900/40"

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import MatchHistory, { type MatchRow } from "@/components/MatchHistory";
+import ProfileAvatar from "@/components/ProfileAvatar";
 import ProfileRefreshButton from "@/components/ProfileRefreshButton";
 import RankEmblem from "@/components/RankEmblem";
 import { getLatestDdragonVersion } from "@/lib/ddragon";
@@ -271,10 +272,6 @@ export default async function PlayerProfilePage({
     flex
   );
 
-  const profileIcon =
-    typeof player.profileIconId === "number"
-      ? `https://ddragon.leagueoflegends.com/cdn/${ddVer}/img/profileicon/${player.profileIconId}.png`
-      : null;
   const nameShown = `${player.gameName}#${player.tagLine}`;
   const lastUpdated =
     formatDateTime(player.lastRefreshAt) ??
@@ -285,145 +282,202 @@ export default async function PlayerProfilePage({
   const initialCursor = cursorFromLast(matchDocs[matchDocs.length - 1]);
 
   return (
-    <main className="min-h-screen bg-zinc-950 text-zinc-100">
-      <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
-        <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex items-start gap-4">
-            <div className="h-16 w-16 shrink-0 overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/40">
-              {profileIcon ? (
-                <img src={profileIcon} alt="Profile icon" className="h-full w-full object-cover" />
-              ) : (
-                <div className="h-full w-full" />
-              )}
-            </div>
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(30,41,59,0.42),transparent_34%),radial-gradient(circle_at_18%_18%,rgba(16,185,129,0.14),transparent_22%),#09090b] text-zinc-100">
+      <div className="mx-auto w-full space-y-6 px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
+        <section className="relative overflow-hidden rounded-[32px] bg-zinc-950/70 p-5 shadow-[0_24px_80px_rgba(0,0,0,0.35)] ring-1 ring-white/5 sm:p-6 lg:p-8">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(16,185,129,0.16),transparent_30%),radial-gradient(circle_at_bottom_left,rgba(59,130,246,0.14),transparent_26%)]" />
 
-            <div className="space-y-1">
-              <div className="text-2xl font-semibold tracking-tight">{nameShown}</div>
+          <div className="relative flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-center">
+              <ProfileAvatar
+                iconId={player.profileIconId ?? null}
+                ddragonVersion={ddVer}
+                alt={`${nameShown} profile icon`}
+                className="h-24 w-24 shrink-0 sm:h-28 sm:w-28 lg:h-32 lg:w-32"
+                level={player.summonerLevel ?? null}
+              />
 
-              <div className="flex items-center gap-2 text-sm text-zinc-400">
-                <RankEmblem tier={solo.tier ?? null} className="h-5 w-5 shrink-0" alt="" />
-                <span className="text-zinc-300">
-                  {rankLine(solo.tier ?? null, solo.division ?? null, solo.lp ?? null)}
-                </span>
-              </div>
+              <div className="min-w-0 space-y-4">
+                <div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <h1 className="text-3xl font-semibold tracking-tight text-zinc-50 sm:text-4xl">
+                      {nameShown}
+                    </h1>
+                    <Pill className="border-zinc-700 bg-zinc-900/70 text-zinc-300">
+                      {String(player.platform ?? "auto").toUpperCase()}
+                    </Pill>
+                    <Pill className="border-zinc-700 bg-zinc-900/70 text-zinc-400">
+                      Match region {String(player.matchRegion ?? "--").toUpperCase()}
+                    </Pill>
+                  </div>
 
-              <div className="text-sm text-zinc-400">
-                Level: <span className="text-zinc-200">{player.summonerLevel ?? "--"}</span>
-                <span className="px-2 text-zinc-600">/</span>
-                Platform:{" "}
-                <span className="text-zinc-200">{String(player.platform ?? "auto").toUpperCase()}</span>
-                <span className="px-2 text-zinc-600">/</span>
-                Match region:{" "}
-                <span className="text-zinc-200">{String(player.matchRegion ?? "--").toUpperCase()}</span>
-              </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-zinc-300">
+                    <div className="inline-flex items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1.5">
+                      <RankEmblem tier={solo.tier ?? null} className="h-5 w-5 shrink-0" alt="" />
+                      <span>{rankLine(solo.tier ?? null, solo.division ?? null, solo.lp ?? null)}</span>
+                    </div>
+                    <div className="inline-flex items-center gap-2 rounded-full border border-zinc-700 bg-zinc-900/50 px-3 py-1.5 text-zinc-400">
+                      <RankEmblem tier={flex.tier ?? null} className="h-5 w-5 shrink-0" alt="" />
+                      <span>{rankLine(flex.tier ?? null, flex.division ?? null, flex.lp ?? null)}</span>
+                    </div>
+                  </div>
+                </div>
 
-              <div className="text-xs text-zinc-500">
-                Last synced: <span className="text-zinc-300">{lastUpdated ?? "--"}</span>
-              </div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <StatTile label="Level" value={player.summonerLevel != null ? player.summonerLevel.toLocaleString() : "--"} />
+                  <StatTile label="Last synced" value={lastUpdated ?? "--"} />
+                  <StatTile label="Mastery sync" value={masteryUpdated ?? "Not synced yet"} />
+                </div>
 
-              <div className="flex items-center gap-3 pt-1 text-sm">
-                <Link
-                  href="/leaderboard"
-                  className="rounded-2xl border border-zinc-800 bg-zinc-900/30 px-4 py-2 hover:bg-zinc-900/60"
-                >
-                  Open leaderboard
-                </Link>
-                <Link
-                  href="/"
-                  className="rounded-2xl border border-zinc-800 bg-zinc-900/30 px-4 py-2 hover:bg-zinc-900/60"
-                >
-                  Go back home
-                </Link>
-              </div>
-            </div>
-          </div>
-
-          <ProfileRefreshButton gameName={canonicalGameName} tagLine={canonicalTagLineLower} />
-        </header>
-
-        <section className="grid gap-4 sm:grid-cols-2">
-          <RankCard
-            title="Ranked Solo"
-            tier={solo.tier ?? null}
-            division={solo.division ?? null}
-            lp={solo.lp ?? null}
-            wins={solo.wins ?? null}
-            losses={solo.losses ?? null}
-            peak={soloPeak}
-          />
-          <RankCard
-            title="Ranked Flex"
-            tier={flex.tier ?? null}
-            division={flex.division ?? null}
-            lp={flex.lp ?? null}
-            wins={flex.wins ?? null}
-            losses={flex.losses ?? null}
-            peak={flexPeak}
-          />
-        </section>
-
-        <section className="rounded-3xl border border-zinc-800 bg-zinc-900/30 p-4 sm:p-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <div className="text-lg font-semibold">Top champions</div>
-              <div className="mt-1 text-xs text-zinc-500">
-                Full mastery sync: <span className="text-zinc-300">{masteryUpdated ?? "Not synced yet"}</span>
-              </div>
-            </div>
-            <Link
-              href={masteryPath}
-              className="rounded-2xl border border-zinc-800 bg-zinc-950/40 px-4 py-2 text-sm hover:bg-white/5"
-            >
-              View all mastery
-            </Link>
-          </div>
-
-          <div className="mt-3 flex flex-wrap gap-2">
-            {Array.isArray(player.mains) && player.mains.length ? (
-              player.mains.slice(0, 3).map((main, index) => {
-                const championId = typeof main?.championId === "number" ? main.championId : null;
-                const championName = championId != null ? champNames[String(championId)] : null;
-                const points = typeof main?.championPoints === "number" ? main.championPoints : null;
-                const icon = champIconUrl(championId);
-
-                return (
-                  <span
-                    key={`${championId ?? "unknown"}-${index}`}
-                    className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950/40 px-3 py-1.5 text-sm"
-                    title={
-                      championName
-                        ? `${championName} (#${championId})`
-                        : championId != null
-                          ? `Champion #${championId}`
-                          : "Champion"
-                    }
+                <div className="flex flex-wrap gap-3">
+                  <Link
+                    href="/leaderboard"
+                    className="rounded-2xl border border-zinc-700 bg-zinc-900/70 px-4 py-2.5 text-sm font-medium text-zinc-100 transition hover:border-zinc-500 hover:bg-white/5"
                   >
-                    {icon ? <img src={icon} alt={championName ?? "Champion"} className="h-6 w-6 rounded-full" /> : null}
-                    <span className="text-zinc-200">
-                      {championName ?? (championId != null ? `#${championId}` : "--")}
-                    </span>
-                    <span className="tabular-nums text-zinc-500">
-                      {points != null ? points.toLocaleString() : "--"} pts
-                    </span>
-                  </span>
-                );
-              })
-            ) : (
-              <div className="text-sm text-zinc-500">No mastery data yet.</div>
-            )}
+                    Open leaderboard
+                  </Link>
+                  <Link
+                    href={masteryPath}
+                    className="rounded-2xl border border-zinc-800 bg-zinc-950/50 px-4 py-2.5 text-sm font-medium text-zinc-300 transition hover:border-zinc-600 hover:bg-white/5"
+                  >
+                    Full mastery
+                  </Link>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex w-full max-w-sm flex-col gap-3 xl:w-[380px] xl:max-w-none">
+              <div className="flex justify-start xl:justify-end">
+                <ProfileRefreshButton gameName={canonicalGameName} tagLine={canonicalTagLineLower} />
+              </div>
+              <HeroQueueSummary
+                title="Current ladder"
+                primaryLabel="Solo"
+                primaryLine={rankLine(solo.tier ?? null, solo.division ?? null, solo.lp ?? null)}
+                primaryTier={solo.tier ?? null}
+                secondaryLabel="Flex"
+                secondaryLine={rankLine(flex.tier ?? null, flex.division ?? null, flex.lp ?? null)}
+                secondaryTier={flex.tier ?? null}
+              />
+            </div>
           </div>
         </section>
 
-        <section className="space-y-3">
-          <div className="text-lg font-semibold">Match history</div>
-          <MatchHistory
-            gameName={canonicalGameName}
-            tagLine={canonicalTagLineLower}
-            ddragonVersion={ddVer}
-            initialMatches={initialMatches}
-            initialCursor={initialCursor}
-          />
-        </section>
+        <div className="grid gap-6 2xl:grid-cols-[360px_minmax(0,1fr)]">
+          <aside className="space-y-6">
+            <RankCard
+              title="Ranked Solo"
+              tier={solo.tier ?? null}
+              division={solo.division ?? null}
+              lp={solo.lp ?? null}
+              wins={solo.wins ?? null}
+              losses={solo.losses ?? null}
+              peak={soloPeak}
+            />
+            <RankCard
+              title="Ranked Flex"
+              tier={flex.tier ?? null}
+              division={flex.division ?? null}
+              lp={flex.lp ?? null}
+              wins={flex.wins ?? null}
+              losses={flex.losses ?? null}
+              peak={flexPeak}
+            />
+          </aside>
+
+          <div className="space-y-6">
+            <section className="rounded-[30px] bg-zinc-900/25 p-5 ring-1 ring-white/5 sm:p-6">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.22em] text-zinc-500">
+                    Champion pool
+                  </div>
+                  <div className="mt-1 text-2xl font-semibold tracking-tight text-zinc-50">
+                    Top champions
+                  </div>
+                  <div className="mt-2 text-sm text-zinc-400">
+                    Stored from your latest mastery sync and used on the leaderboard too.
+                  </div>
+                </div>
+                <Link
+                  href={masteryPath}
+                  className="rounded-2xl border border-zinc-800 bg-zinc-950/40 px-4 py-2 text-sm font-medium text-zinc-300 transition hover:border-zinc-600 hover:bg-white/5"
+                >
+                  View all mastery
+                </Link>
+              </div>
+
+              <div className="mt-5 grid gap-3 md:grid-cols-3">
+                {Array.isArray(player.mains) && player.mains.length ? (
+                  player.mains.slice(0, 3).map((main, index) => {
+                    const championId = typeof main?.championId === "number" ? main.championId : null;
+                    const championName = championId != null ? champNames[String(championId)] : null;
+                    const points = typeof main?.championPoints === "number" ? main.championPoints : null;
+                    const icon = champIconUrl(championId);
+
+                    return (
+                      <div
+                        key={`${championId ?? "unknown"}-${index}`}
+                        className="rounded-3xl bg-zinc-950/45 p-4 ring-1 ring-white/5"
+                        title={
+                          championName
+                            ? `${championName} (#${championId})`
+                            : championId != null
+                              ? `Champion #${championId}`
+                              : "Champion"
+                        }
+                      >
+                        <div className="flex items-center gap-3">
+                          {icon ? (
+                            <img
+                              src={icon}
+                              alt={championName ?? "Champion"}
+                              className="h-12 w-12 rounded-2xl border border-zinc-800"
+                            />
+                          ) : (
+                            <div className="h-12 w-12 rounded-2xl border border-zinc-800 bg-zinc-900/40" />
+                          )}
+                          <div className="min-w-0">
+                            <div className="truncate text-base font-semibold text-zinc-100">
+                              {championName ?? (championId != null ? `#${championId}` : "--")}
+                            </div>
+                            <div className="mt-1 text-sm tabular-nums text-zinc-400">
+                              {points != null ? points.toLocaleString() : "--"} pts
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="rounded-3xl bg-zinc-950/40 p-5 text-sm text-zinc-500 ring-1 ring-white/5 md:col-span-3">
+                    No mastery data yet.
+                  </div>
+                )}
+              </div>
+            </section>
+
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.22em] text-zinc-500">
+                    Recent games
+                  </div>
+                  <div className="mt-1 text-2xl font-semibold tracking-tight text-zinc-50">
+                    Match history
+                  </div>
+                </div>
+              </div>
+              <MatchHistory
+                gameName={canonicalGameName}
+                tagLine={canonicalTagLineLower}
+                ddragonVersion={ddVer}
+                initialMatches={initialMatches}
+                initialCursor={initialCursor}
+              />
+            </section>
+          </div>
+        </div>
       </div>
     </main>
   );
@@ -441,6 +495,66 @@ function Pill({ children, className = "" }: { children: ReactNode; className?: s
     <span className={"inline-flex items-center rounded-full border px-2.5 py-1 text-xs tabular-nums " + className}>
       {children}
     </span>
+  );
+}
+
+function StatTile({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="rounded-2xl bg-zinc-900/25 px-4 py-3 ring-1 ring-white/5">
+      <div className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">{label}</div>
+      <div className="mt-2 text-sm text-zinc-200">{value}</div>
+    </div>
+  );
+}
+
+function HeroQueueSummary({
+  title,
+  primaryLabel,
+  primaryLine,
+  primaryTier,
+  secondaryLabel,
+  secondaryLine,
+  secondaryTier,
+}: {
+  title: string;
+  primaryLabel: string;
+  primaryLine: string;
+  primaryTier: string | null;
+  secondaryLabel: string;
+  secondaryLine: string;
+  secondaryTier: string | null;
+}) {
+  return (
+    <div className="rounded-[28px] bg-zinc-900/35 p-4 ring-1 ring-white/5">
+      <div className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">{title}</div>
+
+      <div className="mt-3 space-y-3">
+        <HeroQueueSummaryRow label={primaryLabel} line={primaryLine} tier={primaryTier} />
+        <HeroQueueSummaryRow label={secondaryLabel} line={secondaryLine} tier={secondaryTier} />
+      </div>
+    </div>
+  );
+}
+
+function HeroQueueSummaryRow({
+  label,
+  line,
+  tier,
+}: {
+  label: string;
+  line: string;
+  tier: string | null;
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-2xl bg-zinc-950/45 px-3 py-3 ring-1 ring-white/5">
+      <div className="rounded-2xl bg-zinc-900/60 p-2 ring-1 ring-white/5">
+        <RankEmblem tier={tier} className="h-10 w-10 shrink-0" alt="" />
+      </div>
+      <div className="min-w-0">
+        <div className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">{label}</div>
+        <div className="mt-1 truncate text-sm font-medium text-zinc-100">{line}</div>
+      </div>
+    </div>
   );
 }
 
@@ -468,40 +582,49 @@ function RankCard({
   const peakSeen = peakSeenLabel(peak);
 
   return (
-    <div className="rounded-3xl border border-zinc-800 bg-zinc-900/30 p-4 sm:p-6">
-      <div className="text-sm text-zinc-400">{title}</div>
-      <div className="mt-3 flex items-center gap-4">
-        <RankEmblem
-          tier={tier}
-          className="h-14 w-14 shrink-0"
-          alt={tier ? `${tier} emblem` : "Unranked emblem"}
-        />
+    <div className="overflow-hidden rounded-[30px] bg-[linear-gradient(180deg,rgba(24,24,27,0.92),rgba(9,9,11,0.88))] p-5 ring-1 ring-white/5 sm:p-6">
+      <div className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">{title}</div>
 
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <Pill className="border-zinc-800 bg-zinc-950/40 text-zinc-200">{currentLine}</Pill>
+      <div className="mt-4 flex items-start gap-4">
+        <div className="rounded-[26px] bg-zinc-950/70 p-3 shadow-[0_12px_30px_rgba(0,0,0,0.2)] ring-1 ring-white/5">
+          <RankEmblem
+            tier={tier}
+            className="h-16 w-16 shrink-0 sm:h-20 sm:w-20"
+            alt={tier ? `${tier} emblem` : "Unranked emblem"}
+          />
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="text-xl font-semibold tracking-tight text-zinc-50">{currentLine}</div>
+          <div className="mt-3 flex flex-wrap gap-5 text-sm text-zinc-400">
+            <div>
+              <span className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Record</span>
+              <div className="mt-1 tabular-nums text-zinc-100">{wl}</div>
+            </div>
+            <div>
+              <span className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Win rate</span>
+              <div className="mt-1 tabular-nums text-zinc-100">{wr != null ? `${wr}%` : "--"}</div>
+            </div>
           </div>
+        </div>
+      </div>
 
-          <div className="mt-2 text-sm tabular-nums text-zinc-400">
-            {wl} <span className="text-zinc-600">/</span> {wr != null ? `${wr}%` : "--"}
+      <div className="mt-4 border-t border-white/8 pt-4">
+        <div className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">Peak rank</div>
+        <div className="mt-3 flex items-center gap-3">
+          <div className="rounded-2xl bg-zinc-900/60 p-2.5 ring-1 ring-white/5">
+            <RankEmblem
+              tier={peak?.tier ?? null}
+              className="h-12 w-12 shrink-0"
+              alt={peak?.tier ? `${peak.tier} peak emblem` : "Peak rank emblem"}
+            />
           </div>
-
-          <div className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-950/40 px-3 py-3">
-            <div className="text-[11px] uppercase tracking-wide text-zinc-500">Peak rank</div>
-            <div className="mt-2 flex items-center gap-3">
-              <RankEmblem
-                tier={peak?.tier ?? null}
-                className="h-10 w-10 shrink-0"
-                alt={peak?.tier ? `${peak.tier} peak emblem` : "Peak rank emblem"}
-              />
-              <div className="min-w-0">
-                <div className="text-sm font-medium text-zinc-100">
-                  {peakLine ?? "Not enough history yet"}
-                </div>
-                <div className="mt-1 text-[11px] text-zinc-500">
-                  {peakSeen ? `Recorded ${peakSeen}` : "Saved from your profile history"}
-                </div>
-              </div>
+          <div className="min-w-0">
+            <div className="text-base font-semibold text-zinc-100">
+              {peakLine ?? "Not enough history yet"}
+            </div>
+            <div className="mt-1 text-xs text-zinc-500">
+              {peakSeen ? `Recorded ${peakSeen}` : "Saved from your profile history"}
             </div>
           </div>
         </div>
