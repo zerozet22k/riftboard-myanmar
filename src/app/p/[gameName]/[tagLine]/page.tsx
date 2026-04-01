@@ -107,6 +107,18 @@ function formatDateTime(value: Date | string | null | undefined) {
   }).format(parsed);
 }
 
+function formatMetaDateTime(value: Date | string | null | undefined) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(parsed);
+}
+
 function rankLine(tier?: string | null, division?: string | null, lp?: number | null) {
   if (!tier) return "UNRANKED";
   const tierText = String(tier).toUpperCase();
@@ -278,6 +290,11 @@ export default async function PlayerProfilePage({
     formatDateTime(isoOrNull(player.solo?.fetchedAt)) ??
     formatDateTime(isoOrNull(player.flex?.fetchedAt));
   const masteryUpdated = formatDateTime(player.masterySyncedAt);
+  const lastUpdatedShort =
+    formatMetaDateTime(player.lastRefreshAt) ??
+    formatMetaDateTime(isoOrNull(player.solo?.fetchedAt)) ??
+    formatMetaDateTime(isoOrNull(player.flex?.fetchedAt));
+  const masteryUpdatedShort = formatMetaDateTime(player.masterySyncedAt);
   const masteryPath = `${canonicalPath}/mastery`;
   const initialCursor = cursorFromLast(matchDocs[matchDocs.length - 1]);
 
@@ -323,10 +340,12 @@ export default async function PlayerProfilePage({
                   </div>
                 </div>
 
-                <div className="grid gap-3 sm:grid-cols-3">
+                <div className="flex flex-wrap items-start gap-3">
                   <StatTile label="Level" value={player.summonerLevel != null ? player.summonerLevel.toLocaleString() : "--"} />
-                  <StatTile label="Last synced" value={lastUpdated ?? "--"} />
-                  <StatTile label="Mastery sync" value={masteryUpdated ?? "Not synced yet"} />
+                  <MetaInfoButton
+                    lastUpdated={lastUpdatedShort}
+                    masteryUpdated={masteryUpdatedShort}
+                  />
                 </div>
 
                 <div className="flex flex-wrap gap-3">
@@ -500,10 +519,39 @@ function Pill({ children, className = "" }: { children: ReactNode; className?: s
 
 function StatTile({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="rounded-2xl bg-zinc-900/25 px-4 py-3 ring-1 ring-white/5">
+    <div className="min-w-[140px] rounded-2xl bg-zinc-900/25 px-4 py-3 ring-1 ring-white/5">
       <div className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">{label}</div>
       <div className="mt-2 text-sm text-zinc-200">{value}</div>
     </div>
+  );
+}
+
+function MetaInfoButton({
+  lastUpdated,
+  masteryUpdated,
+}: {
+  lastUpdated: string | null;
+  masteryUpdated: string | null;
+}) {
+  return (
+    <details className="group relative">
+      <summary className="flex h-[54px] w-[54px] list-none items-center justify-center rounded-2xl bg-zinc-900/25 text-sm font-semibold text-zinc-300 ring-1 ring-white/5 transition hover:bg-white/5">
+        i
+      </summary>
+      <div className="absolute left-0 top-[calc(100%+10px)] z-20 w-[220px] rounded-2xl bg-zinc-950/96 p-3 text-sm text-zinc-300 shadow-[0_18px_50px_rgba(0,0,0,0.35)] ring-1 ring-white/8 sm:left-auto sm:right-0">
+        <div className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Private sync info</div>
+        <div className="mt-2 space-y-2">
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.16em] text-zinc-500">Profile</div>
+            <div className="mt-1 text-sm text-zinc-100">{lastUpdated ?? "--"}</div>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.16em] text-zinc-500">Mastery</div>
+            <div className="mt-1 text-sm text-zinc-100">{masteryUpdated ?? "Not synced yet"}</div>
+          </div>
+        </div>
+      </div>
+    </details>
   );
 }
 

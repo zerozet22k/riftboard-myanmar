@@ -866,24 +866,26 @@ export default function MatchDetailsPanel({
   styleMap: Record<string, RuneInfo>;
 }) {
   return (
-    <div className="mt-2 rounded-[18px] bg-zinc-950/28 ring-1 ring-white/5">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/6 px-3 py-2.5">
-        <div>
-          <div className="text-xs font-semibold text-zinc-100">Match details</div>
-          <div className="text-[11px] text-zinc-500">
-            {details?.match?.matchId ?? matchId}
-            {details?.match?.region ? (
-              <span className="text-zinc-700"> / {String(details.match.region).toUpperCase()}</span>
-            ) : null}
+    <div className="mt-2 space-y-2">
+      <div className="px-3 sm:px-4">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/6 pb-2">
+          <div>
+            <div className="text-xs font-semibold text-zinc-100">Match details</div>
+            <div className="text-[11px] text-zinc-500">
+              {details?.match?.matchId ?? matchId}
+              {details?.match?.region ? (
+                <span className="text-zinc-700"> / {String(details.match.region).toUpperCase()}</span>
+              ) : null}
+            </div>
           </div>
-        </div>
-        <div className="text-[10px] text-zinc-500">
-          Current ranks refresh on demand and may be cached for up to 24h.
+          <div className="max-w-[240px] text-right text-[10px] text-zinc-500">
+            Current ranks refresh on demand and may be cached for up to 24h.
+          </div>
         </div>
       </div>
 
-      {loading ? <div className="px-3 py-3 text-sm text-zinc-400">Loading team details...</div> : null}
-      {!loading && error ? <div className="px-3 py-3 text-sm text-red-300">{error}</div> : null}
+      {loading ? <div className="px-1 py-2 text-sm text-zinc-400">Loading team details...</div> : null}
+      {!loading && error ? <div className="px-1 py-2 text-sm text-red-300">{error}</div> : null}
 
       {!loading && !error && details?.teams ? (
         <>
@@ -948,7 +950,7 @@ export default function MatchDetailsPanel({
       ) : null}
 
       {!loading && !error && !details?.teams ? (
-        <div className="px-3 py-3 text-sm text-zinc-500">No extra details stored for this match yet.</div>
+        <div className="px-1 py-2 text-sm text-zinc-500">No extra details stored for this match yet.</div>
       ) : null}
     </div>
   );
