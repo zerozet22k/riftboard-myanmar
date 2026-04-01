@@ -552,9 +552,10 @@ export default function MatchDetailsPanel({
       {!loading && !error && details?.teams ? (
         <>
           <div className="px-3 pt-2 text-[10px] text-zinc-500 lg:hidden">
-            Swipe sideways in this section for the full team sheet.
+            Swipe sideways below for the full team sheet.
           </div>
-          <div className="-mx-2 overflow-x-auto overscroll-x-contain px-2 pb-2 sm:mx-0 sm:px-0 sm:pb-0">
+          <div className="-mx-2 px-2 pb-2 sm:mx-0 sm:px-0 sm:pb-0">
+            <div className="x-scroll-area touch-pan-x pb-2">
             <div className="min-w-[760px] space-y-3 p-2.5 sm:p-3">
             <TeamTable
               title="Blue side"
@@ -580,6 +581,7 @@ export default function MatchDetailsPanel({
               matchDuration={details.match?.gameDuration ?? null}
               tone="red"
             />
+          </div>
           </div>
           </div>
         </>

@@ -22,8 +22,29 @@
 body {
   margin: 0;
   max-width: 100%;
-  overflow-x: hidden;
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+.x-scroll-area {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(113, 113, 122, 0.9) rgba(24, 24, 27, 0.35);
+}
+
+.x-scroll-area::-webkit-scrollbar {
+  height: 8px;
+}
+
+.x-scroll-area::-webkit-scrollbar-track {
+  background: rgba(24, 24, 27, 0.35);
+  border-radius: 999px;
+}
+
+.x-scroll-area::-webkit-scrollbar-thumb {
+  background: rgba(113, 113, 122, 0.9);
+  border-radius: 999px;
 }
