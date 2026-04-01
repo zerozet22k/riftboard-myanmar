@@ -178,7 +178,7 @@ function RuneIcon({ rune, title }: { rune: RuneInfo | null; title: string }) {
 
 function MetricTile({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="inline-flex items-center gap-1.5 rounded-full bg-zinc-950/45 px-2.5 py-1.5 ring-1 ring-white/5">
+    <div className="inline-flex items-center gap-1.5 rounded-full bg-zinc-950/28 px-2 py-1">
       <span className="text-[10px] uppercase tracking-[0.16em] text-zinc-500">{label}</span>
       <span className="text-xs font-medium tabular-nums text-zinc-100">{value}</span>
     </div>
@@ -417,24 +417,24 @@ export default function MatchHistory({
               <article
                 key={match._id}
                 className={
-                  `rounded-[22px] ring-1 ring-white/5 ` +
+                  `rounded-[20px] ` +
                   `${win ? "bg-blue-500/[0.04]" : "bg-red-500/[0.04]"}`
                 }
               >
                 <div className="space-y-3 p-3 sm:p-4 lg:hidden">
                   <div
                     className={
-                      "rounded-[18px] px-2.5 py-2 ring-1 ring-inset " +
+                      "rounded-[16px] px-0 py-0 " +
                       (win
-                        ? "bg-blue-500/10 ring-blue-400/20"
-                        : "bg-red-500/10 ring-red-400/20")
+                        ? "text-blue-200"
+                        : "text-red-200")
                     }
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                       <span className={win ? "font-semibold text-blue-300" : "font-semibold text-red-300"}>
                         {win ? "Victory" : "Defeat"}
                       </span>
-                      <span className="text-zinc-400">{duration}</span>
+                      <span className="text-zinc-500">{duration}</span>
                     </div>
                     <div className="mt-1.5 text-xs text-zinc-200">{queueName(match.queueId)}</div>
                     <div className="mt-1 text-[11px] text-zinc-500">{ago ?? "Unknown time"}</div>
@@ -535,7 +535,7 @@ export default function MatchHistory({
                     <button
                       type="button"
                       onClick={() => toggleDetails(match.matchId)}
-                      className="rounded-xl bg-zinc-900/80 px-3 py-2 text-xs font-medium text-zinc-100 ring-1 ring-white/8 transition hover:bg-white/5"
+                      className="rounded-lg bg-zinc-900/45 px-3 py-2 text-xs font-medium text-zinc-100 transition hover:bg-white/5"
                     >
                       {isOpen ? "Hide details" : "Open details"}
                     </button>
@@ -543,7 +543,7 @@ export default function MatchHistory({
                     <button
                       type="button"
                       onClick={() => copy(match.matchId)}
-                      className="rounded-xl bg-zinc-950/60 px-3 py-2 text-xs text-zinc-300 ring-1 ring-white/5 transition hover:bg-white/5"
+                      className="rounded-lg bg-zinc-950/35 px-3 py-2 text-xs text-zinc-300 transition hover:bg-white/5"
                     >
                       Copy match ID
                     </button>
@@ -553,17 +553,17 @@ export default function MatchHistory({
                 <div className="hidden gap-3 p-3 sm:p-4 lg:grid lg:grid-cols-[104px_minmax(0,1.25fr)_110px_112px_minmax(0,150px)_120px] lg:items-center">
                   <div
                     className={
-                      "min-w-0 rounded-[18px] px-2.5 py-2 ring-1 ring-inset " +
+                      "min-w-0 rounded-[16px] px-0 py-0 " +
                       (win
-                        ? "bg-blue-500/10 ring-blue-400/20"
-                        : "bg-red-500/10 ring-red-400/20")
+                        ? "text-blue-200"
+                        : "text-red-200")
                     }
                   >
                     <div className="flex items-center gap-2 text-xs">
                       <span className={win ? "font-semibold text-blue-300" : "font-semibold text-red-300"}>
                         {win ? "Victory" : "Defeat"}
                       </span>
-                      <span className="text-zinc-400">{duration}</span>
+                      <span className="text-zinc-500">{duration}</span>
                     </div>
                     <div className="mt-1.5 text-xs text-zinc-200">{queueName(match.queueId)}</div>
                     <div className="mt-1 text-[11px] text-zinc-500">{ago ?? "Unknown time"}</div>
@@ -666,7 +666,7 @@ export default function MatchHistory({
                     <button
                       type="button"
                       onClick={() => toggleDetails(match.matchId)}
-                      className="rounded-xl bg-zinc-900/80 px-3 py-2 text-xs font-medium text-zinc-100 ring-1 ring-white/8 transition hover:bg-white/5"
+                      className="rounded-lg bg-zinc-900/45 px-3 py-2 text-xs font-medium text-zinc-100 transition hover:bg-white/5"
                     >
                       {isOpen ? "Hide details" : "Open details"}
                     </button>
@@ -674,7 +674,7 @@ export default function MatchHistory({
                     <button
                       type="button"
                       onClick={() => copy(match.matchId)}
-                      className="rounded-xl bg-zinc-950/60 px-3 py-2 text-xs text-zinc-300 ring-1 ring-white/5 transition hover:bg-white/5"
+                      className="rounded-lg bg-zinc-950/35 px-3 py-2 text-xs text-zinc-300 transition hover:bg-white/5"
                     >
                       Copy match ID
                     </button>

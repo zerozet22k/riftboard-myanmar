@@ -97,6 +97,47 @@ function formatRank(snapshot: RankSnapshot | null | undefined) {
   return `${tier}${division}${lp}`.trim();
 }
 
+function divisionNumber(division?: string | null) {
+  const value = String(division ?? "").toUpperCase();
+  if (value === "I") return "1";
+  if (value === "II") return "2";
+  if (value === "III") return "3";
+  if (value === "IV") return "4";
+  return "";
+}
+
+function shortRank(snapshot: RankSnapshot | null | undefined) {
+  if (!snapshot?.tier) return "UR";
+
+  const tier = String(snapshot.tier).toUpperCase();
+  const tierShort =
+    tier === "GRANDMASTER"
+      ? "GM"
+      : tier === "CHALLENGER"
+        ? "C"
+        : tier === "MASTER"
+          ? "M"
+          : tier === "PLATINUM"
+            ? "P"
+            : tier === "EMERALD"
+              ? "E"
+              : tier === "DIAMOND"
+                ? "D"
+                : tier === "GOLD"
+                  ? "G"
+                  : tier === "SILVER"
+                    ? "S"
+                    : tier === "BRONZE"
+                      ? "B"
+                      : tier === "IRON"
+                        ? "I"
+                        : tier.slice(0, 1);
+
+  const division = divisionNumber(snapshot.division);
+  const lp = snapshot.lp != null ? `-${Number(snapshot.lp)}lp` : "";
+  return `${tierShort}${division}${lp}`;
+}
+
 function prettyPos(teamPosition?: string | null) {
   const position = String(teamPosition ?? "").toUpperCase().trim();
   if (!position || position === "NONE" || position === "INVALID") return null;
@@ -184,7 +225,7 @@ function RankLine({
   snapshot: RankSnapshot | null | undefined;
 }) {
   return (
-    <div className="flex items-center gap-1 rounded-lg bg-zinc-950/45 px-1.5 py-1 ring-1 ring-white/5">
+    <div className="flex items-center gap-1.5 px-0 py-0.5">
       <RankEmblem
         tier={snapshot?.tier ?? null}
         className="h-4 w-4 shrink-0"
@@ -194,6 +235,19 @@ function RankLine({
         <div className="text-[8px] uppercase tracking-[0.14em] text-zinc-500">{label}</div>
         <div className="truncate text-[10px] font-medium text-zinc-100">{formatRank(snapshot)}</div>
       </div>
+    </div>
+  );
+}
+
+function CompactSoloRank({ snapshot }: { snapshot: RankSnapshot | null | undefined }) {
+  return (
+    <div className="inline-flex items-center gap-1 rounded-full bg-zinc-900/55 px-1.5 py-0.5 text-[10px] font-medium text-zinc-100">
+      <RankEmblem
+        tier={snapshot?.tier ?? null}
+        className="h-3.5 w-3.5 shrink-0"
+        alt={snapshot?.tier ? `${snapshot.tier} emblem` : "Unranked emblem"}
+      />
+      <span>{shortRank(snapshot)}</span>
     </div>
   );
 }
@@ -303,6 +357,281 @@ function PlayerSummaryCell({
   );
 }
 
+function MobileStat({
+  label,
+  value,
+  subvalue,
+}: {
+  label: string;
+  value: ReactNode;
+  subvalue?: ReactNode;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[8px] uppercase tracking-[0.14em] text-zinc-500">{label}</div>
+      <div className="mt-0.5 text-[11px] font-medium tabular-nums text-zinc-100">{value}</div>
+      {subvalue ? <div className="mt-0.5 text-[9px] text-zinc-500">{subvalue}</div> : null}
+    </div>
+  );
+}
+
+function MobileParticipantRow({
+  participant,
+  ddragonVersion,
+  itemMap,
+  spellMap,
+  champMap,
+  runeMap,
+  styleMap,
+  matchDuration,
+  tone,
+}: {
+  participant: MatchParticipant;
+  ddragonVersion: string;
+  itemMap: Record<string, ItemInfo>;
+  spellMap: Record<string, SpellInfo>;
+  champMap: Record<string, string>;
+  runeMap: Record<string, RuneInfo>;
+  styleMap: Record<string, RuneInfo>;
+  matchDuration: number | null | undefined;
+  tone: "blue" | "red";
+}) {
+  const championName =
+    participant.championId != null ? champMap[String(participant.championId)] : null;
+  const championIcon =
+    participant.championId != null ? `${CHAMP_ICON_BASE}/${participant.championId}.png` : null;
+  const profileIcon =
+    participant.profileIconId != null
+      ? `https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/profileicon/${participant.profileIconId}.png`
+      : null;
+  const spellA = participant.summonerSpells[0] ?? null;
+  const spellB = participant.summonerSpells[1] ?? null;
+  const spellAInfo = spellA != null ? spellMap[String(spellA)] ?? null : null;
+  const spellBInfo = spellB != null ? spellMap[String(spellB)] ?? null : null;
+  const primaryRune =
+    participant.primaryRune != null ? runeMap[String(participant.primaryRune)] ?? null : null;
+  const subStyle =
+    participant.subStyle != null ? styleMap[String(participant.subStyle)] ?? null : null;
+  const kills = participant.kills ?? 0;
+  const deaths = participant.deaths ?? 0;
+  const assists = participant.assists ?? 0;
+  const kda = deaths === 0 ? `${kills + assists}.00` : ((kills + assists) / deaths).toFixed(2);
+  const csPm = csPerMinute(participant.cs, matchDuration);
+  const position = prettyPos(participant.teamPosition);
+  const rowTone =
+    participant.isMe && tone === "blue"
+      ? "rounded-xl bg-blue-500/8"
+      : participant.isMe && tone === "red"
+        ? "rounded-xl bg-red-500/8"
+        : "";
+
+  return (
+    <div className={`px-2.5 py-2.5 ${rowTone}`}>
+      <div className="flex items-start gap-2.5">
+        <div className="relative shrink-0">
+          {championIcon ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={championIcon}
+              alt={championName ?? "Champion"}
+              className="h-10 w-10 rounded-xl bg-zinc-900/30 ring-1 ring-white/6"
+              loading="lazy"
+            />
+          ) : (
+            <div className="h-10 w-10 rounded-xl bg-zinc-900/30 ring-1 ring-white/6" />
+          )}
+          {profileIcon ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={profileIcon}
+              alt="Profile icon"
+              className="absolute -bottom-1 -right-1 h-4 w-4 rounded-full bg-zinc-950 ring-1 ring-black/30"
+              loading="lazy"
+            />
+          ) : null}
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <div className="truncate text-[12px] font-semibold text-zinc-100">
+              {participantName(participant)}
+            </div>
+            <CompactSoloRank snapshot={participant.solo} />
+            {participant.isMe ? (
+              <Pill className="border-blue-500/30 bg-blue-500/10 text-blue-100">YOU</Pill>
+            ) : null}
+            {position ? (
+              <Pill className="border-transparent bg-zinc-900/60 text-zinc-300">{position}</Pill>
+            ) : null}
+            {participant.champLevel != null ? (
+              <Pill className="border-transparent bg-zinc-900/60 text-zinc-400">
+                Lv {participant.champLevel}
+              </Pill>
+            ) : participant.summonerLevel != null ? (
+              <Pill className="border-transparent bg-zinc-900/60 text-zinc-400">
+                Lv {participant.summonerLevel}
+              </Pill>
+            ) : null}
+          </div>
+
+          <div className="mt-0.5 text-[10px] text-zinc-500">{championName ?? "Unknown champion"}</div>
+        </div>
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-1">
+        {spellAInfo ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={`https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/spell/${spellAInfo.iconFull}`}
+            alt={spellAInfo.name}
+            title={spellAInfo.name}
+            className="h-5 w-5 rounded-sm bg-zinc-900/30 ring-1 ring-white/6"
+            loading="lazy"
+          />
+        ) : (
+          <div className="h-5 w-5 rounded-sm bg-zinc-900/30 ring-1 ring-white/6" />
+        )}
+        {spellBInfo ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={`https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/spell/${spellBInfo.iconFull}`}
+            alt={spellBInfo.name}
+            title={spellBInfo.name}
+            className="h-5 w-5 rounded-sm bg-zinc-900/30 ring-1 ring-white/6"
+            loading="lazy"
+          />
+        ) : (
+          <div className="h-5 w-5 rounded-sm bg-zinc-900/30 ring-1 ring-white/6" />
+        )}
+        <RuneIcon rune={primaryRune} title="Primary rune" />
+        <RuneIcon rune={subStyle} title="Secondary style" />
+      </div>
+
+      <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5">
+        <MobileStat label="KDA" value={`${kills}/${deaths}/${assists}`} subvalue={`${kda} KDA`} />
+        <MobileStat
+          label="Damage"
+          value={participant.damage != null ? participant.damage.toLocaleString() : "--"}
+          subvalue={`${participant.gold != null ? participant.gold.toLocaleString() : "--"} gold`}
+        />
+        <MobileStat
+          label="Vision"
+          value={participant.visionScore != null ? participant.visionScore.toLocaleString() : "--"}
+          subvalue={`${participant.wardsPlaced ?? "--"} / ${participant.wardsKilled ?? "--"}`}
+        />
+        <MobileStat
+          label="CS"
+          value={participant.cs != null ? participant.cs.toLocaleString() : "--"}
+          subvalue={csPm ? `${csPm}/m` : "--"}
+        />
+      </div>
+
+      <div className="mt-2 flex flex-wrap gap-1">
+        {participant.items.length ? (
+          participant.items.slice(0, 7).map((id, itemIndex) => {
+            const url = `https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/item/${id}.png`;
+            return (
+              <ItemIcon
+                key={`${participant.puuid ?? participant.riotId ?? participant.summonerName ?? "mobile"}-${id}-${itemIndex}`}
+                id={id}
+                url={url}
+                info={itemMap[String(id)] ?? null}
+              />
+            );
+          })
+        ) : (
+          <div className="text-[10px] text-zinc-500">No items</div>
+        )}
+      </div>
+
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <div className="min-w-0 text-[9px] text-zinc-500">{participantRankStatus(participant)}</div>
+        {!participant.isMe && participant.opggUrl ? (
+          <a
+            href={participant.opggUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="shrink-0 rounded-md bg-zinc-900/40 px-2 py-1 text-[10px] text-zinc-300 transition hover:bg-white/5 hover:text-white"
+          >
+            OP.GG
+          </a>
+        ) : (
+          <div className="shrink-0 rounded-md bg-zinc-900/30 px-2 py-1 text-[9px] text-zinc-600">
+            Tracked
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MobileTeamList({
+  title,
+  participants,
+  ddragonVersion,
+  itemMap,
+  spellMap,
+  champMap,
+  runeMap,
+  styleMap,
+  matchDuration,
+  tone,
+}: {
+  title: string;
+  participants: MatchParticipant[];
+  ddragonVersion: string;
+  itemMap: Record<string, ItemInfo>;
+  spellMap: Record<string, SpellInfo>;
+  champMap: Record<string, string>;
+  runeMap: Record<string, RuneInfo>;
+  styleMap: Record<string, RuneInfo>;
+  matchDuration: number | null | undefined;
+  tone: "blue" | "red";
+}) {
+  const teamWon = participants.some((participant) => participant.win === true);
+
+  return (
+    <section
+      className={
+        "rounded-[18px] ring-1 " +
+        (tone === "blue"
+          ? "bg-blue-500/[0.045] ring-blue-400/10"
+          : "bg-red-500/[0.045] ring-red-400/10")
+      }
+    >
+      <div className="flex items-center gap-2 border-b border-white/6 px-3 py-2">
+        <div className="text-xs font-semibold text-zinc-100">{title}</div>
+        <Pill
+          className={
+            teamWon
+              ? "border-blue-500/30 bg-blue-500/10 text-blue-100"
+              : "border-red-500/30 bg-red-500/10 text-red-100"
+          }
+        >
+          {teamWon ? "VICTORY" : "DEFEAT"}
+        </Pill>
+      </div>
+
+      <div className="divide-y divide-white/6 px-1.5 py-1">
+        {participants.map((participant, index) => (
+          <MobileParticipantRow
+            key={`${participant.puuid ?? participant.riotId ?? participant.summonerName ?? title}-mobile-${index}`}
+            participant={participant}
+            ddragonVersion={ddragonVersion}
+            itemMap={itemMap}
+            spellMap={spellMap}
+            champMap={champMap}
+            runeMap={runeMap}
+            styleMap={styleMap}
+            matchDuration={matchDuration}
+            tone={tone}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function TeamTable({
   title,
   participants,
@@ -330,7 +659,14 @@ function TeamTable({
   const maxDamage = Math.max(1, ...participants.map((participant) => participant.damage ?? 0));
 
   return (
-    <section className="rounded-[18px] border border-white/6 bg-zinc-950/20">
+    <section
+      className={
+        "rounded-[18px] ring-1 " +
+        (tone === "blue"
+          ? "bg-blue-500/[0.035] ring-blue-400/10"
+          : "bg-red-500/[0.035] ring-red-400/10")
+      }
+    >
       <div className="flex items-center gap-2 border-b border-white/6 px-3 py-2">
         <div className="text-xs font-semibold text-zinc-100">{title}</div>
         <Pill
@@ -530,7 +866,7 @@ export default function MatchDetailsPanel({
   styleMap: Record<string, RuneInfo>;
 }) {
   return (
-    <div className="mt-2 rounded-[20px] border border-white/6 bg-zinc-950/35">
+    <div className="mt-2 rounded-[18px] bg-zinc-950/28 ring-1 ring-white/5">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/6 px-3 py-2.5">
         <div>
           <div className="text-xs font-semibold text-zinc-100">Match details</div>
@@ -551,13 +887,8 @@ export default function MatchDetailsPanel({
 
       {!loading && !error && details?.teams ? (
         <>
-          <div className="px-3 pt-2 text-[10px] text-zinc-500 lg:hidden">
-            Swipe sideways below for the full team sheet.
-          </div>
-          <div className="-mx-2 px-2 pb-2 sm:mx-0 sm:px-0 sm:pb-0">
-            <div className="x-scroll-area touch-pan-x pb-2">
-            <div className="min-w-[760px] space-y-3 p-2.5 sm:p-3">
-            <TeamTable
+          <div className="space-y-3 p-2.5 sm:hidden">
+            <MobileTeamList
               title="Blue side"
               participants={details.teams.blue}
               ddragonVersion={ddragonVersion}
@@ -569,7 +900,7 @@ export default function MatchDetailsPanel({
               matchDuration={details.match?.gameDuration ?? null}
               tone="blue"
             />
-            <TeamTable
+            <MobileTeamList
               title="Red side"
               participants={details.teams.red}
               ddragonVersion={ddragonVersion}
@@ -582,7 +913,36 @@ export default function MatchDetailsPanel({
               tone="red"
             />
           </div>
-          </div>
+
+          <div className="hidden sm:block">
+            <div className="x-scroll-area pb-2">
+              <div className="min-w-[760px] space-y-3 p-2.5 sm:p-3">
+                <TeamTable
+                  title="Blue side"
+                  participants={details.teams.blue}
+                  ddragonVersion={ddragonVersion}
+                  itemMap={itemMap}
+                  spellMap={spellMap}
+                  champMap={champMap}
+                  runeMap={runeMap}
+                  styleMap={styleMap}
+                  matchDuration={details.match?.gameDuration ?? null}
+                  tone="blue"
+                />
+                <TeamTable
+                  title="Red side"
+                  participants={details.teams.red}
+                  ddragonVersion={ddragonVersion}
+                  itemMap={itemMap}
+                  spellMap={spellMap}
+                  champMap={champMap}
+                  runeMap={runeMap}
+                  styleMap={styleMap}
+                  matchDuration={details.match?.gameDuration ?? null}
+                  tone="red"
+                />
+              </div>
+            </div>
           </div>
         </>
       ) : null}
