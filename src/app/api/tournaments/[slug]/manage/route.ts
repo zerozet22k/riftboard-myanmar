@@ -239,38 +239,65 @@ export async function POST(
         return NextResponse.json({ ok: false, error: "No ready matches in that round" }, { status: 400 });
       }
 
-      if (!tournament.providerId || !tournament.stubTournamentId) {
+      const ensureStubResources = async (forceRecreate = false) => {
+        if (!forceRecreate && tournament.providerId && tournament.stubTournamentId) return;
+
         const callbackUrl = `${resolveCallbackBaseUrl(req)}/api/tournaments/callback/${tournament.callbackToken}`;
-        const providerId =
-          tournament.providerId ??
-          (await createTournamentStubProvider(tournament.platform ?? "sg2", callbackUrl));
-        const stubTournamentId =
-          tournament.stubTournamentId ??
-          (await createTournamentStub(
-            tournament.platform ?? "sg2",
-            providerId,
-            `${tournament.name} - ${tournament.slug}`
-          ));
+        const providerId = await createTournamentStubProvider(tournament.platform ?? "sg2", callbackUrl);
+        const stubTournamentId = await createTournamentStub(
+          tournament.platform ?? "sg2",
+          providerId,
+          `${tournament.name} - ${tournament.slug}`
+        );
 
         tournament.providerId = providerId;
         tournament.stubTournamentId = stubTournamentId;
         await tournament.save();
-      }
+      };
+
+      await ensureStubResources(false);
+
+      let recoveredFromStaleStub = false;
 
       for (const match of readyMatches) {
-        const codes = await createTournamentStubCodes(
-          tournament.platform ?? "sg2",
-          tournament.stubTournamentId!,
-          1,
-          {
-            teamSize: tournament.teamSize ?? 5,
-            metadata: JSON.stringify({
-              slug: tournament.slug,
-              round: match.round,
-              slot: match.slot,
-            }),
-          }
-        );
+        let codes: string[];
+        try {
+          codes = await createTournamentStubCodes(
+            tournament.platform ?? "sg2",
+            tournament.stubTournamentId!,
+            1,
+            {
+              teamSize: tournament.teamSize ?? 5,
+              metadata: JSON.stringify({
+                slug: tournament.slug,
+                round: match.round,
+                slot: match.slot,
+              }),
+            }
+          );
+        } catch (error) {
+          const shouldRecover =
+            error instanceof RiotApiError && (error.status === 403 || error.status === 404);
+
+          if (!shouldRecover || recoveredFromStaleStub) throw error;
+
+          recoveredFromStaleStub = true;
+          await ensureStubResources(true);
+
+          codes = await createTournamentStubCodes(
+            tournament.platform ?? "sg2",
+            tournament.stubTournamentId!,
+            1,
+            {
+              teamSize: tournament.teamSize ?? 5,
+              metadata: JSON.stringify({
+                slug: tournament.slug,
+                round: match.round,
+                slot: match.slot,
+              }),
+            }
+          );
+        }
 
         const tournamentCode = Array.isArray(codes) ? codes[0] : null;
         if (!tournamentCode) continue;
@@ -366,6 +393,13 @@ export async function POST(
         {
           ok: false,
           error: riotErrorMessage,
+          details:
+            error.status === 403
+              ? {
+                  riotMessage: error.body,
+                  riotUrl: error.url,
+                }
+              : undefined,
         },
         { status: error.status === 403 ? 403 : error.status >= 500 ? 502 : 400 }
       );
