@@ -358,12 +358,16 @@ export async function POST(
     return NextResponse.json({ ok: true });
   } catch (error: unknown) {
     if (error instanceof RiotApiError) {
+      const riotErrorMessage =
+        error.status === 403
+          ? "Riot API forbidden. Check RIOT_API_KEY validity/expiry and tournament access for this key."
+          : `Riot API ${error.status}: ${error.body}`;
       return NextResponse.json(
         {
           ok: false,
-          error: `Riot API ${error.status}: ${error.body}`,
+          error: riotErrorMessage,
         },
-        { status: error.status >= 500 ? 502 : 400 }
+        { status: error.status === 403 ? 403 : error.status >= 500 ? 502 : 400 }
       );
     }
 

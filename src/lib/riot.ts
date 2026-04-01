@@ -107,6 +107,12 @@ export function platformToMatchRegion(platform: string): "americas" | "asia" | "
   return MATCH_REGION_DEFAULT();
 }
 
+function platformToTournamentRouting(platform: string): "americas" | "asia" | "europe" {
+  const region = platformToMatchRegion(platform);
+  // Tournament APIs are routed on americas|asia|europe, not sea.
+  return region === "sea" ? "asia" : region;
+}
+
 export class RiotApiError extends Error {
   status: number;
   body: string;
@@ -350,17 +356,18 @@ export async function getMatchById(matchId: string, matchRegion?: string) {
 // -----------------------
 
 export async function createTournamentStubProvider(platform: string, callbackUrl: string) {
-  const host = platform.toLowerCase();
-  const url = `https://${host}.api.riotgames.com/lol/tournament-stub/v5/providers`;
+  const routingHost = platformToTournamentRouting(platform);
+  const platformRegion = platform.toUpperCase();
+  const url = `https://${routingHost}.api.riotgames.com/lol/tournament-stub/v5/providers`;
   return riotFetchWithBody<number>(url, {
-    region: host.toUpperCase(),
+    region: platformRegion,
     url: callbackUrl,
   });
 }
 
 export async function createTournamentStub(platform: string, providerId: number, name: string) {
-  const host = platform.toLowerCase();
-  const url = `https://${host}.api.riotgames.com/lol/tournament-stub/v5/tournaments`;
+  const routingHost = platformToTournamentRouting(platform);
+  const url = `https://${routingHost}.api.riotgames.com/lol/tournament-stub/v5/tournaments`;
   return riotFetchWithBody<number>(url, {
     name,
     providerId,
@@ -373,9 +380,9 @@ export async function createTournamentStubCodes(
   count: number,
   params?: StubTournamentCodeParams
 ) {
-  const host = platform.toLowerCase();
+  const routingHost = platformToTournamentRouting(platform);
   const url =
-    `https://${host}.api.riotgames.com/lol/tournament-stub/v5/codes?` +
+    `https://${routingHost}.api.riotgames.com/lol/tournament-stub/v5/codes?` +
     new URLSearchParams({
       tournamentId: String(tournamentId),
       count: String(count),
@@ -392,17 +399,17 @@ export async function createTournamentStubCodes(
 }
 
 export async function getTournamentStubCode(platform: string, tournamentCode: string) {
-  const host = platform.toLowerCase();
+  const routingHost = platformToTournamentRouting(platform);
   const url =
-    `https://${host}.api.riotgames.com/lol/tournament-stub/v5/codes/` +
+    `https://${routingHost}.api.riotgames.com/lol/tournament-stub/v5/codes/` +
     `${encodeURIComponent(tournamentCode)}`;
   return riotFetch<Record<string, unknown>>(url);
 }
 
 export async function getTournamentStubLobbyEvents(platform: string, tournamentCode: string) {
-  const host = platform.toLowerCase();
+  const routingHost = platformToTournamentRouting(platform);
   const url =
-    `https://${host}.api.riotgames.com/lol/tournament-stub/v5/lobby-events/by-code/` +
+    `https://${routingHost}.api.riotgames.com/lol/tournament-stub/v5/lobby-events/by-code/` +
     `${encodeURIComponent(tournamentCode)}`;
   return riotFetch<Record<string, unknown>>(url);
 }
