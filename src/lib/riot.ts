@@ -113,6 +113,40 @@ function platformToTournamentRouting(platform: string): "americas" | "asia" | "e
   return region === "sea" ? "asia" : region;
 }
 
+function platformToTournamentRegion(platform: string):
+  | "BR"
+  | "EUNE"
+  | "EUW"
+  | "JP"
+  | "LAN"
+  | "LAS"
+  | "NA"
+  | "OCE"
+  | "PBE"
+  | "RU"
+  | "TR"
+  | "KR" {
+  const p = platform.toLowerCase();
+
+  // Legacy platform mapping required by tournament-stub provider registration.
+  if (p === "br1") return "BR";
+  if (p === "eun1") return "EUNE";
+  if (p === "euw1") return "EUW";
+  if (p === "jp1") return "JP";
+  if (p === "la1") return "LAN";
+  if (p === "la2") return "LAS";
+  if (p === "na1") return "NA";
+  if (p === "oc1") return "OCE";
+  if (p === "ru") return "RU";
+  if (p === "tr1") return "TR";
+  if (p === "kr") return "KR";
+
+  // SEA shards are routed through asia. JP is the closest supported tournament region.
+  if (["sg2", "th2", "ph2", "vn2", "tw2"].includes(p)) return "JP";
+
+  return "JP";
+}
+
 export class RiotApiError extends Error {
   status: number;
   body: string;
@@ -357,10 +391,10 @@ export async function getMatchById(matchId: string, matchRegion?: string) {
 
 export async function createTournamentStubProvider(platform: string, callbackUrl: string) {
   const routingHost = platformToTournamentRouting(platform);
-  const platformRegion = platform.toUpperCase();
+  const providerRegion = platformToTournamentRegion(platform);
   const url = `https://${routingHost}.api.riotgames.com/lol/tournament-stub/v5/providers`;
   return riotFetchWithBody<number>(url, {
-    region: platformRegion,
+    region: providerRegion,
     url: callbackUrl,
   });
 }
@@ -389,12 +423,12 @@ export async function createTournamentStubCodes(
     }).toString();
 
   return riotFetchWithBody<string[]>(url, {
-    mapType: params?.mapType ?? "CLASSIC",
+    mapType: params?.mapType ?? "SUMMONERS_RIFT",
     pickType: params?.pickType ?? "TOURNAMENT_DRAFT",
     spectatorType: params?.spectatorType ?? "ALL",
-    teamSize: params?.teamSize ?? 5,
+    teamSize: Math.max(1, Math.min(5, params?.teamSize ?? 5)),
     metadata: params?.metadata ?? "",
-    allowedSummonerIds: params?.allowedSummonerIds ?? [],
+    allowedParticipants: params?.allowedSummonerIds ?? [],
   });
 }
 
