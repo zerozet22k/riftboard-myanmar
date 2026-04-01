@@ -113,7 +113,7 @@ export default function TournamentRegisterForm({
         />
       </label>
 
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3 mt-6">
         <button
           type="submit"
           disabled={pending || disabled}

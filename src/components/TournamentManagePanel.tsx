@@ -27,6 +27,49 @@ export default function TournamentManagePanel({
   const [generatedCodes, setGeneratedCodes] = useState<Array<{ round: number; slot: number; code: string }>>([]);
   const teamMap = useMemo(() => new Map(teams.map((team) => [team.id, team])), [teams]);
 
+  async function copyText(value: string, successMessage: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setMessage(successMessage);
+      setError(null);
+    } catch {
+      setError("Could not copy to clipboard.");
+    }
+  }
+
+  function getPublicTournamentUrl() {
+    return `${window.location.origin}${tournament.path}`;
+  }
+
+  function buildMatchShareText(round: number, slot: number, code: string) {
+    const isManualCode = code.startsWith("MAN-");
+    return [
+      `${tournament.slug.toUpperCase()} - Round ${round} Match ${slot}`,
+      isManualCode ? `Manual Lobby Ref: ${code}` : `Tournament Code: ${code}`,
+      isManualCode
+        ? "This is NOT a Riot tournament code. Host must create a Custom game lobby manually and invite both teams."
+        : "Open LoL client and use Join Tournament Code.",
+      `Public Tournament Page: ${getPublicTournamentUrl()}`,
+    ].join("\n");
+  }
+
+  function normalizeGeneratedCodes(input: unknown) {
+    if (!Array.isArray(input)) return [] as Array<{ round: number; slot: number; code: string }>;
+
+    const normalized: Array<{ round: number; slot: number; code: string }> = [];
+    for (const item of input) {
+      if (!item || typeof item !== "object") continue;
+      const candidate = item as { round?: unknown; slot?: unknown; code?: unknown };
+      if (typeof candidate.code !== "string") continue;
+      normalized.push({
+        round: Number(candidate.round ?? 0),
+        slot: Number(candidate.slot ?? 0),
+        code: candidate.code,
+      });
+    }
+    return normalized;
+  }
+
   function runAction(payload: Record<string, unknown>) {
     setError(null);
     setMessage(null);
@@ -48,20 +91,30 @@ export default function TournamentManagePanel({
 
         if (payload.action === "seed_bracket") setMessage("Bracket generated.");
         if (payload.action === "generate_codes") {
-          const list = Array.isArray(data?.generatedCodes) ? data.generatedCodes : [];
-          setGeneratedCodes(
-            list
-              .filter((item) => item && typeof item.code === "string")
-              .map((item) => ({
-                round: Number(item.round ?? 0),
-                slot: Number(item.slot ?? 0),
-                code: String(item.code),
-              }))
-          );
+          const normalized = normalizeGeneratedCodes(data?.generatedCodes);
+          setGeneratedCodes(normalized);
 
-          const generatedCount = typeof data?.generated === "number" ? data.generated : list.length;
+          const generatedCount = typeof data?.generated === "number" ? data.generated : normalized.length;
+          const manualCount = typeof data?.manualFallbackCount === "number" ? data.manualFallbackCount : 0;
+          const riotCount = Math.max(0, generatedCount - manualCount);
           const warning = typeof data?.warning === "string" ? ` ${data.warning}` : "";
-          setMessage(`Lobby codes generated (${generatedCount}).${warning}`);
+          const summary = manualCount > 0
+            ? `Codes generated (${generatedCount}): ${riotCount} Riot, ${manualCount} manual.`
+            : `Lobby codes generated (${generatedCount}).`;
+          setMessage(`${summary}${warning}`);
+        }
+        if (payload.action === "regenerate_codes") {
+          const normalized = normalizeGeneratedCodes(data?.generatedCodes);
+          setGeneratedCodes(normalized);
+
+          const generatedCount = typeof data?.generated === "number" ? data.generated : normalized.length;
+          const manualCount = typeof data?.manualFallbackCount === "number" ? data.manualFallbackCount : 0;
+          const riotCount = Math.max(0, generatedCount - manualCount);
+          const warning = typeof data?.warning === "string" ? ` ${data.warning}` : "";
+          const summary = manualCount > 0
+            ? `Codes regenerated (${generatedCount}): ${riotCount} Riot, ${manualCount} manual.`
+            : `Lobby codes regenerated (${generatedCount}).`;
+          setMessage(`${summary}${warning}`);
         }
         if (payload.action === "report_result") setMessage("Match result saved.");
         router.refresh();
@@ -93,13 +146,33 @@ export default function TournamentManagePanel({
         <button
           type="button"
           disabled={pending}
+          onClick={() => runAction({ action: "regenerate_codes" })}
+          className="rounded-2xl border border-white/20 px-4 py-2.5 text-sm font-semibold text-zinc-100 transition hover:bg-white/5 disabled:opacity-60"
+        >
+          Regenerate round codes
+        </button>
+        <button
+          type="button"
+          disabled={pending}
           onClick={async () => {
-            await navigator.clipboard.writeText(`${window.location.origin}${tournament.path}/manage?token=${manageToken}`);
-            setMessage("Manage link copied.");
+            await copyText(
+              `${window.location.origin}${tournament.path}/manage?token=${manageToken}`,
+              "Manage link copied."
+            );
           }}
           className="rounded-2xl border border-white/10 px-4 py-2.5 text-sm text-zinc-200 transition hover:bg-white/5 disabled:opacity-60"
         >
           Copy manage link
+        </button>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={async () => {
+            await copyText(getPublicTournamentUrl(), "Public tournament link copied.");
+          }}
+          className="rounded-2xl border border-white/10 px-4 py-2.5 text-sm text-zinc-200 transition hover:bg-white/5 disabled:opacity-60"
+        >
+          Copy public link
         </button>
       </div>
 
@@ -116,8 +189,17 @@ export default function TournamentManagePanel({
                     Round {match.round} • Match {match.slot}
                   </div>
                   <div className="mt-1 text-xs text-zinc-500">
-                    {match.tournamentCode ? `Lobby code ${match.tournamentCode}` : "No code yet"}
+                    {match.tournamentCode
+                      ? match.tournamentCode.startsWith("MAN-")
+                        ? `Manual lobby ref ${match.tournamentCode}`
+                        : `Tournament code ${match.tournamentCode}`
+                      : "No code yet"}
                   </div>
+                  {match.tournamentCode?.startsWith("MAN-") ? (
+                    <div className="mt-1 text-[11px] text-amber-300">
+                      Manual fallback code: host a Custom game lobby manually (cannot join via Tournament Code).
+                    </div>
+                  ) : null}
                 </div>
                 <div className="text-xs text-zinc-500">{match.status}</div>
               </div>
@@ -156,6 +238,24 @@ export default function TournamentManagePanel({
                   disabled={pending || !teamA || !teamB || match.status === "completed"}
                 />
               </div>
+
+              {match.tournamentCode ? (
+                <div className="mt-3 flex items-center justify-end">
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={async () => {
+                      await copyText(
+                        buildMatchShareText(match.round, match.slot, match.tournamentCode as string),
+                        `Share text copied for Round ${match.round} Match ${match.slot}.`
+                      );
+                    }}
+                    className="rounded-xl border border-white/10 px-3 py-1.5 text-xs text-zinc-200 transition hover:bg-white/5 disabled:opacity-40"
+                  >
+                    Copy player instructions
+                  </button>
+                </div>
+              ) : null}
             </div>
           );
         })}
@@ -168,11 +268,19 @@ export default function TournamentManagePanel({
           <div className="space-y-1.5 text-sm">
             {generatedCodes.map((item) => (
               <div key={`${item.round}-${item.slot}-${item.code}`} className="flex items-center justify-between gap-3">
-                <span className="text-zinc-300">Round {item.round} Match {item.slot}</span>
+                <span className="text-zinc-300">
+                  Round {item.round} Match {item.slot}
+                  {item.code.startsWith("MAN-") ? " (manual)" : ""}
+                </span>
                 <code className="rounded-lg bg-zinc-900 px-2 py-1 font-mono text-zinc-100">{item.code}</code>
               </div>
             ))}
           </div>
+          {generatedCodes.some((item) => item.code.startsWith("MAN-")) ? (
+            <div className="mt-3 text-xs text-amber-300">
+              Manual codes are references only. Players cannot use Join Tournament Code for these; host must create a Custom game lobby manually.
+            </div>
+          ) : null}
         </div>
       ) : null}
       {error ? <div className="text-sm text-red-300">{error}</div> : null}
