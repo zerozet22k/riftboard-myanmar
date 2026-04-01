@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "refresh:leaderboard:local": "node scripts/refresh-leaderboard-local.mjs"
+    "refresh:leaderboard:local": "node scripts/refresh-leaderboard-local.mjs",
+    "refresh:leaderboard:ps": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-local-cron.ps1"
   },
   "dependencies": {
     "mongoose": "^9.0.1",

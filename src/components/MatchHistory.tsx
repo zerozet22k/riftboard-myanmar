@@ -417,7 +417,7 @@ export default function MatchHistory({
               <article
                 key={match._id}
                 className={
-                  `overflow-hidden rounded-[22px] ring-1 ring-white/5 ` +
+                  `rounded-[22px] ring-1 ring-white/5 ` +
                   `${win ? "bg-blue-500/[0.04]" : "bg-red-500/[0.04]"}`
                 }
               >

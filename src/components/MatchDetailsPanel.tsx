@@ -154,7 +154,7 @@ function ItemIcon({ id, url, info }: { id: number; url: string; info: ItemInfo |
       src={url}
       alt={title}
       title={title}
-      className="h-6 w-6 rounded-md bg-zinc-900/30 ring-1 ring-white/6"
+      className="h-5 w-5 rounded-md bg-zinc-900/30 ring-1 ring-white/6"
       loading="lazy"
     />
   );
@@ -162,7 +162,7 @@ function ItemIcon({ id, url, info }: { id: number; url: string; info: ItemInfo |
 
 function RuneIcon({ rune, title }: { rune: RuneInfo | null; title: string }) {
   if (!rune?.icon) {
-    return <div className="h-5 w-5 rounded-md bg-zinc-900/30 ring-1 ring-white/6" />;
+    return <div className="h-4 w-4 rounded-sm bg-zinc-900/30 ring-1 ring-white/6" />;
   }
   return (
     // eslint-disable-next-line @next/next/no-img-element
@@ -170,7 +170,7 @@ function RuneIcon({ rune, title }: { rune: RuneInfo | null; title: string }) {
       src={`https://ddragon.leagueoflegends.com/cdn/img/${rune.icon}`}
       alt={rune.name || title}
       title={rune.name || title}
-      className="h-5 w-5 rounded-md bg-zinc-900/30 ring-1 ring-white/6"
+      className="h-4 w-4 rounded-sm bg-zinc-900/30 ring-1 ring-white/6"
       loading="lazy"
     />
   );
@@ -184,15 +184,15 @@ function RankLine({
   snapshot: RankSnapshot | null | undefined;
 }) {
   return (
-    <div className="flex items-center gap-1.5 rounded-lg bg-zinc-950/45 px-2 py-1.5 ring-1 ring-white/5">
+    <div className="flex items-center gap-1 rounded-lg bg-zinc-950/45 px-1.5 py-1 ring-1 ring-white/5">
       <RankEmblem
         tier={snapshot?.tier ?? null}
-        className="h-5 w-5 shrink-0"
+        className="h-4 w-4 shrink-0"
         alt={snapshot?.tier ? `${snapshot.tier} emblem` : "Unranked emblem"}
       />
       <div className="min-w-0">
-        <div className="text-[9px] uppercase tracking-[0.16em] text-zinc-500">{label}</div>
-        <div className="truncate text-[11px] font-medium text-zinc-100">{formatRank(snapshot)}</div>
+        <div className="text-[8px] uppercase tracking-[0.14em] text-zinc-500">{label}</div>
+        <div className="truncate text-[10px] font-medium text-zinc-100">{formatRank(snapshot)}</div>
       </div>
     </div>
   );
@@ -222,25 +222,25 @@ function PlayerSummaryCell({
   const position = prettyPos(participant.teamPosition);
 
   return (
-    <div className="flex min-w-[220px] items-start gap-2.5">
+    <div className="flex min-w-[190px] items-start gap-2">
       <div className="relative shrink-0">
         {championIcon ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={championIcon}
             alt={championName ?? "Champion"}
-            className="h-10 w-10 rounded-[14px] bg-zinc-900/30 ring-1 ring-white/6"
+            className="h-9 w-9 rounded-[12px] bg-zinc-900/30 ring-1 ring-white/6"
             loading="lazy"
           />
         ) : (
-          <div className="h-10 w-10 rounded-[14px] bg-zinc-900/30 ring-1 ring-white/6" />
+          <div className="h-9 w-9 rounded-[12px] bg-zinc-900/30 ring-1 ring-white/6" />
         )}
         {profileIcon ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={profileIcon}
             alt="Profile icon"
-            className="absolute -bottom-1 -right-1 h-4 w-4 rounded-full bg-zinc-950 ring-1 ring-black/30"
+            className="absolute -bottom-1 -right-1 h-3.5 w-3.5 rounded-full bg-zinc-950 ring-1 ring-black/30"
             loading="lazy"
           />
         ) : null}
@@ -248,7 +248,7 @@ function PlayerSummaryCell({
 
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
-          <div className="truncate text-[12px] font-semibold text-zinc-100">
+          <div className="truncate text-[11px] font-semibold text-zinc-100">
             {participantName(participant)}
           </div>
           {participant.isMe ? (
@@ -268,7 +268,7 @@ function PlayerSummaryCell({
           ) : null}
         </div>
 
-        <div className="mt-0.5 text-[11px] text-zinc-500">{championName ?? "Unknown champion"}</div>
+        <div className="mt-0.5 text-[10px] text-zinc-500">{championName ?? "Unknown champion"}</div>
 
         <div className="mt-1.5 flex flex-wrap items-center gap-1">
           {spellAInfo ? (
@@ -277,11 +277,11 @@ function PlayerSummaryCell({
               src={`https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/spell/${spellAInfo.iconFull}`}
               alt={spellAInfo.name}
               title={spellAInfo.name}
-              className="h-5 w-5 rounded-md bg-zinc-900/30 ring-1 ring-white/6"
+              className="h-4 w-4 rounded-sm bg-zinc-900/30 ring-1 ring-white/6"
               loading="lazy"
             />
           ) : (
-            <div className="h-5 w-5 rounded-md bg-zinc-900/30 ring-1 ring-white/6" />
+            <div className="h-4 w-4 rounded-sm bg-zinc-900/30 ring-1 ring-white/6" />
           )}
           {spellBInfo ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -289,11 +289,11 @@ function PlayerSummaryCell({
               src={`https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/spell/${spellBInfo.iconFull}`}
               alt={spellBInfo.name}
               title={spellBInfo.name}
-              className="h-5 w-5 rounded-md bg-zinc-900/30 ring-1 ring-white/6"
+              className="h-4 w-4 rounded-sm bg-zinc-900/30 ring-1 ring-white/6"
               loading="lazy"
             />
           ) : (
-            <div className="h-5 w-5 rounded-md bg-zinc-900/30 ring-1 ring-white/6" />
+            <div className="h-4 w-4 rounded-sm bg-zinc-900/30 ring-1 ring-white/6" />
           )}
           <RuneIcon rune={primaryRune} title="Primary rune" />
           <RuneIcon rune={subStyle} title="Secondary style" />
@@ -344,17 +344,17 @@ function TeamTable({
         </Pill>
       </div>
 
-      <table className="w-full border-collapse text-[11px] text-zinc-300">
+      <table className="w-full border-collapse text-[10px] text-zinc-300">
         <thead>
           <tr className="text-left uppercase tracking-[0.14em] text-zinc-500">
-            <th className="w-[240px] px-3 py-2 font-medium">Player</th>
-            <th className="w-[78px] px-2 py-2 font-medium">KDA</th>
-            <th className="w-[96px] px-2 py-2 font-medium">Dmg</th>
-            <th className="w-[84px] px-2 py-2 font-medium">Vision</th>
-            <th className="w-[86px] px-2 py-2 font-medium">CS</th>
-            <th className="w-[156px] px-2 py-2 font-medium">Rank</th>
-            <th className="w-[150px] px-2 py-2 font-medium">Items</th>
-            <th className="w-[108px] px-3 py-2 font-medium">Link</th>
+            <th className="w-[210px] px-2.5 py-2 font-medium">Player</th>
+            <th className="w-[64px] px-1.5 py-2 font-medium">KDA</th>
+            <th className="w-[84px] px-1.5 py-2 font-medium">Dmg</th>
+            <th className="w-[68px] px-1.5 py-2 font-medium">Vision</th>
+            <th className="w-[72px] px-1.5 py-2 font-medium">CS</th>
+            <th className="w-[136px] px-1.5 py-2 font-medium">Rank</th>
+            <th className="w-[118px] px-1.5 py-2 font-medium">Items</th>
+            <th className="w-[84px] px-2.5 py-2 font-medium">Link</th>
           </tr>
         </thead>
 
@@ -395,7 +395,7 @@ function TeamTable({
                 key={`${participant.puuid ?? participant.riotId ?? participant.summonerName ?? title}-${index}`}
                 className={`align-top ${rowTone}`}
               >
-                <td className="border-t border-white/6 px-3 py-2.5">
+                <td className="border-t border-white/6 px-2.5 py-2">
                   <PlayerSummaryCell
                     participant={participant}
                     championName={championName}
@@ -409,18 +409,18 @@ function TeamTable({
                   />
                 </td>
 
-                <td className="border-t border-white/6 px-2 py-2.5">
+                <td className="border-t border-white/6 px-1.5 py-2">
                   <div className="font-semibold tabular-nums text-zinc-100">
                     {kills}/{deaths}/{assists}
                   </div>
-                  <div className="mt-0.5 text-[10px] tabular-nums text-zinc-500">{kda} KDA</div>
+                  <div className="mt-0.5 text-[9px] tabular-nums text-zinc-500">{kda} KDA</div>
                 </td>
 
-                <td className="border-t border-white/6 px-2 py-2.5">
+                <td className="border-t border-white/6 px-1.5 py-2">
                   <div className="font-medium tabular-nums text-zinc-100">
                     {damage != null ? damage.toLocaleString() : "--"}
                   </div>
-                  <div className="mt-1.5 h-1.5 w-[72px] rounded-full bg-white/6">
+                  <div className="mt-1 h-1.5 w-[60px] rounded-full bg-white/6">
                     <div
                       className={
                         "h-full rounded-full " + (tone === "blue" ? "bg-blue-400/80" : "bg-red-400/80")
@@ -430,36 +430,36 @@ function TeamTable({
                   </div>
                 </td>
 
-                <td className="border-t border-white/6 px-2 py-2.5">
+                <td className="border-t border-white/6 px-1.5 py-2">
                   <div className="font-medium tabular-nums text-zinc-100">
                     {vision != null ? vision.toLocaleString() : "--"}
                   </div>
-                  <div className="mt-0.5 text-[10px] tabular-nums text-zinc-500">
+                  <div className="mt-0.5 text-[9px] tabular-nums text-zinc-500">
                     {participant.wardsPlaced ?? "--"} / {participant.wardsKilled ?? "--"}
                   </div>
                 </td>
 
-                <td className="border-t border-white/6 px-2 py-2.5">
+                <td className="border-t border-white/6 px-1.5 py-2">
                   <div className="font-medium tabular-nums text-zinc-100">
                     {participant.cs != null ? participant.cs.toLocaleString() : "--"}
                   </div>
-                  <div className="mt-0.5 text-[10px] tabular-nums text-zinc-500">
+                  <div className="mt-0.5 text-[9px] tabular-nums text-zinc-500">
                     {csPm ? `${csPm}/m` : "--"}
                   </div>
-                  <div className="mt-0.5 text-[10px] tabular-nums text-zinc-500">
+                  <div className="mt-0.5 text-[9px] tabular-nums text-zinc-500">
                     {participant.gold != null ? participant.gold.toLocaleString() : "--"} gold
                   </div>
                 </td>
 
-                <td className="border-t border-white/6 px-2 py-2.5">
+                <td className="border-t border-white/6 px-1.5 py-2">
                   <div className="space-y-1.5">
                     <RankLine label="Solo" snapshot={participant.solo} />
                     <RankLine label="Flex" snapshot={participant.flex} />
                   </div>
                 </td>
 
-                <td className="border-t border-white/6 px-2 py-2.5">
-                  <div className="flex min-w-[130px] flex-wrap gap-1">
+                <td className="border-t border-white/6 px-1.5 py-2">
+                  <div className="flex min-w-[104px] flex-wrap gap-1">
                     {participant.items.length ? (
                       participant.items.slice(0, 7).map((id, itemIndex) => {
                         const url = `https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/item/${id}.png`;
@@ -473,25 +473,25 @@ function TeamTable({
                         );
                       })
                     ) : (
-                      <div className="text-[10px] text-zinc-500">No items</div>
+                      <div className="text-[9px] text-zinc-500">No items</div>
                     )}
                   </div>
                 </td>
 
-                <td className="border-t border-white/6 px-3 py-2.5">
-                  <div className="w-[92px] space-y-1.5">
-                    <div className="text-[10px] text-zinc-500">{participantRankStatus(participant)}</div>
+                <td className="border-t border-white/6 px-2.5 py-2">
+                  <div className="w-[72px] space-y-1">
+                    <div className="text-[9px] text-zinc-500">{participantRankStatus(participant)}</div>
                     {!participant.isMe && participant.opggUrl ? (
                       <a
                         href={participant.opggUrl}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex w-full items-center justify-center rounded-xl bg-zinc-950/40 px-2 py-1.5 text-[11px] text-zinc-300 ring-1 ring-white/5 transition hover:bg-white/5 hover:text-white"
+                        className="inline-flex w-full items-center justify-center rounded-lg bg-zinc-950/40 px-1.5 py-1 text-[10px] text-zinc-300 ring-1 ring-white/5 transition hover:bg-white/5 hover:text-white"
                       >
                         OP.GG
                       </a>
                     ) : (
-                      <div className="rounded-xl bg-zinc-950/30 px-2 py-1.5 text-center text-[10px] text-zinc-600 ring-1 ring-white/5">
+                      <div className="rounded-lg bg-zinc-950/30 px-1.5 py-1 text-center text-[9px] text-zinc-600 ring-1 ring-white/5">
                         Tracked
                       </div>
                     )}
@@ -550,8 +550,12 @@ export default function MatchDetailsPanel({
       {!loading && error ? <div className="px-3 py-3 text-sm text-red-300">{error}</div> : null}
 
       {!loading && !error && details?.teams ? (
-        <div className="overflow-x-auto">
-          <div className="min-w-[860px] space-y-3 p-2.5 sm:p-3">
+        <>
+          <div className="px-3 pt-2 text-[10px] text-zinc-500 lg:hidden">
+            Swipe sideways in this section for the full team sheet.
+          </div>
+          <div className="-mx-2 overflow-x-auto overscroll-x-contain px-2 pb-2 sm:mx-0 sm:px-0 sm:pb-0">
+            <div className="min-w-[760px] space-y-3 p-2.5 sm:p-3">
             <TeamTable
               title="Blue side"
               participants={details.teams.blue}
@@ -577,7 +581,8 @@ export default function MatchDetailsPanel({
               tone="red"
             />
           </div>
-        </div>
+          </div>
+        </>
       ) : null}
 
       {!loading && !error && !details?.teams ? (
