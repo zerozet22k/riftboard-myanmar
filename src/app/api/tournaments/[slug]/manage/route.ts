@@ -1,7 +1,12 @@
 import { revalidatePath } from "next/cache";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { createTournamentStub, createTournamentStubCodes, createTournamentStubProvider } from "@/lib/riot";
+import {
+  createTournamentStub,
+  createTournamentStubCodes,
+  createTournamentStubProvider,
+  RiotApiError,
+} from "@/lib/riot";
 import { dbConnect } from "@/lib/mongodb";
 import { getAppBaseUrl } from "@/lib/runtimeConfig";
 import { buildSingleElimBracket, hashToken } from "@/lib/tournaments";
@@ -52,6 +57,27 @@ function pickTargetRound(
 ) {
   const rounds = [...new Set(matches.filter(matchReadyForCode).map((match) => match.round))].sort((a, b) => a - b);
   return rounds[0] ?? null;
+}
+
+function resolveCallbackBaseUrl(req: NextRequest) {
+  const configured = getAppBaseUrl();
+  const requestOrigin = req.nextUrl.origin;
+  const configuredHost = (() => {
+    try {
+      return new URL(configured).hostname.toLowerCase();
+    } catch {
+      return "";
+    }
+  })();
+
+  const usesLocalConfiguredHost =
+    configuredHost === "127.0.0.1" || configuredHost === "localhost" || configuredHost === "0.0.0.0";
+
+  if (usesLocalConfiguredHost && requestOrigin && !/localhost|127\.0\.0\.1|0\.0\.0\.0/i.test(requestOrigin)) {
+    return requestOrigin;
+  }
+
+  return configured;
 }
 
 async function loadTournamentForManage(slug: string, token: string) {
@@ -214,7 +240,7 @@ export async function POST(
       }
 
       if (!tournament.providerId || !tournament.stubTournamentId) {
-        const callbackUrl = `${getAppBaseUrl()}/api/tournaments/callback/${tournament.callbackToken}`;
+        const callbackUrl = `${resolveCallbackBaseUrl(req)}/api/tournaments/callback/${tournament.callbackToken}`;
         const providerId =
           tournament.providerId ??
           (await createTournamentStubProvider(tournament.platform ?? "sg2", callbackUrl));
@@ -331,6 +357,16 @@ export async function POST(
 
     return NextResponse.json({ ok: true });
   } catch (error: unknown) {
+    if (error instanceof RiotApiError) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `Riot API ${error.status}: ${error.body}`,
+        },
+        { status: error.status >= 500 ? 502 : 400 }
+      );
+    }
+
     return NextResponse.json(
       { ok: false, error: error instanceof Error ? error.message : "Manage action failed" },
       { status: 500 }
