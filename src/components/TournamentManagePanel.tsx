@@ -24,11 +24,13 @@ export default function TournamentManagePanel({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [generatedCodes, setGeneratedCodes] = useState<Array<{ round: number; slot: number; code: string }>>([]);
   const teamMap = useMemo(() => new Map(teams.map((team) => [team.id, team])), [teams]);
 
   function runAction(payload: Record<string, unknown>) {
     setError(null);
     setMessage(null);
+    setGeneratedCodes([]);
 
     startTransition(async () => {
       try {
@@ -45,7 +47,22 @@ export default function TournamentManagePanel({
         }
 
         if (payload.action === "seed_bracket") setMessage("Bracket generated.");
-        if (payload.action === "generate_codes") setMessage("Lobby codes generated.");
+        if (payload.action === "generate_codes") {
+          const list = Array.isArray(data?.generatedCodes) ? data.generatedCodes : [];
+          setGeneratedCodes(
+            list
+              .filter((item) => item && typeof item.code === "string")
+              .map((item) => ({
+                round: Number(item.round ?? 0),
+                slot: Number(item.slot ?? 0),
+                code: String(item.code),
+              }))
+          );
+
+          const generatedCount = typeof data?.generated === "number" ? data.generated : list.length;
+          const warning = typeof data?.warning === "string" ? ` ${data.warning}` : "";
+          setMessage(`Lobby codes generated (${generatedCount}).${warning}`);
+        }
         if (payload.action === "report_result") setMessage("Match result saved.");
         router.refresh();
       } catch (err: unknown) {
@@ -145,6 +162,19 @@ export default function TournamentManagePanel({
       </div>
 
       {message ? <div className="text-sm text-emerald-300">{message}</div> : null}
+      {generatedCodes.length ? (
+        <div className="rounded-2xl bg-zinc-950/60 p-4 ring-1 ring-white/8">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">Generated lobby codes</div>
+          <div className="space-y-1.5 text-sm">
+            {generatedCodes.map((item) => (
+              <div key={`${item.round}-${item.slot}-${item.code}`} className="flex items-center justify-between gap-3">
+                <span className="text-zinc-300">Round {item.round} Match {item.slot}</span>
+                <code className="rounded-lg bg-zinc-900 px-2 py-1 font-mono text-zinc-100">{item.code}</code>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
       {error ? <div className="text-sm text-red-300">{error}</div> : null}
     </div>
   );

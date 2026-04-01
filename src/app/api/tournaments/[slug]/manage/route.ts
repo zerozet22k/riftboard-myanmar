@@ -80,6 +80,16 @@ function resolveCallbackBaseUrl(req: NextRequest) {
   return configured;
 }
 
+function buildManualTournamentCode(slug: string, round: number, slot: number) {
+  const safeSlug = String(slug ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 6);
+  const rand = Math.random().toString(36).slice(2, 7).toUpperCase();
+  return `MAN-${safeSlug || "TOUR"}-R${round}S${slot}-${rand}`;
+}
+
 async function loadTournamentForManage(slug: string, token: string) {
   const tournament = await Tournament.findOne(
     { slug: String(slug).trim().toLowerCase() },
@@ -234,10 +244,32 @@ export async function POST(
       const readyMatches = matches.filter(
         (match) => match.round === targetRound && matchReadyForCode(match)
       );
+      const generatedCodes: Array<{ matchId: string; round: number; slot: number; code: string }> = [];
 
       if (!readyMatches.length) {
         return NextResponse.json({ ok: false, error: "No ready matches in that round" }, { status: 400 });
       }
+
+      const applyManualCodes = async () => {
+        for (const match of readyMatches) {
+          const manualCode = buildManualTournamentCode(tournament.slug, match.round, match.slot);
+          await TournamentMatch.updateOne(
+            { _id: match._id },
+            {
+              $set: {
+                tournamentCode: manualCode,
+                status: "code_ready",
+              },
+            }
+          );
+          generatedCodes.push({
+            matchId: String(match._id),
+            round: match.round,
+            slot: match.slot,
+            code: manualCode,
+          });
+        }
+      };
 
       const ensureStubResources = async (forceRecreate = false) => {
         if (!forceRecreate && tournament.providerId && tournament.stubTournamentId) return;
@@ -255,14 +287,38 @@ export async function POST(
         await tournament.save();
       };
 
-      await ensureStubResources(false);
-
       let recoveredFromStaleStub = false;
+      let manualFallbackCount = 0;
+      const allowManualCodeFallback = process.env.TOURNAMENT_MANUAL_CODE_FALLBACK !== "0";
+
+      try {
+        await ensureStubResources(false);
+      } catch (error) {
+        const canFallback =
+          allowManualCodeFallback && error instanceof RiotApiError && error.status === 403;
+        if (!canFallback) throw error;
+
+        await applyManualCodes();
+        manualFallbackCount = readyMatches.length;
+
+        revalidatePath(`/tournaments/${tournament.slug}`);
+        revalidatePath(`/tournaments/${tournament.slug}/manage`);
+
+        return NextResponse.json({
+          ok: true,
+          generated: readyMatches.length,
+          round: targetRound,
+          generatedCodes,
+          manualFallbackCount,
+          warning:
+            "Riot tournament API is forbidden for this key; generated manual lobby codes instead.",
+        });
+      }
 
       for (const match of readyMatches) {
-        let codes: string[];
+        let tournamentCode: string | null = null;
         try {
-          codes = await createTournamentStubCodes(
+          const codes = await createTournamentStubCodes(
             tournament.platform ?? "sg2",
             tournament.stubTournamentId!,
             1,
@@ -275,6 +331,7 @@ export async function POST(
               }),
             }
           );
+          tournamentCode = Array.isArray(codes) ? codes[0] : null;
         } catch (error) {
           const shouldRecover =
             error instanceof RiotApiError && (error.status === 403 || error.status === 404);
@@ -282,24 +339,56 @@ export async function POST(
           if (!shouldRecover || recoveredFromStaleStub) throw error;
 
           recoveredFromStaleStub = true;
-          await ensureStubResources(true);
+          try {
+            await ensureStubResources(true);
+          } catch (recreateError) {
+            const canFallback =
+              allowManualCodeFallback && recreateError instanceof RiotApiError && recreateError.status === 403;
+            if (!canFallback) throw recreateError;
 
-          codes = await createTournamentStubCodes(
-            tournament.platform ?? "sg2",
-            tournament.stubTournamentId!,
-            1,
-            {
-              teamSize: tournament.teamSize ?? 5,
-              metadata: JSON.stringify({
-                slug: tournament.slug,
-                round: match.round,
-                slot: match.slot,
-              }),
-            }
-          );
+            tournamentCode = buildManualTournamentCode(tournament.slug, match.round, match.slot);
+            manualFallbackCount += 1;
+            if (!tournamentCode) continue;
+
+            await TournamentMatch.updateOne(
+              { _id: match._id },
+              {
+                $set: {
+                  tournamentCode,
+                  status: "code_ready",
+                },
+              }
+            );
+            continue;
+          }
+
+          try {
+            const codes = await createTournamentStubCodes(
+              tournament.platform ?? "sg2",
+              tournament.stubTournamentId!,
+              1,
+              {
+                teamSize: tournament.teamSize ?? 5,
+                metadata: JSON.stringify({
+                  slug: tournament.slug,
+                  round: match.round,
+                  slot: match.slot,
+                }),
+              }
+            );
+            tournamentCode = Array.isArray(codes) ? codes[0] : null;
+          } catch (retryError) {
+            const canFallback =
+              allowManualCodeFallback &&
+              retryError instanceof RiotApiError &&
+              retryError.status === 403;
+            if (!canFallback) throw retryError;
+
+            tournamentCode = buildManualTournamentCode(tournament.slug, match.round, match.slot);
+            manualFallbackCount += 1;
+          }
         }
 
-        const tournamentCode = Array.isArray(codes) ? codes[0] : null;
         if (!tournamentCode) continue;
 
         await TournamentMatch.updateOne(
@@ -311,12 +400,28 @@ export async function POST(
             },
           }
         );
+        generatedCodes.push({
+          matchId: String(match._id),
+          round: match.round,
+          slot: match.slot,
+          code: tournamentCode,
+        });
       }
 
       revalidatePath(`/tournaments/${tournament.slug}`);
       revalidatePath(`/tournaments/${tournament.slug}/manage`);
 
-      return NextResponse.json({ ok: true, generated: readyMatches.length, round: targetRound });
+      return NextResponse.json({
+        ok: true,
+        generated: readyMatches.length,
+        round: targetRound,
+        generatedCodes,
+        manualFallbackCount,
+        warning:
+          manualFallbackCount > 0
+            ? "Riot tournament API is forbidden for this key; generated manual lobby codes instead."
+            : undefined,
+      });
     }
 
     const match = await TournamentMatch.findOne({
