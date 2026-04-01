@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import ProfileAvatar from "@/components/ProfileAvatar";
 import RankEmblem from "@/components/RankEmblem";
+import { formatNumber, formatRelativeTime } from "@/lib/displayTime";
 
 const CHAMP_SUMMARY_URL =
   "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-summary.json";
@@ -145,7 +146,7 @@ function shortNumber(value?: number | null) {
   if (value == null) return null;
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return null;
-  if (Math.abs(numeric) < 1000) return numeric.toLocaleString();
+  if (Math.abs(numeric) < 1000) return formatNumber(numeric);
 
   const units = ["K", "M", "B"];
   let scaled = Math.abs(numeric);
@@ -166,16 +167,10 @@ function parseUpdatedTs(iso?: string | null) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function relTime(iso?: string | null) {
+function relTime(iso: string | null | undefined) {
   const timestamp = parseUpdatedTs(iso);
   if (!timestamp) return "--";
-
-  const minutes = Math.floor((Date.now() - timestamp) / 60000);
-  if (minutes < 1) return "now";
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  return `${Math.floor(hours / 24)}d`;
+  return formatRelativeTime(timestamp, Date.now()) ?? "--";
 }
 
 function prettyRank(tier?: string | null, div?: string | null) {
@@ -252,7 +247,7 @@ function MainsStrip({
         const championName =
           main.name ?? (main.championId != null ? champNames[String(main.championId)] : null) ?? "Unknown";
         const shortPoints = shortNumber(main.points);
-        const fullPoints = main.points != null ? Number(main.points).toLocaleString() : null;
+        const fullPoints = main.points != null ? formatNumber(main.points) : null;
 
         return (
           <span
@@ -302,60 +297,56 @@ function QueueCell({
   const peakRanked = !!peakTier;
 
   return (
-    <div className="grid gap-2">
-      <div className="rounded-2xl bg-zinc-950/35 p-3 ring-1 ring-white/5">
-        <div className="flex items-start gap-3">
-          <div className="rounded-2xl bg-zinc-950/70 p-2 ring-1 ring-white/5">
+    <div className="space-y-1.5">
+      <div className="flex items-start gap-3 rounded-xl bg-zinc-950/24 px-3 py-2.5">
+        <div className="rounded-xl bg-zinc-950/55 p-1.5 ring-1 ring-white/5">
             <RankEmblem
               tier={tier}
-              className="h-11 w-11 shrink-0"
+              className="h-9 w-9 shrink-0"
               alt={tier ? `${tier} emblem` : "Unranked emblem"}
             />
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="text-sm font-semibold text-zinc-100">{prettyRank(tier, div)}</div>
+            {currentRanked && lp != null ? (
+              <Pill className="border-zinc-700 bg-zinc-900/80 text-zinc-200">
+                {formatNumber(lp)} LP
+              </Pill>
+            ) : null}
           </div>
 
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="text-sm font-semibold text-zinc-100">{prettyRank(tier, div)}</div>
-              {currentRanked && lp != null ? (
-                <Pill className="border-zinc-700 bg-zinc-900/80 text-zinc-200">
-                  {Number(lp).toLocaleString()} LP
-                </Pill>
-              ) : null}
-            </div>
+          <div className="mt-1 text-xs tabular-nums text-zinc-400">
+            {wins != null && losses != null ? `${wins}-${losses}` : "--"} / {wr != null ? `${wr}%` : "--"}
+          </div>
 
-            <div className="mt-1 text-xs tabular-nums text-zinc-400">
-              {wins != null && losses != null ? `${wins}-${losses}` : "--"} / {wr != null ? `${wr}%` : "--"}
-            </div>
-
-            <div className="mt-1 text-[11px] uppercase tracking-wide text-zinc-500">
-              {currentRanked ? labelRanked : labelUnranked}
-            </div>
+          <div className="mt-1 text-[11px] uppercase tracking-wide text-zinc-500">
+            {currentRanked ? labelRanked : labelUnranked}
           </div>
         </div>
       </div>
 
-      <div className="rounded-2xl bg-zinc-950/25 p-3 ring-1 ring-white/5">
-        <div className="flex items-start gap-3">
-          <div className="rounded-2xl bg-zinc-950/70 p-2 ring-1 ring-white/5">
+      <div className="flex items-start gap-3 border-t border-white/6 pt-2">
+        <div className="rounded-xl bg-zinc-950/40 p-1.5 ring-1 ring-white/5">
             <RankEmblem
               tier={peakTier}
-              className="h-8 w-8 shrink-0"
+              className="h-7 w-7 shrink-0"
               alt={peakTier ? `${peakTier} peak emblem` : "Peak emblem"}
             />
-          </div>
+        </div>
 
-          <div className="min-w-0 flex-1">
-            <div className="text-[11px] uppercase tracking-wide text-zinc-500">Peak</div>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <span className={"text-sm font-medium " + (peakRanked ? "text-zinc-100" : "text-zinc-500")}>
-                {peakRanked ? prettyRank(peakTier, peakDiv) : "No peak saved"}
-              </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[11px] uppercase tracking-wide text-zinc-500">Peak</div>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <span className={"text-sm font-medium " + (peakRanked ? "text-zinc-100" : "text-zinc-500")}>
+              {peakRanked ? prettyRank(peakTier, peakDiv) : "No peak saved"}
+            </span>
             {peakRanked && peakLp != null ? (
               <Pill className="border-zinc-700 bg-zinc-900/80 text-zinc-300">
-                {Number(peakLp).toLocaleString()} LP
+                {formatNumber(peakLp)} LP
               </Pill>
-              ) : null}
-            </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -363,7 +354,11 @@ function QueueCell({
   );
 }
 
-export default function LeaderboardTable({ initialRows }: { initialRows: LeaderboardRow[] }) {
+export default function LeaderboardTable({
+  initialRows,
+}: {
+  initialRows: LeaderboardRow[];
+}) {
   const [sort, setSort] = useState<SortState>({ col: "soloRank", dir: "desc" });
   const [pageSize, setPageSize] = useState(10);
   const [page, setPage] = useState(1);
@@ -543,7 +538,7 @@ export default function LeaderboardTable({ initialRows }: { initialRows: Leaderb
           const absoluteIndex = (safePage - 1) * pageSize + index + 1;
 
           return (
-            <article key={row.id} className="rounded-3xl bg-zinc-900/30 p-4 ring-1 ring-white/5">
+            <article key={row.id} className="rounded-[24px] bg-zinc-900/22 p-4">
               <div className="flex items-start gap-3">
                 <ProfileAvatar
                   iconId={row.profileIconId ?? null}
@@ -603,11 +598,11 @@ export default function LeaderboardTable({ initialRows }: { initialRows: Leaderb
         })}
 
         {!slice.length ? (
-          <div className="rounded-3xl bg-zinc-900/30 p-6 text-zinc-400 ring-1 ring-white/5">No players.</div>
+          <div className="rounded-[24px] bg-zinc-900/22 p-6 text-zinc-400">No players.</div>
         ) : null}
       </div>
 
-      <div className="hidden overflow-x-auto rounded-3xl bg-zinc-900/30 ring-1 ring-white/5 xl:block">
+      <div className="hidden overflow-x-auto rounded-[24px] bg-zinc-900/22 xl:block">
         <table className="min-w-full text-sm">
           <thead className="sticky top-0 border-b border-white/8 bg-zinc-950/85 backdrop-blur">
             <tr className="text-zinc-300">

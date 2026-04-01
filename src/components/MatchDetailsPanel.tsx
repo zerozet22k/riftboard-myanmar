@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import RankEmblem from "@/components/RankEmblem";
+import { formatNumber } from "@/lib/displayTime";
 
 type RankSnapshot = {
   tier?: string | null;
@@ -93,7 +94,7 @@ function formatRank(snapshot: RankSnapshot | null | undefined) {
   if (!snapshot?.tier) return "UNRANKED";
   const tier = String(snapshot.tier).toUpperCase();
   const division = snapshot.division ? ` ${String(snapshot.division).toUpperCase()}` : "";
-  const lp = snapshot.lp != null ? ` ${Number(snapshot.lp).toLocaleString()} LP` : "";
+  const lp = snapshot.lp != null ? ` ${formatNumber(snapshot.lp)} LP` : "";
   return `${tier}${division}${lp}`.trim();
 }
 
@@ -511,17 +512,17 @@ function MobileParticipantRow({
         <MobileStat label="KDA" value={`${kills}/${deaths}/${assists}`} subvalue={`${kda} KDA`} />
         <MobileStat
           label="Damage"
-          value={participant.damage != null ? participant.damage.toLocaleString() : "--"}
-          subvalue={`${participant.gold != null ? participant.gold.toLocaleString() : "--"} gold`}
+          value={formatNumber(participant.damage) ?? "--"}
+          subvalue={`${formatNumber(participant.gold) ?? "--"} gold`}
         />
         <MobileStat
           label="Vision"
-          value={participant.visionScore != null ? participant.visionScore.toLocaleString() : "--"}
+          value={formatNumber(participant.visionScore) ?? "--"}
           subvalue={`${participant.wardsPlaced ?? "--"} / ${participant.wardsKilled ?? "--"}`}
         />
         <MobileStat
           label="CS"
-          value={participant.cs != null ? participant.cs.toLocaleString() : "--"}
+          value={formatNumber(participant.cs) ?? "--"}
           subvalue={csPm ? `${csPm}/m` : "--"}
         />
       </div>
@@ -592,12 +593,7 @@ function MobileTeamList({
 
   return (
     <section
-      className={
-        "rounded-[18px] ring-1 " +
-        (tone === "blue"
-          ? "bg-blue-500/[0.045] ring-blue-400/10"
-          : "bg-red-500/[0.045] ring-red-400/10")
-      }
+      className={tone === "blue" ? "rounded-[18px] bg-blue-500/[0.038]" : "rounded-[18px] bg-red-500/[0.038]"}
     >
       <div className="flex items-center gap-2 border-b border-white/6 px-3 py-2">
         <div className="text-xs font-semibold text-zinc-100">{title}</div>
@@ -660,12 +656,7 @@ function TeamTable({
 
   return (
     <section
-      className={
-        "rounded-[18px] ring-1 " +
-        (tone === "blue"
-          ? "bg-blue-500/[0.035] ring-blue-400/10"
-          : "bg-red-500/[0.035] ring-red-400/10")
-      }
+      className={tone === "blue" ? "rounded-[18px] bg-blue-500/[0.032]" : "rounded-[18px] bg-red-500/[0.032]"}
     >
       <div className="flex items-center gap-2 border-b border-white/6 px-3 py-2">
         <div className="text-xs font-semibold text-zinc-100">{title}</div>
@@ -754,7 +745,7 @@ function TeamTable({
 
                 <td className="border-t border-white/6 px-1.5 py-2">
                   <div className="font-medium tabular-nums text-zinc-100">
-                    {damage != null ? damage.toLocaleString() : "--"}
+                    {formatNumber(damage) ?? "--"}
                   </div>
                   <div className="mt-1 h-1.5 w-[60px] rounded-full bg-white/6">
                     <div
@@ -768,7 +759,7 @@ function TeamTable({
 
                 <td className="border-t border-white/6 px-1.5 py-2">
                   <div className="font-medium tabular-nums text-zinc-100">
-                    {vision != null ? vision.toLocaleString() : "--"}
+                    {formatNumber(vision) ?? "--"}
                   </div>
                   <div className="mt-0.5 text-[9px] tabular-nums text-zinc-500">
                     {participant.wardsPlaced ?? "--"} / {participant.wardsKilled ?? "--"}
@@ -777,13 +768,13 @@ function TeamTable({
 
                 <td className="border-t border-white/6 px-1.5 py-2">
                   <div className="font-medium tabular-nums text-zinc-100">
-                    {participant.cs != null ? participant.cs.toLocaleString() : "--"}
+                    {formatNumber(participant.cs) ?? "--"}
                   </div>
                   <div className="mt-0.5 text-[9px] tabular-nums text-zinc-500">
                     {csPm ? `${csPm}/m` : "--"}
                   </div>
                   <div className="mt-0.5 text-[9px] tabular-nums text-zinc-500">
-                    {participant.gold != null ? participant.gold.toLocaleString() : "--"} gold
+                    {formatNumber(participant.gold) ?? "--"} gold
                   </div>
                 </td>
 
@@ -867,7 +858,7 @@ export default function MatchDetailsPanel({
 }) {
   return (
     <div className="mt-2 space-y-2">
-      <div className="px-3 sm:px-4">
+      <div className="px-5 sm:px-6">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/6 pb-2">
           <div>
             <div className="text-xs font-semibold text-zinc-100">Match details</div>
@@ -884,8 +875,8 @@ export default function MatchDetailsPanel({
         </div>
       </div>
 
-      {loading ? <div className="px-1 py-2 text-sm text-zinc-400">Loading team details...</div> : null}
-      {!loading && error ? <div className="px-1 py-2 text-sm text-red-300">{error}</div> : null}
+      {loading ? <div className="px-5 py-2 text-sm text-zinc-400 sm:px-6">Loading team details...</div> : null}
+      {!loading && error ? <div className="px-5 py-2 text-sm text-red-300 sm:px-6">{error}</div> : null}
 
       {!loading && !error && details?.teams ? (
         <>
@@ -950,7 +941,7 @@ export default function MatchDetailsPanel({
       ) : null}
 
       {!loading && !error && !details?.teams ? (
-        <div className="px-1 py-2 text-sm text-zinc-500">No extra details stored for this match yet.</div>
+        <div className="px-5 py-2 text-sm text-zinc-500 sm:px-6">No extra details stored for this match yet.</div>
       ) : null}
     </div>
   );

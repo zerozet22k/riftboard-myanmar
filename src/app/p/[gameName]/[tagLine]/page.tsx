@@ -6,6 +6,11 @@ import ProfileAvatar from "@/components/ProfileAvatar";
 import ProfileRefreshButton from "@/components/ProfileRefreshButton";
 import RankEmblem from "@/components/RankEmblem";
 import { getLatestDdragonVersion } from "@/lib/ddragon";
+import {
+  formatFullDateTime,
+  formatMetaDateTime as formatDisplayMetaDateTime,
+  formatNumber,
+} from "@/lib/displayTime";
 import { dbConnect } from "@/lib/mongodb";
 import { buildPlayerLookupQuery, canonicalPlayerPath } from "@/lib/playerIdentity";
 import { bestRankSnapshot } from "@/lib/rank";
@@ -93,32 +98,6 @@ function isoOrNull(value: Date | string | null | undefined) {
   return parsed.toISOString();
 }
 
-function formatDateTime(value: Date | string | null | undefined) {
-  if (!value) return null;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return new Intl.DateTimeFormat(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(parsed);
-}
-
-function formatMetaDateTime(value: Date | string | null | undefined) {
-  if (!value) return null;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(parsed);
-}
-
 function rankLine(tier?: string | null, division?: string | null, lp?: number | null) {
   if (!tier) return "UNRANKED";
   const tierText = String(tier).toUpperCase();
@@ -134,7 +113,7 @@ function peakRankFromHistory(history: PeakRankLike[], current: PeakRankLike | nu
 }
 
 function peakSeenLabel(snapshot?: PeakRankLike | null) {
-  return formatDateTime(snapshot?.fetchedAt ?? null);
+  return formatFullDateTime(snapshot?.fetchedAt ?? null);
 }
 
 function cursorFromLast(last: MatchDoc | undefined) {
@@ -283,41 +262,38 @@ export default async function PlayerProfilePage({
     rankHistory.filter((entry) => entry.queue === "RANKED_FLEX_SR"),
     flex
   );
+  // eslint-disable-next-line react-hooks/purity
+  const renderedAtMs = Date.now();
 
   const nameShown = `${player.gameName}#${player.tagLine}`;
-  const lastUpdated =
-    formatDateTime(player.lastRefreshAt) ??
-    formatDateTime(isoOrNull(player.solo?.fetchedAt)) ??
-    formatDateTime(isoOrNull(player.flex?.fetchedAt));
-  const masteryUpdated = formatDateTime(player.masterySyncedAt);
   const lastUpdatedShort =
-    formatMetaDateTime(player.lastRefreshAt) ??
-    formatMetaDateTime(isoOrNull(player.solo?.fetchedAt)) ??
-    formatMetaDateTime(isoOrNull(player.flex?.fetchedAt));
-  const masteryUpdatedShort = formatMetaDateTime(player.masterySyncedAt);
+    formatDisplayMetaDateTime(player.lastRefreshAt) ??
+    formatDisplayMetaDateTime(isoOrNull(player.solo?.fetchedAt)) ??
+    formatDisplayMetaDateTime(isoOrNull(player.flex?.fetchedAt));
+  const masteryUpdatedShort = formatDisplayMetaDateTime(player.masterySyncedAt);
   const masteryPath = `${canonicalPath}/mastery`;
   const initialCursor = cursorFromLast(matchDocs[matchDocs.length - 1]);
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(30,41,59,0.42),transparent_34%),radial-gradient(circle_at_18%_18%,rgba(16,185,129,0.14),transparent_22%),#09090b] text-zinc-100">
-      <div className="mx-auto w-full space-y-6 px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
-        <section className="relative overflow-hidden rounded-[32px] bg-zinc-950/70 p-5 shadow-[0_24px_80px_rgba(0,0,0,0.35)] ring-1 ring-white/5 sm:p-6 lg:p-8">
+      <div className="mx-auto w-full max-w-[1400px] space-y-3 px-4 py-3 sm:px-5 sm:py-4 lg:px-6">
+        <section className="relative overflow-hidden rounded-[24px] bg-zinc-950/62 p-4 ring-1 ring-white/5 sm:p-5">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(16,185,129,0.16),transparent_30%),radial-gradient(circle_at_bottom_left,rgba(59,130,246,0.14),transparent_26%)]" />
 
-          <div className="relative flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
-            <div className="flex w-full flex-col gap-5 lg:flex-row lg:items-center">
+          <div className="relative grid gap-3 xl:grid-cols-[minmax(0,1fr)_260px]">
+            <div className="flex w-full flex-col gap-3 lg:flex-row lg:items-center">
               <ProfileAvatar
                 iconId={player.profileIconId ?? null}
                 ddragonVersion={ddVer}
                 alt={`${nameShown} profile icon`}
-                className="h-20 w-20 shrink-0 sm:h-28 sm:w-28 lg:h-32 lg:w-32"
+                className="h-[72px] w-[72px] shrink-0 sm:h-[88px] sm:w-[88px]"
                 level={player.summonerLevel ?? null}
               />
 
-              <div className="min-w-0 space-y-4">
+              <div className="min-w-0 space-y-2.5">
                 <div>
                   <div className="flex flex-wrap items-center gap-3">
-                    <h1 className="text-2xl font-semibold tracking-tight text-zinc-50 sm:text-4xl">
+                    <h1 className="text-2xl font-semibold tracking-tight text-zinc-50 sm:text-[2rem]">
                       {nameShown}
                     </h1>
                     <Pill className="border-zinc-700 bg-zinc-900/70 text-zinc-300">
@@ -328,36 +304,36 @@ export default async function PlayerProfilePage({
                     </Pill>
                   </div>
 
-                  <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-zinc-300">
-                    <div className="inline-flex items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1.5">
-                      <RankEmblem tier={solo.tier ?? null} className="h-5 w-5 shrink-0" alt="" />
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-zinc-300">
+                    <div className="inline-flex items-center gap-2 rounded-full bg-emerald-500/10 px-3 py-1">
+                      <RankEmblem tier={solo.tier ?? null} className="h-4 w-4 shrink-0" alt="" />
                       <span>{rankLine(solo.tier ?? null, solo.division ?? null, solo.lp ?? null)}</span>
                     </div>
-                    <div className="inline-flex items-center gap-2 rounded-full border border-zinc-700 bg-zinc-900/50 px-3 py-1.5 text-zinc-400">
-                      <RankEmblem tier={flex.tier ?? null} className="h-5 w-5 shrink-0" alt="" />
+                    <div className="inline-flex items-center gap-2 rounded-full bg-zinc-900/45 px-3 py-1 text-zinc-400">
+                      <RankEmblem tier={flex.tier ?? null} className="h-4 w-4 shrink-0" alt="" />
                       <span>{rankLine(flex.tier ?? null, flex.division ?? null, flex.lp ?? null)}</span>
                     </div>
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-start gap-3">
-                  <StatTile label="Level" value={player.summonerLevel != null ? player.summonerLevel.toLocaleString() : "--"} />
+                <div className="flex flex-wrap items-start gap-2.5">
+                  <StatTile label="Level" value={formatNumber(player.summonerLevel) ?? "--"} />
                   <MetaInfoButton
                     lastUpdated={lastUpdatedShort}
                     masteryUpdated={masteryUpdatedShort}
                   />
                 </div>
 
-                <div className="flex flex-wrap gap-3">
+                <div className="flex flex-wrap gap-2.5">
                   <Link
                     href="/leaderboard"
-                    className="rounded-2xl border border-zinc-700 bg-zinc-900/70 px-4 py-2.5 text-sm font-medium text-zinc-100 transition hover:border-zinc-500 hover:bg-white/5"
+                    className="rounded-xl bg-zinc-900/52 px-3.5 py-2 text-sm font-medium text-zinc-100 transition hover:bg-white/5"
                   >
                     Open leaderboard
                   </Link>
                   <Link
                     href={masteryPath}
-                    className="rounded-2xl border border-zinc-800 bg-zinc-950/50 px-4 py-2.5 text-sm font-medium text-zinc-300 transition hover:border-zinc-600 hover:bg-white/5"
+                    className="rounded-xl bg-zinc-950/42 px-3.5 py-2 text-sm font-medium text-zinc-300 transition hover:bg-white/5"
                   >
                     Full mastery
                   </Link>
@@ -365,7 +341,7 @@ export default async function PlayerProfilePage({
               </div>
             </div>
 
-            <div className="flex w-full flex-col gap-3 xl:w-[380px] xl:max-w-none">
+            <div className="flex w-full flex-col gap-2">
               <div className="flex justify-start xl:justify-end">
                 <ProfileRefreshButton gameName={canonicalGameName} tagLine={canonicalTagLineLower} />
               </div>
@@ -382,8 +358,8 @@ export default async function PlayerProfilePage({
           </div>
         </section>
 
-        <div className="grid gap-6 2xl:grid-cols-[360px_minmax(0,1fr)]">
-          <aside className="space-y-6">
+        <div className="grid gap-3 2xl:grid-cols-[280px_minmax(0,1fr)]">
+          <aside className="space-y-3">
             <RankCard
               title="Ranked Solo"
               tier={solo.tier ?? null}
@@ -404,14 +380,14 @@ export default async function PlayerProfilePage({
             />
           </aside>
 
-          <div className="space-y-6">
-            <section className="rounded-[30px] bg-zinc-900/25 p-5 ring-1 ring-white/5 sm:p-6">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div className="space-y-4">
+            <section className="rounded-[22px] bg-zinc-900/18 p-4 ring-1 ring-white/5 sm:p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                   <div className="text-[11px] uppercase tracking-[0.22em] text-zinc-500">
                     Champion pool
                   </div>
-                  <div className="mt-1 text-2xl font-semibold tracking-tight text-zinc-50">
+                  <div className="mt-1 text-xl font-semibold tracking-tight text-zinc-50">
                     Top champions
                   </div>
                   <div className="mt-2 text-sm text-zinc-400">
@@ -426,7 +402,7 @@ export default async function PlayerProfilePage({
                 </Link>
               </div>
 
-              <div className="mt-5 grid gap-3 md:grid-cols-3">
+              <div className="mt-3 grid gap-2 md:grid-cols-3">
                 {Array.isArray(player.mains) && player.mains.length ? (
                   player.mains.slice(0, 3).map((main, index) => {
                     const championId = typeof main?.championId === "number" ? main.championId : null;
@@ -437,7 +413,7 @@ export default async function PlayerProfilePage({
                     return (
                       <div
                         key={`${championId ?? "unknown"}-${index}`}
-                        className="rounded-3xl bg-zinc-950/45 p-4 ring-1 ring-white/5"
+                        className="rounded-[16px] bg-zinc-950/36 p-3"
                         title={
                           championName
                             ? `${championName} (#${championId})`
@@ -451,17 +427,17 @@ export default async function PlayerProfilePage({
                             <img
                               src={icon}
                               alt={championName ?? "Champion"}
-                              className="h-12 w-12 rounded-2xl border border-zinc-800"
+                              className="h-9 w-9 rounded-lg"
                             />
                           ) : (
-                            <div className="h-12 w-12 rounded-2xl border border-zinc-800 bg-zinc-900/40" />
+                            <div className="h-9 w-9 rounded-lg bg-zinc-900/40" />
                           )}
                           <div className="min-w-0">
-                            <div className="truncate text-base font-semibold text-zinc-100">
+                            <div className="truncate text-sm font-semibold text-zinc-100">
                               {championName ?? (championId != null ? `#${championId}` : "--")}
                             </div>
                             <div className="mt-1 text-sm tabular-nums text-zinc-400">
-                              {points != null ? points.toLocaleString() : "--"} pts
+                              {formatNumber(points) ?? "--"} pts
                             </div>
                           </div>
                         </div>
@@ -482,7 +458,7 @@ export default async function PlayerProfilePage({
                   <div className="text-[11px] uppercase tracking-[0.22em] text-zinc-500">
                     Recent games
                   </div>
-                  <div className="mt-1 text-2xl font-semibold tracking-tight text-zinc-50">
+                  <div className="mt-1 text-xl font-semibold tracking-tight text-zinc-50">
                     Match history
                   </div>
                 </div>
@@ -493,6 +469,7 @@ export default async function PlayerProfilePage({
                 ddragonVersion={ddVer}
                 initialMatches={initialMatches}
                 initialCursor={initialCursor}
+                renderedAtMs={renderedAtMs}
               />
             </section>
           </div>
@@ -519,9 +496,9 @@ function Pill({ children, className = "" }: { children: ReactNode; className?: s
 
 function StatTile({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="min-w-[140px] rounded-2xl bg-zinc-900/25 px-4 py-3 ring-1 ring-white/5">
+    <div className="min-w-[104px] rounded-xl bg-zinc-900/18 px-3 py-2">
       <div className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">{label}</div>
-      <div className="mt-2 text-sm text-zinc-200">{value}</div>
+      <div className="mt-1 text-sm text-zinc-200">{value}</div>
     </div>
   );
 }
@@ -535,7 +512,10 @@ function MetaInfoButton({
 }) {
   return (
     <details className="group relative">
-      <summary className="flex h-[54px] w-[54px] list-none items-center justify-center rounded-2xl bg-zinc-900/25 text-sm font-semibold text-zinc-300 ring-1 ring-white/5 transition hover:bg-white/5">
+      <summary
+        aria-label="Show private sync info"
+        className="flex h-9 w-9 list-none items-center justify-center rounded-full bg-zinc-900/22 text-sm font-semibold text-zinc-300 ring-1 ring-white/5 transition hover:bg-white/5"
+      >
         i
       </summary>
       <div className="absolute left-0 top-[calc(100%+10px)] z-20 w-[220px] rounded-2xl bg-zinc-950/96 p-3 text-sm text-zinc-300 shadow-[0_18px_50px_rgba(0,0,0,0.35)] ring-1 ring-white/8 sm:left-auto sm:right-0">
@@ -573,10 +553,10 @@ function HeroQueueSummary({
   secondaryTier: string | null;
 }) {
   return (
-    <div className="rounded-[28px] bg-zinc-900/35 p-4 ring-1 ring-white/5">
+    <div className="rounded-[18px] bg-zinc-900/20 p-2.5 ring-1 ring-white/5">
       <div className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">{title}</div>
 
-      <div className="mt-3 space-y-3">
+      <div className="mt-2 space-y-1.5">
         <HeroQueueSummaryRow label={primaryLabel} line={primaryLine} tier={primaryTier} />
         <HeroQueueSummaryRow label={secondaryLabel} line={secondaryLine} tier={secondaryTier} />
       </div>
@@ -594,13 +574,11 @@ function HeroQueueSummaryRow({
   tier: string | null;
 }) {
   return (
-    <div className="flex items-center gap-3 rounded-2xl bg-zinc-950/45 px-3 py-3 ring-1 ring-white/5">
-      <div className="rounded-2xl bg-zinc-900/60 p-2 ring-1 ring-white/5">
-        <RankEmblem tier={tier} className="h-10 w-10 shrink-0" alt="" />
-      </div>
+    <div className="flex items-center gap-2 rounded-xl bg-zinc-950/34 px-2.5 py-2">
+      <RankEmblem tier={tier} className="h-7 w-7 shrink-0" alt="" />
       <div className="min-w-0">
         <div className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">{label}</div>
-        <div className="mt-1 truncate text-sm font-medium text-zinc-100">{line}</div>
+        <div className="mt-0.5 truncate text-xs font-medium text-zinc-100">{line}</div>
       </div>
     </div>
   );
@@ -630,21 +608,21 @@ function RankCard({
   const peakSeen = peakSeenLabel(peak);
 
   return (
-    <div className="overflow-hidden rounded-[30px] bg-[linear-gradient(180deg,rgba(24,24,27,0.92),rgba(9,9,11,0.88))] p-5 ring-1 ring-white/5 sm:p-6">
+    <div className="overflow-hidden rounded-[20px] bg-zinc-900/18 p-4 ring-1 ring-white/5">
       <div className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">{title}</div>
 
-      <div className="mt-4 flex items-start gap-4">
-        <div className="rounded-[26px] bg-zinc-950/70 p-3 shadow-[0_12px_30px_rgba(0,0,0,0.2)] ring-1 ring-white/5">
+      <div className="mt-3 flex items-start gap-3">
+        <div className="rounded-[18px] bg-zinc-950/40 p-2 ring-1 ring-white/5">
           <RankEmblem
             tier={tier}
-            className="h-16 w-16 shrink-0 sm:h-20 sm:w-20"
+            className="h-12 w-12 shrink-0"
             alt={tier ? `${tier} emblem` : "Unranked emblem"}
           />
         </div>
 
         <div className="min-w-0 flex-1">
-          <div className="text-xl font-semibold tracking-tight text-zinc-50">{currentLine}</div>
-          <div className="mt-3 flex flex-wrap gap-5 text-sm text-zinc-400">
+          <div className="text-base font-semibold tracking-tight text-zinc-50">{currentLine}</div>
+          <div className="mt-2 flex flex-wrap gap-4 text-sm text-zinc-400">
             <div>
               <span className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Record</span>
               <div className="mt-1 tabular-nums text-zinc-100">{wl}</div>
@@ -657,18 +635,18 @@ function RankCard({
         </div>
       </div>
 
-      <div className="mt-4 border-t border-white/8 pt-4">
+      <div className="mt-3 border-t border-white/8 pt-3">
         <div className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">Peak rank</div>
-        <div className="mt-3 flex items-center gap-3">
-          <div className="rounded-2xl bg-zinc-900/60 p-2.5 ring-1 ring-white/5">
+        <div className="mt-2 flex items-center gap-2.5">
+          <div className="rounded-xl bg-zinc-900/40 p-1.5 ring-1 ring-white/5">
             <RankEmblem
               tier={peak?.tier ?? null}
-              className="h-12 w-12 shrink-0"
+              className="h-8 w-8 shrink-0"
               alt={peak?.tier ? `${peak.tier} peak emblem` : "Peak rank emblem"}
             />
           </div>
           <div className="min-w-0">
-            <div className="text-base font-semibold text-zinc-100">
+            <div className="text-sm font-semibold text-zinc-100">
               {peakLine ?? "Not enough history yet"}
             </div>
             <div className="mt-1 text-xs text-zinc-500">

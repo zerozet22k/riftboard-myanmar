@@ -37,7 +37,16 @@ export type ChampionMastery = {
 
 export type MatchId = string;
 
-export type MatchV5 = any;
+export type MatchV5 = unknown;
+
+export type StubTournamentCodeParams = {
+  mapType?: string;
+  pickType?: string;
+  spectatorType?: string;
+  teamSize?: number;
+  metadata?: string;
+  allowedSummonerIds?: string[];
+};
 
 function mustEnv(name: string) {
   const v = process.env[name];
@@ -185,6 +194,50 @@ export async function getPuuidByRiotId(gameName: string, tagLine: string) {
   return riotFetch<RiotAccount>(url);
 }
 
+async function riotFetchWithBody<T>(
+  url: string,
+  body: unknown,
+  opts?: { maxRetries?: number }
+): Promise<T> {
+  const maxRetries = opts?.maxRetries ?? 3;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "X-Riot-Token": API_KEY(),
+        "Accept-Language": "en-US,en;q=0.9",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    });
+
+    if (res.ok) {
+      const text = await res.text();
+      if (!text) return undefined as T;
+      try {
+        return JSON.parse(text) as T;
+      } catch {
+        return text as T;
+      }
+    }
+
+    const text = await res.text().catch(() => "");
+    const msg = parseRiotErrorMessage(text || res.statusText);
+
+    if (res.status === 429 && attempt < maxRetries) {
+      const waitMs = retryAfterMsFromHeaders(res) ?? (1500 + attempt * 1500);
+      await sleep(waitMs + Math.floor(Math.random() * 250));
+      continue;
+    }
+
+    throw new RiotApiError(res.status, msg, { url, retryAfterMs: retryAfterMsFromHeaders(res) });
+  }
+
+  throw new RiotApiError(429, "Rate limit (retries exhausted)", { url });
+}
+
 export async function getAccountByPuuid(puuid: string) {
   for (const region of ACCOUNT_REGIONS) {
     const url =
@@ -290,4 +343,66 @@ export async function getMatchById(matchId: string, matchRegion?: string) {
   const host = matchHost(matchRegion);
   const url = `https://${host}.api.riotgames.com/lol/match/v5/matches/${encodeURIComponent(matchId)}`;
   return riotFetch<MatchV5>(url);
+}
+
+// -----------------------
+// Tournament Stub-V5
+// -----------------------
+
+export async function createTournamentStubProvider(platform: string, callbackUrl: string) {
+  const host = platform.toLowerCase();
+  const url = `https://${host}.api.riotgames.com/lol/tournament-stub/v5/providers`;
+  return riotFetchWithBody<number>(url, {
+    region: host.toUpperCase(),
+    url: callbackUrl,
+  });
+}
+
+export async function createTournamentStub(platform: string, providerId: number, name: string) {
+  const host = platform.toLowerCase();
+  const url = `https://${host}.api.riotgames.com/lol/tournament-stub/v5/tournaments`;
+  return riotFetchWithBody<number>(url, {
+    name,
+    providerId,
+  });
+}
+
+export async function createTournamentStubCodes(
+  platform: string,
+  tournamentId: number,
+  count: number,
+  params?: StubTournamentCodeParams
+) {
+  const host = platform.toLowerCase();
+  const url =
+    `https://${host}.api.riotgames.com/lol/tournament-stub/v5/codes?` +
+    new URLSearchParams({
+      tournamentId: String(tournamentId),
+      count: String(count),
+    }).toString();
+
+  return riotFetchWithBody<string[]>(url, {
+    mapType: params?.mapType ?? "CLASSIC",
+    pickType: params?.pickType ?? "TOURNAMENT_DRAFT",
+    spectatorType: params?.spectatorType ?? "ALL",
+    teamSize: params?.teamSize ?? 5,
+    metadata: params?.metadata ?? "",
+    allowedSummonerIds: params?.allowedSummonerIds ?? [],
+  });
+}
+
+export async function getTournamentStubCode(platform: string, tournamentCode: string) {
+  const host = platform.toLowerCase();
+  const url =
+    `https://${host}.api.riotgames.com/lol/tournament-stub/v5/codes/` +
+    `${encodeURIComponent(tournamentCode)}`;
+  return riotFetch<Record<string, unknown>>(url);
+}
+
+export async function getTournamentStubLobbyEvents(platform: string, tournamentCode: string) {
+  const host = platform.toLowerCase();
+  const url =
+    `https://${host}.api.riotgames.com/lol/tournament-stub/v5/lobby-events/by-code/` +
+    `${encodeURIComponent(tournamentCode)}`;
+  return riotFetch<Record<string, unknown>>(url);
 }

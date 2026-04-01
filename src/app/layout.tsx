@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -23,8 +23,6 @@ export const metadata: Metadata = {
   description:
     "RiftBoard Myanmar — a community League of Legends LP leaderboard and champion mains tracker.",
   applicationName: "RiftBoard Myanmar",
-  themeColor: "#09090b",
-  colorScheme: "dark",
   openGraph: {
     type: "website",
     url: "https://rift-board-myanmar.vercel.app/",
@@ -39,6 +37,11 @@ export const metadata: Metadata = {
     description:
       "Community League of Legends LP leaderboard and champion mains tracker.",
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#09090b",
+  colorScheme: "dark",
 };
 
 export default function RootLayout({

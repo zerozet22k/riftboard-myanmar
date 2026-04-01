@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import MatchDetailsPanel, { type MatchDetailsResponse } from "@/components/MatchDetailsPanel";
+import { formatCompactDateTime, formatNumber, formatRelativeTime } from "@/lib/displayTime";
 
 export type MatchRow = {
   _id: string;
@@ -108,18 +109,6 @@ function fmtDuration(sec: number | null) {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-function fmtAgo(epochMs: number | null) {
-  if (!epochMs || !Number.isFinite(epochMs)) return null;
-  const delta = Date.now() - epochMs;
-  if (delta < 0) return null;
-  const minutes = Math.floor(delta / 60000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 48) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
-}
-
 function sideLabel(teamId?: number | null) {
   if (teamId === 100) return "BLUE SIDE";
   if (teamId === 200) return "RED SIDE";
@@ -155,7 +144,7 @@ function ItemIcon({ id, url, info }: { id: number; url: string; info: ItemInfo |
       src={url}
       alt={title}
       title={title}
-      className="h-7 w-7 rounded-md border border-zinc-800 bg-zinc-900/30"
+      className="h-6 w-6 rounded-md border border-zinc-800 bg-zinc-900/30"
       loading="lazy"
     />
   );
@@ -191,12 +180,14 @@ export default function MatchHistory({
   ddragonVersion,
   initialMatches,
   initialCursor,
+  renderedAtMs,
 }: {
   gameName: string;
   tagLine: string;
   ddragonVersion: string;
   initialMatches: MatchRow[];
   initialCursor: string | null;
+  renderedAtMs: number;
 }) {
   const [items, setItems] = useState<MatchRow[]>(initialMatches);
   const [cursor, setCursor] = useState<string | null>(initialCursor);
@@ -383,7 +374,7 @@ export default function MatchHistory({
   const shownCount = useMemo(() => items.length, [items.length]);
 
   return (
-    <div className="space-y-3 rounded-[24px] bg-zinc-900/20 p-3 ring-1 ring-white/5 sm:p-4">
+    <div className="space-y-2">
       {empty ? (
         <div className="text-sm text-zinc-400">No matches yet. Hit Refresh to sync some.</div>
       ) : (
@@ -397,9 +388,8 @@ export default function MatchHistory({
             const assists = match.assists ?? 0;
             const kda = deaths === 0 ? `${kills + assists}.00` : ((kills + assists) / deaths).toFixed(2);
             const win = match.win === true;
-            const playedAt = match.gameCreation ? new Date(match.gameCreation) : null;
-            const playedStr = playedAt ? playedAt.toLocaleString() : "--";
-            const ago = fmtAgo(match.gameCreation ?? null);
+            const playedStr = formatCompactDateTime(match.gameCreation ?? null) ?? "--";
+            const ago = formatRelativeTime(match.gameCreation ?? null, renderedAtMs);
             const duration = fmtDuration(match.gameDuration ?? null);
             const isArena = match.queueId != null && ARENA_QUEUES.has(match.queueId);
             const side = !isArena ? sideLabel(match.teamId ?? null) : null;
@@ -416,12 +406,9 @@ export default function MatchHistory({
             return (
               <article
                 key={match._id}
-                className={
-                  `rounded-[20px] ` +
-                  `${win ? "bg-blue-500/[0.04]" : "bg-red-500/[0.04]"}`
-                }
+                className={`overflow-hidden rounded-[18px] ${win ? "bg-blue-500/[0.035]" : "bg-red-500/[0.035]"}`}
               >
-                <div className="space-y-3 p-3 sm:p-4 lg:hidden">
+                <div className="space-y-2 p-2.5 sm:p-3 lg:hidden">
                   <div
                     className={
                       "rounded-[16px] px-0 py-0 " +
@@ -446,18 +433,18 @@ export default function MatchHistory({
                       <img
                         src={champIcon}
                         alt={champName ?? "Champion"}
-                        className="h-14 w-14 rounded-[18px] bg-zinc-900/40 ring-1 ring-white/6"
+                        className="h-12 w-12 rounded-[14px] bg-zinc-900/40 ring-1 ring-white/6"
                         loading="lazy"
                       />
                     ) : (
-                      <div className="h-14 w-14 rounded-[18px] bg-zinc-900/40 ring-1 ring-white/6" />
+                      <div className="h-12 w-12 rounded-[14px] bg-zinc-900/40 ring-1 ring-white/6" />
                     )}
 
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <div className="truncate text-base font-semibold tracking-tight text-zinc-50">
-                          {champName ?? "Unknown champion"}
-                        </div>
+                      <div className="truncate text-sm font-semibold tracking-tight text-zinc-50 sm:text-[15px]">
+                        {champName ?? "Unknown champion"}
+                      </div>
                         {position ? (
                           <Pill className="border-transparent bg-zinc-900/60 text-zinc-300">{position}</Pill>
                         ) : null}
@@ -466,18 +453,18 @@ export default function MatchHistory({
                         ) : null}
                       </div>
 
-                      <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                      <div className="mt-1 flex flex-wrap items-center gap-1">
                         {spellAInfo ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
                             src={`https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/spell/${spellAInfo.iconFull}`}
                             alt={spellAInfo.name}
                             title={spellAInfo.name}
-                            className="h-7 w-7 rounded-md bg-zinc-900/30 ring-1 ring-white/6"
+                            className="h-5 w-5 rounded-md bg-zinc-900/30 ring-1 ring-white/6"
                             loading="lazy"
                           />
                         ) : (
-                          <div className="h-7 w-7 rounded-md bg-zinc-900/30 ring-1 ring-white/6" />
+                          <div className="h-5 w-5 rounded-md bg-zinc-900/30 ring-1 ring-white/6" />
                         )}
                         {spellBInfo ? (
                           // eslint-disable-next-line @next/next/no-img-element
@@ -485,17 +472,17 @@ export default function MatchHistory({
                             src={`https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/spell/${spellBInfo.iconFull}`}
                             alt={spellBInfo.name}
                             title={spellBInfo.name}
-                            className="h-7 w-7 rounded-md bg-zinc-900/30 ring-1 ring-white/6"
+                            className="h-5 w-5 rounded-md bg-zinc-900/30 ring-1 ring-white/6"
                             loading="lazy"
                           />
                         ) : (
-                          <div className="h-7 w-7 rounded-md bg-zinc-900/30 ring-1 ring-white/6" />
+                          <div className="h-5 w-5 rounded-md bg-zinc-900/30 ring-1 ring-white/6" />
                         )}
                         <RuneIcon rune={primaryRune} title="Primary rune" />
                         <RuneIcon rune={subStyle} title="Secondary style" />
                       </div>
 
-                      <div className="mt-2 text-base font-semibold tabular-nums text-zinc-100">
+                      <div className="mt-1 text-sm font-semibold tabular-nums text-zinc-100">
                         {kills} / {deaths} / {assists}
                       </div>
                       <div className="mt-0.5 text-xs tabular-nums text-zinc-400">{kda} KDA</div>
@@ -509,7 +496,7 @@ export default function MatchHistory({
                     <MetricTile label="CS" value={match.cs ?? "--"} />
                     <MetricTile
                       label="Gold"
-                      value={match.gold != null ? match.gold.toLocaleString() : "--"}
+                      value={formatNumber(match.gold) ?? "--"}
                     />
                   </div>
 
@@ -535,7 +522,7 @@ export default function MatchHistory({
                     <button
                       type="button"
                       onClick={() => toggleDetails(match.matchId)}
-                      className="rounded-lg bg-zinc-900/45 px-3 py-2 text-xs font-medium text-zinc-100 transition hover:bg-white/5"
+                      className="rounded-lg bg-zinc-900/45 px-2.5 py-1.5 text-[11px] font-medium text-zinc-100 transition hover:bg-white/5"
                     >
                       {isOpen ? "Hide details" : "Open details"}
                     </button>
@@ -543,14 +530,14 @@ export default function MatchHistory({
                     <button
                       type="button"
                       onClick={() => copy(match.matchId)}
-                      className="rounded-lg bg-zinc-950/35 px-3 py-2 text-xs text-zinc-300 transition hover:bg-white/5"
+                      className="rounded-lg bg-zinc-950/35 px-2.5 py-1.5 text-[11px] text-zinc-300 transition hover:bg-white/5"
                     >
                       Copy match ID
                     </button>
                   </div>
                 </div>
 
-                <div className="hidden gap-3 p-3 sm:p-4 lg:grid lg:grid-cols-[104px_minmax(0,1.25fr)_110px_112px_minmax(0,150px)_120px] lg:items-center">
+                <div className="hidden gap-2 p-2.5 sm:p-3 lg:grid lg:grid-cols-[84px_minmax(0,1.1fr)_90px_76px_minmax(0,126px)_94px] lg:items-center">
                   <div
                     className={
                       "min-w-0 rounded-[16px] px-0 py-0 " +
@@ -576,16 +563,16 @@ export default function MatchHistory({
                         <img
                           src={champIcon}
                           alt={champName ?? "Champion"}
-                          className="h-14 w-14 rounded-[18px] bg-zinc-900/40 ring-1 ring-white/6"
+                          className="h-10 w-10 rounded-[12px] bg-zinc-900/40 ring-1 ring-white/6"
                           loading="lazy"
                         />
                       ) : (
-                        <div className="h-14 w-14 rounded-[18px] bg-zinc-900/40 ring-1 ring-white/6" />
+                        <div className="h-10 w-10 rounded-[12px] bg-zinc-900/40 ring-1 ring-white/6" />
                       )}
 
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <div className="truncate text-base font-semibold tracking-tight text-zinc-50">
+                          <div className="truncate text-[13px] font-semibold tracking-tight text-zinc-50">
                             {champName ?? "Unknown champion"}
                           </div>
                           {position ? (
@@ -596,18 +583,18 @@ export default function MatchHistory({
                           ) : null}
                         </div>
 
-                        <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                        <div className="mt-1 flex flex-wrap items-center gap-1">
                           {spellAInfo ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
                               src={`https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/spell/${spellAInfo.iconFull}`}
                               alt={spellAInfo.name}
                               title={spellAInfo.name}
-                              className="h-7 w-7 rounded-md bg-zinc-900/30 ring-1 ring-white/6"
+                              className="h-5 w-5 rounded-md bg-zinc-900/30 ring-1 ring-white/6"
                               loading="lazy"
                             />
                           ) : (
-                            <div className="h-7 w-7 rounded-md bg-zinc-900/30 ring-1 ring-white/6" />
+                            <div className="h-5 w-5 rounded-md bg-zinc-900/30 ring-1 ring-white/6" />
                           )}
                           {spellBInfo ? (
                             // eslint-disable-next-line @next/next/no-img-element
@@ -615,11 +602,11 @@ export default function MatchHistory({
                               src={`https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/spell/${spellBInfo.iconFull}`}
                               alt={spellBInfo.name}
                               title={spellBInfo.name}
-                              className="h-7 w-7 rounded-md bg-zinc-900/30 ring-1 ring-white/6"
+                              className="h-5 w-5 rounded-md bg-zinc-900/30 ring-1 ring-white/6"
                               loading="lazy"
                             />
                           ) : (
-                            <div className="h-7 w-7 rounded-md bg-zinc-900/30 ring-1 ring-white/6" />
+                            <div className="h-5 w-5 rounded-md bg-zinc-900/30 ring-1 ring-white/6" />
                           )}
                           <RuneIcon rune={primaryRune} title="Primary rune" />
                           <RuneIcon rune={subStyle} title="Secondary style" />
@@ -629,7 +616,7 @@ export default function MatchHistory({
                   </div>
 
                   <div className="min-w-0">
-                    <div className="text-base font-semibold tabular-nums text-zinc-100">
+                    <div className="text-[13px] font-semibold tabular-nums text-zinc-100">
                       {kills} / {deaths} / {assists}
                     </div>
                     <div className="mt-0.5 text-xs tabular-nums text-zinc-400">{kda} KDA</div>
@@ -640,7 +627,7 @@ export default function MatchHistory({
                     <MetricTile label="CS" value={match.cs ?? "--"} />
                     <MetricTile
                       label="Gold"
-                      value={match.gold != null ? match.gold.toLocaleString() : "--"}
+                      value={formatNumber(match.gold) ?? "--"}
                     />
                   </div>
 
@@ -666,7 +653,7 @@ export default function MatchHistory({
                     <button
                       type="button"
                       onClick={() => toggleDetails(match.matchId)}
-                      className="rounded-lg bg-zinc-900/45 px-3 py-2 text-xs font-medium text-zinc-100 transition hover:bg-white/5"
+                      className="rounded-lg bg-zinc-900/40 px-2 py-1.5 text-[10px] font-medium text-zinc-100 transition hover:bg-white/5"
                     >
                       {isOpen ? "Hide details" : "Open details"}
                     </button>
@@ -674,7 +661,7 @@ export default function MatchHistory({
                     <button
                       type="button"
                       onClick={() => copy(match.matchId)}
-                      className="rounded-lg bg-zinc-950/35 px-3 py-2 text-xs text-zinc-300 transition hover:bg-white/5"
+                      className="rounded-lg bg-zinc-950/28 px-2 py-1.5 text-[10px] text-zinc-300 transition hover:bg-white/5"
                     >
                       Copy match ID
                     </button>
@@ -700,7 +687,7 @@ export default function MatchHistory({
         </div>
       )}
       {err ? <div className="text-sm text-red-300">{err}</div> : null}
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center justify-between gap-3 px-1">
         <div className="text-xs text-zinc-500">
           Showing <span className="text-zinc-300">{shownCount}</span> matches
         </div>

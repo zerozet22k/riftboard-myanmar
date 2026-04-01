@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Types } from "mongoose";
 import { dbConnect } from "@/lib/mongodb";
 import { bestRankSnapshot } from "@/lib/rank";
 import { Player } from "@/models/player";
@@ -24,6 +25,42 @@ const TIER_ORDER: Record<string, number> = {
 
 const DIV_ORDER: Record<string, number> = { I: 4, II: 3, III: 2, IV: 1 };
 
+type RankSnapshot = {
+  tier?: string | null;
+  division?: string | null;
+  lp?: number | null;
+  wins?: number | null;
+  losses?: number | null;
+  fetchedAt?: Date | string | null;
+};
+
+type PlayerMain = {
+  championId?: number | null;
+  championPoints?: number | null;
+  championName?: string | null;
+};
+
+type LeaderboardPlayer = {
+  _id: Types.ObjectId;
+  gameName?: string | null;
+  tagLine?: string | null;
+  platform?: string | null;
+  profileIconId?: number | null;
+  summonerLevel?: number | null;
+  solo?: RankSnapshot | null;
+  flex?: RankSnapshot | null;
+  mains?: PlayerMain[] | null;
+  lastRefreshAt?: Date | string | null;
+};
+
+type RankHistoryRow = {
+  playerId: Types.ObjectId;
+  queue: "RANKED_SOLO_5x5" | "RANKED_FLEX_SR" | string;
+  tier?: string | null;
+  division?: string | null;
+  lp?: number | null;
+};
+
 function rankKey(tier?: string | null, div?: string | null, lp?: number | null) {
   const t = tier ? TIER_ORDER[String(tier).toUpperCase()] : undefined;
   if (t === undefined) return -1;
@@ -39,20 +76,21 @@ function winrate(w?: number | null, l?: number | null) {
   return Math.round((w / total) * 100);
 }
 
-function topMains(p: any) {
+function topMains(p: LeaderboardPlayer): NonNullable<LeaderboardRow["mains"]> {
   const src = Array.isArray(p.mains) ? p.mains : [];
   const mapped = src
-    .map((x: any) => ({
+    .map((x) => ({
       championId: x?.championId ?? null,
+      name: x?.championName ?? null,
       points: x?.championPoints ?? null,
     }))
-    .filter((m: any) => m.championId != null);
+    .filter((m) => m.championId != null);
 
-  mapped.sort((a: any, b: any) => (b.points ?? -1) - (a.points ?? -1));
+  mapped.sort((a, b) => (b.points ?? -1) - (a.points ?? -1));
   return mapped.slice(0, 3);
 }
 
-function lastUpdatedIso(p: any): string | null {
+function lastUpdatedIso(p: LeaderboardPlayer): string | null {
   const d = p?.lastRefreshAt ?? p?.solo?.fetchedAt ?? p?.flex?.fetchedAt ?? null;
   if (!d) return null;
   const t = new Date(d).getTime();
@@ -82,7 +120,7 @@ function fallbackPeak(current: {
 export default async function LeaderboardPage() {
   await dbConnect();
 
-  const q: any = {
+  const q: Record<string, unknown> = {
     "leaderboard.status": "approved",
     $or: [
       { "leaderboard.group": "burmese" },
@@ -105,9 +143,9 @@ export default async function LeaderboardPage() {
       lastRefreshAt: 1,
       updatedAt: 1,
     }
-  ).lean();
+  ).lean<LeaderboardPlayer[]>();
 
-  const playerIds = players.map((p: any) => p._id);
+  const playerIds: Types.ObjectId[] = players.map((p) => p._id as Types.ObjectId);
   const rankHistory = await RankEntry.find(
     {
       playerId: { $in: playerIds },
@@ -120,7 +158,7 @@ export default async function LeaderboardPage() {
       division: 1,
       lp: 1,
     }
-  ).lean();
+  ).lean<RankHistoryRow[]>();
 
   const peakMap = new Map<
     string,
@@ -130,7 +168,7 @@ export default async function LeaderboardPage() {
     }
   >();
 
-  for (const row of rankHistory as any[]) {
+  for (const row of rankHistory) {
     const playerId = String(row.playerId);
     const current = peakMap.get(playerId) ?? { solo: null, flex: null };
 
@@ -143,14 +181,14 @@ export default async function LeaderboardPage() {
     peakMap.set(playerId, current);
   }
 
-  const rows: LeaderboardRow[] = players.map((p: any) => {
+  const rows: LeaderboardRow[] = players.map((p) => {
     const gameName = String(p.gameName ?? "").trim();
     const tagLineRaw = String(p.tagLine ?? "").trim();
     const tagLineLower = tagLineRaw.toLowerCase();
     const href = pHref(gameName, tagLineLower);
 
-    const solo = p.solo || {};
-    const flex = p.flex || {};
+    const solo: RankSnapshot = p.solo || {};
+    const flex: RankSnapshot = p.flex || {};
 
     const soloTier = solo.tier ?? null;
     const soloDiv = solo.division ?? null;
@@ -219,6 +257,12 @@ export default async function LeaderboardPage() {
           <div className="space-y-2">
             <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">Leaderboard</h1>
             <div className="flex flex-wrap gap-2 pt-1">
+              <Link
+                href="/tournaments"
+                className="rounded-2xl border border-zinc-800 bg-zinc-950/40 px-4 py-2 text-sm hover:bg-zinc-900/40"
+              >
+                Community tournaments
+              </Link>
               <Link
                 href="/submit"
                 className="rounded-2xl border border-zinc-800 bg-zinc-950/40 px-4 py-2 text-sm hover:bg-zinc-900/40"

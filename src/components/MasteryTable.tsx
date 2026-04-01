@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { formatFullDateTime, formatNumber } from "@/lib/displayTime";
 
 export type MasteryRow = {
   championId: number;
@@ -21,14 +22,11 @@ const CHAMP_ICON_BASE =
   "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-icons";
 
 function numberOrDash(value: number | null | undefined) {
-  return typeof value === "number" ? value.toLocaleString() : "--";
+  return typeof value === "number" ? (formatNumber(value) ?? "--") : "--";
 }
 
 function lastPlayedText(lastPlayTime: number | null) {
-  if (!lastPlayTime) return "--";
-  const date = new Date(lastPlayTime);
-  if (Number.isNaN(date.getTime())) return "--";
-  return date.toLocaleString();
+  return formatFullDateTime(lastPlayTime) ?? "--";
 }
 
 export default function MasteryTable({
@@ -70,8 +68,8 @@ export default function MasteryTable({
   }, [query, rows, sort]);
 
   return (
-    <section className="rounded-3xl border border-zinc-800 bg-zinc-900/30 p-4 sm:p-6">
-      <div className="flex flex-col gap-3 border-b border-zinc-800/80 pb-4 sm:flex-row sm:items-end sm:justify-between">
+    <section className="rounded-[24px] bg-zinc-900/22 p-4 sm:p-5">
+      <div className="flex flex-col gap-3 border-b border-zinc-800/70 pb-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="text-lg font-semibold text-zinc-100">Champion mastery</div>
           <div className="mt-1 text-sm text-zinc-400">
@@ -103,7 +101,7 @@ export default function MasteryTable({
       </div>
 
       {stale ? (
-        <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+        <div className="mt-4 rounded-xl bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
           This mastery list may be stale. Refresh the player profile to pull the latest Riot data.
         </div>
       ) : null}
@@ -115,18 +113,18 @@ export default function MasteryTable({
           {filtered.map((row) => (
             <article
               key={row.championId}
-              className="rounded-2xl border border-zinc-800 bg-zinc-950/40 p-4"
+              className="rounded-[18px] bg-zinc-950/34 p-3.5"
             >
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div className="flex items-start gap-3">
                   <img
                     src={`${CHAMP_ICON_BASE}/${row.championId}.png`}
                     alt={row.championName}
-                    className="h-14 w-14 rounded-2xl border border-zinc-800 bg-zinc-900/40"
+                    className="h-12 w-12 rounded-xl bg-zinc-900/40"
                     loading="lazy"
                   />
                   <div>
-                    <div className="text-base font-semibold text-zinc-100">{row.championName}</div>
+                    <div className="text-sm font-semibold text-zinc-100">{row.championName}</div>
                     <div className="mt-1 text-sm text-zinc-400">
                       Mastery {numberOrDash(row.championLevel)} / {numberOrDash(row.championPoints)} pts
                     </div>
@@ -167,7 +165,7 @@ export default function MasteryTable({
                   </div>
                   <div>
                     <div className="text-xs uppercase tracking-wide text-zinc-500">Stored at</div>
-                    <div>{row.fetchedAt ? new Date(row.fetchedAt).toLocaleString() : "--"}</div>
+                    <div>{formatFullDateTime(row.fetchedAt) ?? "--"}</div>
                   </div>
                 </div>
               </div>

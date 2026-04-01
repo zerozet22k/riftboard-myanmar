@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import MasteryTable, { type MasteryRow } from "@/components/MasteryTable";
+import { formatFullDateTime } from "@/lib/displayTime";
 import { dbConnect } from "@/lib/mongodb";
 import { buildPlayerLookupQuery, canonicalPlayerPath } from "@/lib/playerIdentity";
 import { Player } from "@/models/player";
@@ -25,13 +26,6 @@ function safeDecode(seg: unknown) {
   } catch {
     return String(seg ?? "");
   }
-}
-
-function formatDateTime(value: Date | string | null | undefined) {
-  if (!value) return null;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return parsed.toLocaleString();
 }
 
 async function getChampionNameMap() {
@@ -105,7 +99,7 @@ export default async function PlayerMasteryPage({
     fetchedAt: doc.fetchedAt instanceof Date ? doc.fetchedAt.toISOString() : null,
   }));
 
-  const lastSyncedLabel = formatDateTime(player.masterySyncedAt ?? masteryDocs[0]?.fetchedAt ?? null);
+  const lastSyncedLabel = formatFullDateTime(player.masterySyncedAt ?? masteryDocs[0]?.fetchedAt ?? null);
   const stale = !player.masterySyncedAt;
 
   return (

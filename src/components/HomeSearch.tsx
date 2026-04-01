@@ -3,16 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-const RANK_ICON_BASE =
-    "https://raw.communitydragon.org/15.6/plugins/rcp-fe-lol-shared-components/global/default";
-
 const PROFILE_ICON_BASE =
     "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/profile-icons";
-
-function tierIconUrl(tier?: string | null) {
-    if (!tier) return `${RANK_ICON_BASE}/normal.png`;
-    return `${RANK_ICON_BASE}/${String(tier).toLowerCase()}.png`;
-}
 
 function profileIconUrl(profileIconId?: number | null) {
     if (profileIconId == null || !Number.isFinite(Number(profileIconId))) return null;
@@ -36,53 +28,6 @@ type SearchResult = {
     soloWr?: number | null;
 };
 
-function normTier(tier?: string | null) {
-    return tier ? String(tier).toUpperCase() : null;
-}
-function normDiv(div?: string | null) {
-    return div ? String(div).toUpperCase() : null;
-}
-
-function rankLabel(tier?: string | null, div?: string | null) {
-    if (!tier) return "UNRANKED";
-    const t = normTier(tier);
-    const d = normDiv(div);
-    return d ? `${t} ${d}` : `${t}`;
-}
-
-function lpLabel(lp?: number | null) {
-    if (lp == null || !Number.isFinite(Number(lp))) return null;
-    return `${Number(lp).toLocaleString()} LP`;
-}
-
-function wlLabel(w?: number | null, l?: number | null) {
-    if (w == null || l == null) return null;
-    return `${w}-${l}`;
-}
-
-function wrLabel(wr?: number | null) {
-    if (wr == null || !Number.isFinite(Number(wr))) return null;
-    return `${Math.round(Number(wr))}%`;
-}
-
-function Pill({
-    children,
-    className = "",
-}: {
-    children: React.ReactNode;
-    className?: string;
-}) {
-    return (
-        <span
-            className={
-                "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] leading-none tabular-nums " +
-                className
-            }
-        >
-            {children}
-        </span>
-    );
-}
 
 export default function HomeSearch() {
     const router = useRouter();
@@ -163,8 +108,8 @@ export default function HomeSearch() {
     }
 
     const topHint = useMemo(() => {
-        if (trimmed.length < 2) return "Type at least 2 characters…";
-        if (loading) return "Searching…";
+        if (trimmed.length < 2) return "Type at least 2 characters...";
+        if (loading) return "Searching...";
         if (!items.length) return "No results.";
         return null;
     }, [trimmed.length, loading, items.length]);
