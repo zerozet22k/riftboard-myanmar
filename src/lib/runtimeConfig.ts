@@ -41,6 +41,10 @@ export function getCommunityJoinCodes() {
   return fallback ? [fallback] : [];
 }
 
+export function isCommunityCodeRequired() {
+  return getCommunityJoinCodes().length > 0;
+}
+
 export function getCommunityDiscordUrl() {
   return firstNonEmpty([
     normalizeUrl(process.env.COMMUNITY_DISCORD_URL),

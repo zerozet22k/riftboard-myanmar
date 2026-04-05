@@ -2,8 +2,13 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import type { Metadata } from "next";
 import SubmitForm from "@/components/SubmitForm";
-import { getCommunityJoinCode, getCommunityDiscordUrl } from "@/lib/runtimeConfig";
+import { hasCommunityAccessCookieValue } from "@/lib/communityAccess";
 import { getOptionalDiscordSession, readPendingDiscordBindCookieValue } from "@/lib/discordSession";
+import {
+  getCommunityDiscordUrl,
+  getCommunityJoinCodes,
+  isCommunityCodeRequired,
+} from "@/lib/runtimeConfig";
 
 export const metadata: Metadata = {
   title: "Link Discord",
@@ -35,6 +40,10 @@ function messageText(status?: string, message?: string, riotId?: string) {
           ? "Discord OAuth state did not match. Start the link flow again."
           : message === "oauth-state-expired"
             ? "Your Discord OAuth session expired. Start the link flow again."
+            : message === "community-code-required"
+              ? "Enter your private community code first to unlock Discord access for this browser."
+              : message === "wrong-community-code"
+                ? "That community code was not accepted. Check it and try again."
             : message === "no-riot-connection"
               ? "Discord did not return a Riot account connection. Add your Riot account to Discord first, then try again."
               : message === "guild-membership-required"
@@ -78,9 +87,13 @@ export default async function DiscordLinkedRolesPage({
     cookies(),
     getOptionalDiscordSession(),
   ]);
+  const communityCodeRequired = isCommunityCodeRequired();
+  const communityUnlocked = hasCommunityAccessCookieValue(store.get("community_access")?.value);
   const communityDiscordUrl = getCommunityDiscordUrl();
-  const joinCodeRequired = !!getCommunityJoinCode();
-  const pending = readPendingDiscordBindCookieValue(store.get("discord_pending_bind")?.value);
+  const joinCodeRequired = getCommunityJoinCodes().length > 0;
+  const pending = communityUnlocked
+    ? readPendingDiscordBindCookieValue(store.get("discord_pending_bind")?.value)
+    : null;
   const notice = messageText(status, message, riotId);
 
   return (
@@ -93,51 +106,106 @@ export default async function DiscordLinkedRolesPage({
           <div className="mt-4">
             <div className="text-[11px] uppercase tracking-[0.24em] text-zinc-500">Discord</div>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight text-zinc-50">
-              Join Discord and link your Riot account
+              {communityCodeRequired
+                ? "Unlock community access, then join Discord"
+                : "Join Discord and link your Riot account"}
             </h1>
             <p className="mt-3 max-w-3xl text-sm text-zinc-400">
-              Join the Riftboard Myanmar server first, then link the Riot account that Discord
-              exposes on your profile. Manual Riot ID entry is no longer trusted for protected
-              community features.
+              {communityCodeRequired
+                ? "Enter your private Myanmar community code first. After this browser is unlocked, Riftboard will reveal the Discord invite and account-link flow."
+                : "Join the Riftboard Myanmar server first, then link the Riot account that Discord exposes on your profile. Manual Riot ID entry is no longer trusted for protected community features."}
             </p>
           </div>
         </header>
 
         {notice ? <Notice tone={notice.tone} text={notice.text} /> : null}
 
-        <section className="rounded-[28px] bg-zinc-900/25 p-5 ring-1 ring-white/5 sm:p-6">
-          <div className="text-xl font-semibold text-zinc-50">
-            {viewer ? "Your verified account" : "Connect Discord"}
-          </div>
-          <p className="mt-2 text-sm text-zinc-400">
-            {viewer
-              ? "This is the Riot account currently trusted for leaderboard refreshes, linked roles, and tournament actions."
-              : "Join the community server, then start the Discord flow. Riftboard will read your Discord-connected Riot account. If Discord does not expose one, binding is blocked until you add it in Discord."}
-          </p>
+        {!communityUnlocked ? (
+          <section className="rounded-[28px] bg-zinc-900/25 p-5 ring-1 ring-white/5 sm:p-6">
+            <div className="text-xl font-semibold text-zinc-50">Enter community code first</div>
+            <p className="mt-2 text-sm text-zinc-400">
+              This private code unlocks Discord access for the Riftboard Myanmar community on this
+              browser. The site will not reveal the Discord invite until the code is accepted.
+            </p>
 
-          {!viewer && communityDiscordUrl ? (
-            <div className="mt-5">
-              <Link
-                href={communityDiscordUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-5 py-3 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-400/20"
+            <form action="/api/community/access" method="POST" className="mt-5 space-y-3">
+              <input type="hidden" name="returnTo" value="/discord/linked-roles" />
+              <label className="block space-y-1.5 text-sm">
+                <div className="text-zinc-400">Community code</div>
+                <input
+                  name="code"
+                  type="password"
+                  placeholder="Enter community code"
+                  autoComplete="off"
+                  required
+                  className="w-full rounded-2xl bg-zinc-950/55 px-4 py-3 text-zinc-100 outline-none ring-1 ring-white/8 focus:ring-white/15"
+                />
+              </label>
+              <button
+                type="submit"
+                className="rounded-2xl bg-emerald-500/90 px-5 py-3 text-sm font-semibold text-black transition hover:bg-emerald-400"
               >
-                Join Riftboard Discord
-              </Link>
+                Unlock community access
+              </button>
+            </form>
+          </section>
+        ) : (
+          <section className="rounded-[28px] bg-zinc-900/25 p-5 ring-1 ring-white/5 sm:p-6">
+            <div className="text-xl font-semibold text-zinc-50">
+              {viewer ? "Your verified account" : "Connect Discord"}
             </div>
-          ) : null}
+            <p className="mt-2 text-sm text-zinc-400">
+              {viewer
+                ? "This is the Riot account currently trusted for leaderboard refreshes, linked roles, and tournament actions."
+                : "Join the community server, then start the Discord flow. Riftboard will read your Discord-connected Riot account. If Discord does not expose one, binding is blocked until you add it in Discord."}
+            </p>
 
-          {viewer ? (
-            <div className="mt-5 rounded-[24px] bg-zinc-950/55 p-4 ring-1 ring-white/6">
-              <div className="text-sm text-zinc-400">Discord</div>
-              <div className="mt-1 text-lg font-semibold text-zinc-100">
-                {viewer.discordUsername ?? viewer.discordUserId}
+            {!viewer && communityDiscordUrl ? (
+              <div className="mt-5">
+                <Link
+                  href={communityDiscordUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-5 py-3 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-400/20"
+                >
+                  Join Riftboard Discord
+                </Link>
               </div>
-              <div className="mt-4 text-sm text-zinc-400">Riot account</div>
-              <div className="mt-1 text-lg font-semibold text-zinc-100">
-                {viewer.gameName}#{viewer.tagLine}
+            ) : null}
+
+            {viewer ? (
+              <div className="mt-5 rounded-[24px] bg-zinc-950/55 p-4 ring-1 ring-white/6">
+                <div className="text-sm text-zinc-400">Discord</div>
+                <div className="mt-1 text-lg font-semibold text-zinc-100">
+                  {viewer.discordUsername ?? viewer.discordUserId}
+                </div>
+                <div className="mt-4 text-sm text-zinc-400">Riot account</div>
+                <div className="mt-1 text-lg font-semibold text-zinc-100">
+                  {viewer.gameName}#{viewer.tagLine}
+                </div>
+                <div className="mt-5 flex flex-wrap gap-3">
+                  <form action="/api/discord/oauth/start" method="GET">
+                    <input type="hidden" name="returnTo" value="/discord/linked-roles" />
+                    <button
+                      type="submit"
+                      className="rounded-2xl bg-emerald-500/90 px-5 py-3 text-sm font-semibold text-black transition hover:bg-emerald-400"
+                    >
+                      Reconnect Discord
+                    </button>
+                  </form>
+                  {communityDiscordUrl ? (
+                    <Link
+                      href={communityDiscordUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-2xl border border-white/10 px-5 py-3 text-sm text-zinc-200 transition hover:bg-white/5"
+                    >
+                      Open community Discord
+                    </Link>
+                  ) : null}
+                </div>
               </div>
+            ) : (
               <div className="mt-5 flex flex-wrap gap-3">
                 <form action="/api/discord/oauth/start" method="GET">
                   <input type="hidden" name="returnTo" value="/discord/linked-roles" />
@@ -145,7 +213,7 @@ export default async function DiscordLinkedRolesPage({
                     type="submit"
                     className="rounded-2xl bg-emerald-500/90 px-5 py-3 text-sm font-semibold text-black transition hover:bg-emerald-400"
                   >
-                    Reconnect Discord
+                    Link account
                   </button>
                 </form>
                 {communityDiscordUrl ? (
@@ -155,37 +223,15 @@ export default async function DiscordLinkedRolesPage({
                     rel="noreferrer"
                     className="rounded-2xl border border-white/10 px-5 py-3 text-sm text-zinc-200 transition hover:bg-white/5"
                   >
-                    Open community Discord
+                    Join Discord
                   </Link>
                 ) : null}
               </div>
-            </div>
-          ) : (
-            <div className="mt-5 flex flex-wrap gap-3">
-              <form action="/api/discord/oauth/start" method="GET">
-                <input type="hidden" name="returnTo" value="/discord/linked-roles" />
-                <button
-                  type="submit"
-                  className="rounded-2xl bg-emerald-500/90 px-5 py-3 text-sm font-semibold text-black transition hover:bg-emerald-400"
-                >
-                  Link account
-                </button>
-              </form>
-              {communityDiscordUrl ? (
-                <Link
-                  href={communityDiscordUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded-2xl border border-white/10 px-5 py-3 text-sm text-zinc-200 transition hover:bg-white/5"
-                >
-                  Join Discord
-                </Link>
-              ) : null}
-            </div>
-          )}
-        </section>
+            )}
+          </section>
+        )}
 
-        {viewer ? (
+        {communityUnlocked && viewer ? (
           <section className="rounded-[28px] bg-zinc-900/25 p-5 ring-1 ring-white/5 sm:p-6">
             <div className="text-xl font-semibold text-zinc-50">Refresh this verified account</div>
             <p className="mt-2 text-sm text-zinc-400">
@@ -213,7 +259,7 @@ export default async function DiscordLinkedRolesPage({
           </section>
         ) : null}
 
-        {pending ? (
+        {communityUnlocked && pending ? (
           <section className="rounded-[28px] bg-zinc-900/25 p-5 ring-1 ring-white/5 sm:p-6">
             <div className="text-xl font-semibold text-zinc-50">Choose your Riot account</div>
             <p className="mt-2 text-sm text-zinc-400">

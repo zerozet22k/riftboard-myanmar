@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 
 type SiteHeaderProps = {
   discordUrl?: string;
+  accessLabel?: string;
 };
 
 const NAV_ITEMS = [
@@ -26,7 +27,10 @@ function navLinkClass(active: boolean) {
   ].join(" ");
 }
 
-export default function SiteHeader({ discordUrl = "" }: SiteHeaderProps) {
+export default function SiteHeader({
+  discordUrl = "",
+  accessLabel = "Link Account",
+}: SiteHeaderProps) {
   const pathname = usePathname();
 
   return (
@@ -76,7 +80,7 @@ export default function SiteHeader({ discordUrl = "" }: SiteHeaderProps) {
               href="/discord/linked-roles"
               className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-200 transition hover:bg-white/10"
             >
-              Link Account
+              {accessLabel}
             </Link>
             {discordUrl ? (
               <Link

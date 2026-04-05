@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import SiteHeader from "@/components/SiteHeader";
-import { getCommunityDiscordUrl } from "@/lib/runtimeConfig";
+import { getCommunityDiscordUrl, isCommunityCodeRequired } from "@/lib/runtimeConfig";
 import { RIOT_LEGAL_BOILERPLATE } from "@/lib/tournaments";
 import "./globals.css";
 
@@ -51,7 +51,8 @@ export const viewport: Viewport = {
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  const communityDiscordUrl = getCommunityDiscordUrl();
+  const communityCodeRequired = isCommunityCodeRequired();
+  const communityDiscordUrl = communityCodeRequired ? "" : getCommunityDiscordUrl();
 
   return (
     <html lang="en" className="dark">
@@ -72,7 +73,10 @@ export default function RootLayout({
 
         {/* App frame */}
         <div className="mx-auto w-full">
-          <SiteHeader discordUrl={communityDiscordUrl} />
+          <SiteHeader
+            discordUrl={communityDiscordUrl}
+            accessLabel={communityCodeRequired ? "Community Access" : "Link Account"}
+          />
           {children}
           <footer className="px-4 sm:px-6 py-10 text-center text-xs text-zinc-500">
             <div className="mb-3 flex items-center justify-center gap-4 text-sm text-zinc-400">
