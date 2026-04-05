@@ -75,7 +75,7 @@ export default function RootLayout({
         <div className="mx-auto w-full">
           <SiteHeader
             discordUrl={communityDiscordUrl}
-            accessLabel={communityCodeRequired ? "Community Access" : "Link Account"}
+            accessLabel={communityCodeRequired ? "Join Community" : "Link Account"}
           />
           {children}
           <footer className="px-4 sm:px-6 py-10 text-center text-xs text-zinc-500">

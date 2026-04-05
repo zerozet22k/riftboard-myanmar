@@ -102,15 +102,15 @@ export default async function DiscordLinkedRolesPage({
             Back to leaderboard
           </Link>
           <div className="mt-4">
-            <div className="text-[11px] uppercase tracking-[0.24em] text-zinc-500">Discord access</div>
+            <div className="text-[11px] uppercase tracking-[0.24em] text-zinc-500">Join community</div>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight text-zinc-50">
               {communityCodeRequired
-                ? "Unlock this browser and connect Discord"
+                ? "Unlock Discord access"
                 : "Connect Discord and your Riot account"}
             </h1>
             <p className="mt-3 max-w-3xl text-sm text-zinc-400">
               {communityCodeRequired
-                ? "Use your private Myanmar community code once to unlock this browser. After that, Riftboard can show the Discord invite and use the Riot account already attached to your Discord profile."
+                ? "Enter your private Myanmar community code once to continue. After that, you can open the community Discord and connect the Riot account already linked to your Discord profile."
                 : "Join the community Discord, then connect the Riot account Discord already exposes on your profile. Manual Riot ID entry is disabled for protected community features."}
             </p>
           </div>
@@ -203,11 +203,11 @@ export default async function DiscordLinkedRolesPage({
                   ) : null}
                 </div>
 
-                <div className="mt-6 border-t border-white/6 pt-5">
-                  <div className="text-sm font-semibold text-zinc-100">Refresh leaderboard data</div>
+                <div className="mt-6">
+                  <div className="text-sm font-semibold text-zinc-100">Refresh profile</div>
                   <p className="mt-1 text-sm text-zinc-400">
-                    Refreshes run only for this linked Riot account. Since this browser is already
-                    unlocked, you do not need to enter the community code again.
+                    Refresh this linked Riot account here. No extra community-code step needed on
+                    this browser.
                   </p>
                   <div className="mt-4">
                     <SubmitForm
@@ -220,7 +220,8 @@ export default async function DiscordLinkedRolesPage({
                       returnTo="/discord/linked-roles"
                       showBindingCard={false}
                       showReconnectLink={false}
-                      submitLabel="Refresh leaderboard data"
+                      submitLabel="Refresh profile"
+                      variant="inline"
                     />
                   </div>
                 </div>

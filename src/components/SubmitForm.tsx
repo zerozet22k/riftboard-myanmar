@@ -28,6 +28,7 @@ export default function SubmitForm({
   showBindingCard = true,
   showReconnectLink = true,
   submitLabel = "Refresh my account",
+  variant = "card",
 }: {
   codeRequired: boolean;
   viewer: SubmitViewer | null;
@@ -35,12 +36,21 @@ export default function SubmitForm({
   showBindingCard?: boolean;
   showReconnectLink?: boolean;
   submitLabel?: string;
+  variant?: "card" | "inline";
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [code, setCode] = useState("");
+  const formClassName =
+    variant === "inline"
+      ? "space-y-4"
+      : "rounded-2xl border border-zinc-800 bg-zinc-900/30 p-4 sm:p-6 space-y-4";
+  const primaryButtonClassName =
+    variant === "inline"
+      ? "inline-flex items-center justify-center rounded-xl bg-emerald-500/90 px-4 py-2 text-sm font-semibold text-black transition hover:bg-emerald-400 disabled:opacity-50"
+      : "inline-flex items-center justify-center rounded-xl border border-zinc-800 bg-zinc-950/40 px-4 py-2 text-sm font-semibold text-zinc-100 hover:bg-white/5 disabled:opacity-50";
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -111,10 +121,7 @@ export default function SubmitForm({
   }
 
   return (
-    <form
-      onSubmit={onSubmit}
-      className="rounded-2xl border border-zinc-800 bg-zinc-900/30 p-4 sm:p-6 space-y-4"
-    >
+    <form onSubmit={onSubmit} className={formClassName}>
       {showBindingCard ? (
         <div className="rounded-2xl border border-white/8 bg-zinc-950/40 p-4">
           <div className="text-xs uppercase tracking-[0.14em] text-zinc-500">Verified binding</div>
@@ -145,7 +152,7 @@ export default function SubmitForm({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <button
           type="submit"
-          className="inline-flex items-center justify-center rounded-xl border border-zinc-800 bg-zinc-950/40 px-4 py-2 text-sm font-semibold text-zinc-100 hover:bg-white/5 disabled:opacity-50"
+          className={primaryButtonClassName}
           disabled={pending}
         >
           {pending ? "Refreshing..." : submitLabel}
