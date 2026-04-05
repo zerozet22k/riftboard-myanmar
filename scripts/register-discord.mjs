@@ -99,7 +99,9 @@ async function discordApi(pathname, init) {
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`Discord API ${res.status}: ${text || res.statusText}`);
+    throw new Error(
+      `Discord API ${res.status} on ${init.method ?? "GET"} ${pathname}: ${text || res.statusText}`
+    );
   }
 
   if (res.status === 204) return null;
@@ -128,16 +130,19 @@ async function main() {
   const interactionsEndpointUrl = `${appBaseUrl}/api/discord/interactions`;
   const linkedRolesVerificationUrl = `${appBaseUrl}/discord/linked-roles`;
 
+  console.log("Registering linked role metadata...");
   await discordApi(`/applications/${applicationId}/role-connections/metadata`, {
     method: "PUT",
     body: JSON.stringify(LINKED_ROLE_METADATA),
   });
 
+  console.log(`Registering guild commands for guild ${guildId}...`);
   await discordApi(`/applications/${applicationId}/guilds/${guildId}/commands`, {
     method: "PUT",
     body: JSON.stringify(COMMANDS),
   });
 
+  console.log("Updating application URLs...");
   await discordApi("/applications/@me", {
     method: "PATCH",
     body: JSON.stringify({

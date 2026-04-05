@@ -31,7 +31,7 @@ export default function SiteHeader({ discordUrl = "" }: SiteHeaderProps) {
 
   return (
     <header className="sticky top-0 z-40 border-b border-white/8 bg-zinc-950/80 backdrop-blur-xl">
-      <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-3 px-4 py-3 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
+      <div className="mx-auto flex w-full flex-col gap-3 px-4 py-3 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
         <div className="flex items-center justify-between gap-4">
           <Link href="/" className="min-w-0">
             <div className="text-[11px] uppercase tracking-[0.28em] text-zinc-500">
