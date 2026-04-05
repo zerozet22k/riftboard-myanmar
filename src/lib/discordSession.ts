@@ -1,7 +1,11 @@
 import crypto from "node:crypto";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
-import { loadVerifiedDiscordIdentity, type DiscordRiotCandidate } from "@/lib/discordLinkedRoles";
+import {
+  loadStoredDiscordIdentity,
+  loadVerifiedDiscordIdentity,
+  type DiscordRiotCandidate,
+} from "@/lib/discordLinkedRoles";
 import { decryptDiscordSecret, encryptDiscordSecret } from "@/lib/discord";
 
 const DISCORD_SESSION_COOKIE = "discord_session";
@@ -44,6 +48,10 @@ export type PendingDiscordBindPayload = {
   candidates: DiscordRiotCandidate[];
   returnTo: string;
   createdAt: number;
+};
+
+type DiscordSessionLoadOptions = {
+  verifyGuildMembership?: boolean;
 };
 
 function firstNonEmpty(values: Array<string | undefined>) {
@@ -222,12 +230,17 @@ export function decodePendingDiscordTokenPayload(payload: PendingDiscordBindPayl
   };
 }
 
-async function loadDiscordViewerSessionFromCookieValue(token: string | undefined | null) {
+async function loadDiscordViewerSessionFromCookieValue(
+  token: string | undefined | null,
+  options?: DiscordSessionLoadOptions
+) {
   const payload = unsealPayload<SignedSessionPayload>(token);
   if (!payload?.discordUserId || payload.v !== 1) return null;
 
   try {
-    const identity = await loadVerifiedDiscordIdentity(payload.discordUserId);
+    const identity = options?.verifyGuildMembership
+      ? await loadVerifiedDiscordIdentity(payload.discordUserId)
+      : await loadStoredDiscordIdentity(payload.discordUserId);
     return {
       discordUserId: String(identity.link.discordUserId),
       discordUsername: identity.link.discordUsername ?? null,
@@ -247,17 +260,29 @@ export async function getOptionalDiscordSession() {
 }
 
 export async function requireDiscordSession() {
-  const session = await getOptionalDiscordSession();
+  const store = await cookies();
+  const session = await loadDiscordViewerSessionFromCookieValue(
+    store.get(DISCORD_SESSION_COOKIE)?.value,
+    { verifyGuildMembership: true }
+  );
   if (!session) throw new Error("Connect Discord and verify your Riot account first.");
   return session;
 }
 
-export async function getOptionalDiscordSessionFromRequest(req: NextRequest) {
-  return loadDiscordViewerSessionFromCookieValue(req.cookies.get(DISCORD_SESSION_COOKIE)?.value);
+export async function getOptionalDiscordSessionFromRequest(
+  req: NextRequest,
+  options?: DiscordSessionLoadOptions
+) {
+  return loadDiscordViewerSessionFromCookieValue(
+    req.cookies.get(DISCORD_SESSION_COOKIE)?.value,
+    options
+  );
 }
 
 export async function requireDiscordSessionFromRequest(req: NextRequest) {
-  const session = await getOptionalDiscordSessionFromRequest(req);
+  const session = await getOptionalDiscordSessionFromRequest(req, {
+    verifyGuildMembership: true,
+  });
   if (!session) throw new Error("Connect Discord and verify your Riot account first.");
   return session;
 }

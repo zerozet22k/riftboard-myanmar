@@ -1,15 +1,13 @@
-import Link from "next/link";
 import type { Types } from "mongoose";
 import { dbConnect } from "@/lib/mongodb";
 import { bestRankSnapshot } from "@/lib/rank";
-import { getCommunityDiscordUrl } from "@/lib/runtimeConfig";
 import { Player } from "@/models/player";
 import { RankEntry } from "@/models/rankEntry";
 import AutoUIRefresh from "@/components/AutoUIRefresh";
 import LeaderboardTable, { type LeaderboardRow } from "@/components/LeaderboardTable";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 const TIER_ORDER: Record<string, number> = {
   CHALLENGER: 9,
@@ -120,7 +118,6 @@ function fallbackPeak(current: {
 
 export default async function LeaderboardPage() {
   await dbConnect();
-  const communityDiscordUrl = getCommunityDiscordUrl();
 
   const q: Record<string, unknown> = {
     "leaderboard.status": "approved",
@@ -253,7 +250,7 @@ export default async function LeaderboardPage() {
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
-      <AutoUIRefresh everyMs={15000} />
+      <AutoUIRefresh everyMs={60000} />
       <div className="mx-auto max-w-full p-4 sm:p-6 space-y-6">
         <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="space-y-2">

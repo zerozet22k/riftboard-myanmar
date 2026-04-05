@@ -1,6 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { hasCommunityAccessFromRequest } from "@/lib/communityAccess";
 import { dbConnect } from "@/lib/mongodb";
 import { canonicalPlayerPath } from "@/lib/playerIdentity";
 import { refreshPlayerById } from "@/lib/refresh";
@@ -35,7 +36,9 @@ export async function POST(req: NextRequest) {
     }
 
     const requiredCodes = getCommunityJoinCodes();
-    if (requiredCodes.length && !requiredCodes.includes(String(parsed.data.code ?? "").trim())) {
+    const unlockedBrowser = hasCommunityAccessFromRequest(req);
+    const providedCode = String(parsed.data.code ?? "").trim();
+    if (requiredCodes.length && !unlockedBrowser && !requiredCodes.includes(providedCode)) {
       return NextResponse.json({ ok: false, error: "Wrong community code" }, { status: 401 });
     }
 

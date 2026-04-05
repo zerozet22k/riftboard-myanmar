@@ -26,11 +26,15 @@ export default function SubmitForm({
   viewer,
   returnTo = "/submit",
   showBindingCard = true,
+  showReconnectLink = true,
+  submitLabel = "Refresh my account",
 }: {
   codeRequired: boolean;
   viewer: SubmitViewer | null;
   returnTo?: string;
   showBindingCard?: boolean;
+  showReconnectLink?: boolean;
+  submitLabel?: string;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -144,15 +148,17 @@ export default function SubmitForm({
           className="inline-flex items-center justify-center rounded-xl border border-zinc-800 bg-zinc-950/40 px-4 py-2 text-sm font-semibold text-zinc-100 hover:bg-white/5 disabled:opacity-50"
           disabled={pending}
         >
-          {pending ? "Refreshing..." : "Refresh my account"}
+          {pending ? "Refreshing..." : submitLabel}
         </button>
 
-        <Link
-          href={`/api/discord/oauth/start?returnTo=${encodeURIComponent(returnTo)}`}
-          className="rounded-xl border border-white/10 px-4 py-2 text-sm text-zinc-200 transition hover:bg-white/5"
-        >
-          Reconnect Discord
-        </Link>
+        {showReconnectLink ? (
+          <Link
+            href={`/api/discord/oauth/start?returnTo=${encodeURIComponent(returnTo)}`}
+            className="rounded-xl border border-white/10 px-4 py-2 text-sm text-zinc-200 transition hover:bg-white/5"
+          >
+            Reconnect Discord
+          </Link>
+        ) : null}
       </div>
 
       {msg && <p className="text-sm text-zinc-200">{msg}</p>}

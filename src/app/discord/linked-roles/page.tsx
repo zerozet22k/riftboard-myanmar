@@ -6,13 +6,12 @@ import { hasCommunityAccessCookieValue } from "@/lib/communityAccess";
 import { getOptionalDiscordSession, readPendingDiscordBindCookieValue } from "@/lib/discordSession";
 import {
   getCommunityDiscordUrl,
-  getCommunityJoinCodes,
   isCommunityCodeRequired,
 } from "@/lib/runtimeConfig";
 
 export const metadata: Metadata = {
-  title: "Link Discord",
-  description: "Join the community Discord and link a Riot account from Discord-provided connections only.",
+  title: "Discord Access",
+  description: "Unlock Discord access and connect the Riot account already attached to your Discord profile.",
 };
 
 function messageText(status?: string, message?: string, riotId?: string) {
@@ -90,7 +89,6 @@ export default async function DiscordLinkedRolesPage({
   const communityCodeRequired = isCommunityCodeRequired();
   const communityUnlocked = hasCommunityAccessCookieValue(store.get("community_access")?.value);
   const communityDiscordUrl = getCommunityDiscordUrl();
-  const joinCodeRequired = getCommunityJoinCodes().length > 0;
   const pending = communityUnlocked
     ? readPendingDiscordBindCookieValue(store.get("discord_pending_bind")?.value)
     : null;
@@ -101,19 +99,19 @@ export default async function DiscordLinkedRolesPage({
       <div className="mx-auto w-full max-w-[980px] space-y-6 px-4 py-6 sm:px-6 lg:px-8">
         <header className="rounded-[30px] bg-zinc-900/30 p-6 ring-1 ring-white/5 sm:p-8">
           <Link href="/" className="text-sm text-zinc-400 transition hover:text-zinc-200">
-            Back to Riftboard
+            Back to leaderboard
           </Link>
           <div className="mt-4">
-            <div className="text-[11px] uppercase tracking-[0.24em] text-zinc-500">Discord</div>
+            <div className="text-[11px] uppercase tracking-[0.24em] text-zinc-500">Discord access</div>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight text-zinc-50">
               {communityCodeRequired
-                ? "Unlock community access, then join Discord"
-                : "Join Discord and link your Riot account"}
+                ? "Unlock this browser and connect Discord"
+                : "Connect Discord and your Riot account"}
             </h1>
             <p className="mt-3 max-w-3xl text-sm text-zinc-400">
               {communityCodeRequired
-                ? "Enter your private Myanmar community code first. After this browser is unlocked, Riftboard will reveal the Discord invite and account-link flow."
-                : "Join the Riftboard Myanmar server first, then link the Riot account that Discord exposes on your profile. Manual Riot ID entry is no longer trusted for protected community features."}
+                ? "Use your private Myanmar community code once to unlock this browser. After that, Riftboard can show the Discord invite and use the Riot account already attached to your Discord profile."
+                : "Join the community Discord, then connect the Riot account Discord already exposes on your profile. Manual Riot ID entry is disabled for protected community features."}
             </p>
           </div>
         </header>
@@ -122,20 +120,20 @@ export default async function DiscordLinkedRolesPage({
 
         {!communityUnlocked ? (
           <section className="rounded-[28px] bg-zinc-900/25 p-5 ring-1 ring-white/5 sm:p-6">
-            <div className="text-xl font-semibold text-zinc-50">Enter community code first</div>
+            <div className="text-xl font-semibold text-zinc-50">Unlock this browser</div>
             <p className="mt-2 text-sm text-zinc-400">
-              This private code unlocks Discord access for the Riftboard Myanmar community on this
-              browser. The site will not reveal the Discord invite until the code is accepted.
+              Enter your private community code to reveal the Discord invite and the protected
+              account tools on this device.
             </p>
 
             <form action="/api/community/access" method="POST" className="mt-5 space-y-3">
               <input type="hidden" name="returnTo" value="/discord/linked-roles" />
               <label className="block space-y-1.5 text-sm">
-                <div className="text-zinc-400">Community code</div>
+                <div className="text-zinc-400">Private community code</div>
                 <input
                   name="code"
                   type="password"
-                  placeholder="Enter community code"
+                  placeholder="Enter code"
                   autoComplete="off"
                   required
                   className="w-full rounded-2xl bg-zinc-950/55 px-4 py-3 text-zinc-100 outline-none ring-1 ring-white/8 focus:ring-white/15"
@@ -145,19 +143,19 @@ export default async function DiscordLinkedRolesPage({
                 type="submit"
                 className="rounded-2xl bg-emerald-500/90 px-5 py-3 text-sm font-semibold text-black transition hover:bg-emerald-400"
               >
-                Unlock community access
+                Unlock access
               </button>
             </form>
           </section>
         ) : (
           <section className="rounded-[28px] bg-zinc-900/25 p-5 ring-1 ring-white/5 sm:p-6">
             <div className="text-xl font-semibold text-zinc-50">
-              {viewer ? "Your verified account" : "Connect Discord"}
+              {viewer ? "Verified Riot account" : "Connect Discord"}
             </div>
             <p className="mt-2 text-sm text-zinc-400">
               {viewer
-                ? "This is the Riot account currently trusted for leaderboard refreshes, linked roles, and tournament actions."
-                : "Join the community server, then start the Discord flow. Riftboard will read your Discord-connected Riot account. If Discord does not expose one, binding is blocked until you add it in Discord."}
+                ? "Riftboard will use this Discord-linked Riot account for leaderboard refreshes, linked roles, and tournament actions."
+                : "Open the community Discord first if you need the invite, then connect the Riot account already attached to your Discord profile."}
             </p>
 
             {!viewer && communityDiscordUrl ? (
@@ -168,7 +166,7 @@ export default async function DiscordLinkedRolesPage({
                   rel="noreferrer"
                   className="inline-flex rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-5 py-3 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-400/20"
                 >
-                  Join Riftboard Discord
+                  Open Discord invite
                 </Link>
               </div>
             ) : null}
@@ -190,7 +188,7 @@ export default async function DiscordLinkedRolesPage({
                       type="submit"
                       className="rounded-2xl bg-emerald-500/90 px-5 py-3 text-sm font-semibold text-black transition hover:bg-emerald-400"
                     >
-                      Reconnect Discord
+                      Relink Discord
                     </button>
                   </form>
                   {communityDiscordUrl ? (
@@ -200,9 +198,31 @@ export default async function DiscordLinkedRolesPage({
                       rel="noreferrer"
                       className="rounded-2xl border border-white/10 px-5 py-3 text-sm text-zinc-200 transition hover:bg-white/5"
                     >
-                      Open community Discord
+                      Open Discord invite
                     </Link>
                   ) : null}
+                </div>
+
+                <div className="mt-6 border-t border-white/6 pt-5">
+                  <div className="text-sm font-semibold text-zinc-100">Refresh leaderboard data</div>
+                  <p className="mt-1 text-sm text-zinc-400">
+                    Refreshes run only for this linked Riot account. Since this browser is already
+                    unlocked, you do not need to enter the community code again.
+                  </p>
+                  <div className="mt-4">
+                    <SubmitForm
+                      codeRequired={false}
+                      viewer={{
+                        discordUsername: viewer.discordUsername,
+                        gameName: viewer.gameName,
+                        tagLine: viewer.tagLine,
+                      }}
+                      returnTo="/discord/linked-roles"
+                      showBindingCard={false}
+                      showReconnectLink={false}
+                      submitLabel="Refresh leaderboard data"
+                    />
+                  </div>
                 </div>
               </div>
             ) : (
@@ -213,7 +233,7 @@ export default async function DiscordLinkedRolesPage({
                     type="submit"
                     className="rounded-2xl bg-emerald-500/90 px-5 py-3 text-sm font-semibold text-black transition hover:bg-emerald-400"
                   >
-                    Link account
+                    Connect Discord
                   </button>
                 </form>
                 {communityDiscordUrl ? (
@@ -223,7 +243,7 @@ export default async function DiscordLinkedRolesPage({
                     rel="noreferrer"
                     className="rounded-2xl border border-white/10 px-5 py-3 text-sm text-zinc-200 transition hover:bg-white/5"
                   >
-                    Join Discord
+                    Open Discord invite
                   </Link>
                 ) : null}
               </div>
@@ -231,37 +251,9 @@ export default async function DiscordLinkedRolesPage({
           </section>
         )}
 
-        {communityUnlocked && viewer ? (
-          <section className="rounded-[28px] bg-zinc-900/25 p-5 ring-1 ring-white/5 sm:p-6">
-            <div className="text-xl font-semibold text-zinc-50">Refresh this verified account</div>
-            <p className="mt-2 text-sm text-zinc-400">
-              You no longer need a separate submit page. Refreshes now run against your current
-              Discord-verified Riot account only.
-            </p>
-            {joinCodeRequired ? (
-              <p className="mt-2 text-sm text-zinc-500">
-                Your community code is still required here, but Riftboard never displays that code
-                publicly.
-              </p>
-            ) : null}
-            <div className="mt-5">
-              <SubmitForm
-                codeRequired={joinCodeRequired}
-                viewer={{
-                  discordUsername: viewer.discordUsername,
-                  gameName: viewer.gameName,
-                  tagLine: viewer.tagLine,
-                }}
-                returnTo="/discord/linked-roles"
-                showBindingCard={false}
-              />
-            </div>
-          </section>
-        ) : null}
-
         {communityUnlocked && pending ? (
           <section className="rounded-[28px] bg-zinc-900/25 p-5 ring-1 ring-white/5 sm:p-6">
-            <div className="text-xl font-semibold text-zinc-50">Choose your Riot account</div>
+            <div className="text-xl font-semibold text-zinc-50">Pick your Riot account</div>
             <p className="mt-2 text-sm text-zinc-400">
               Discord returned more than one Riot-style connection for{" "}
               <span className="text-zinc-200">{pending.discordUsername ?? pending.discordUserId}</span>.
@@ -288,7 +280,7 @@ export default async function DiscordLinkedRolesPage({
                       type="submit"
                       className="rounded-2xl bg-emerald-500/90 px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-emerald-400"
                     >
-                      Use this account
+                      Use this Riot account
                     </button>
                   </div>
                 </form>

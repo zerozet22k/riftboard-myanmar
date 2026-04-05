@@ -43,6 +43,7 @@ export type DiscordRiotCandidate = {
 };
 
 const RIOT_CONNECTION_TYPE_PATTERN = /(riot|league)/i;
+const RECENT_GUILD_VERIFICATION_MS = 10 * 60 * 1000;
 
 function normalizeTierValue(tier?: string | null) {
   return tier ? TIER_SCORE[String(tier).toUpperCase()] ?? 0 : 0;
@@ -151,6 +152,16 @@ export async function verifyDiscordGuildMembershipForLink(linkInput: DiscordLink
   if (!guildId) throw new Error("Missing env: DISCORD_GUILD_ID");
 
   const accessToken = await ensureFreshDiscordAccessToken(link);
+  const lastVerifiedAt = link.lastVerifiedAt ? new Date(link.lastVerifiedAt).getTime() : 0;
+  if (
+    lastVerifiedAt &&
+    Number.isFinite(lastVerifiedAt) &&
+    Date.now() - lastVerifiedAt < RECENT_GUILD_VERIFICATION_MS &&
+    String(link.lastVerifiedGuildId ?? "").trim() === guildId
+  ) {
+    return accessToken;
+  }
+
   const guilds = await getDiscordUserGuilds(accessToken);
   const isMember = guilds.some((guild) => String(guild?.id ?? "").trim() === guildId);
 
@@ -164,23 +175,28 @@ export async function verifyDiscordGuildMembershipForLink(linkInput: DiscordLink
   return accessToken;
 }
 
-export async function loadVerifiedDiscordIdentity(discordUserId: string) {
+export async function loadStoredDiscordIdentity(discordUserId: string) {
   await dbConnect();
 
   const link = await DiscordLink.findOne({ discordUserId: String(discordUserId).trim() });
   if (!link?._id) throw new Error("No Discord link found. Connect Discord first.");
   if (!link.verifiedBinding || link.verificationSource !== "discord_connections") {
-    throw new Error("Reconnect your Discord account to verify your Riot binding again.");
+    throw new Error("Reconnect Discord to verify your Riot account again.");
   }
 
-  const accessToken = await verifyDiscordGuildMembershipForLink(link);
   const player = await Player.findById(
     link.playerId,
     { gameName: 1, tagLine: 1, solo: 1, leaderboard: 1 }
   ).lean<PlayerProjection | null>();
 
   if (!player?._id) throw new Error("Your linked Riftboard profile could not be found.");
-  return { link, player, accessToken };
+  return { link, player };
+}
+
+export async function loadVerifiedDiscordIdentity(discordUserId: string) {
+  const identity = await loadStoredDiscordIdentity(discordUserId);
+  const accessToken = await verifyDiscordGuildMembershipForLink(identity.link);
+  return { ...identity, accessToken };
 }
 
 export async function saveVerifiedDiscordLinkFromCandidate(input: {

@@ -13,7 +13,9 @@ export async function dbConnect() {
     if (cached.conn) return cached.conn;
 
     if (!cached.promise) {
-        cached.promise = mongoose.connect(MONGODB_URI!, { autoIndex: true });
+        cached.promise = mongoose.connect(MONGODB_URI!, {
+            autoIndex: process.env.NODE_ENV !== "production",
+        });
     }
 
     cached.conn = await cached.promise;

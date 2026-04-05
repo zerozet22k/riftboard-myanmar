@@ -1,4 +1,5 @@
 // app/api/cron/leaderboard/route.ts
+import { revalidatePath } from "next/cache";
 import { NextRequest, NextResponse } from "next/server";
 import { refreshAllPlayers } from "@/lib/refresh";
 import { getSchedulerTokens } from "@/lib/runtimeConfig";
@@ -70,6 +71,9 @@ export async function GET(req: NextRequest) {
             cooldownMs,
             force,
         });
+
+        revalidatePath("/");
+        revalidatePath("/leaderboard");
 
         return NextResponse.json({ ok: true, result });
     } catch (e: unknown) {
