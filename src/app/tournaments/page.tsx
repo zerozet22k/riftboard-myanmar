@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { dbConnect } from "@/lib/mongodb";
+import { displayTournamentStatus } from "@/lib/tournaments";
 import { Tournament } from "@/models/tournament";
 import { TournamentTeam } from "@/models/tournamentTeam";
 
@@ -16,6 +17,8 @@ type TournamentListRow = {
   maxTeams?: number;
   bestOf?: number;
   status: string;
+  complianceStatus?: string;
+  riotApiState?: string;
   startsAt?: Date | null;
 };
 
@@ -45,17 +48,29 @@ export default async function TournamentsPage() {
       maxTeams: 1,
       bestOf: 1,
       status: 1,
+      complianceStatus: 1,
+      riotApiState: 1,
       startsAt: 1,
       createdAt: 1,
     }
   )
+    .where("status")
+    .ne("draft")
     .sort({ startsAt: 1, createdAt: -1 })
     .lean()) as TournamentListRow[];
 
   const counts = await TournamentTeam.aggregate<{
     _id: unknown;
     total: number;
-  }>([{ $group: { _id: "$tournamentId", total: { $sum: 1 } } }]);
+  }>([
+    {
+      $match: {
+        verificationMode: "discord_verified",
+        status: { $ne: "dropped" },
+      },
+    },
+    { $group: { _id: "$tournamentId", total: { $sum: 1 } } },
+  ]);
 
   const countMap = new Map(counts.map((row) => [String(row._id), row.total]));
 
@@ -67,18 +82,13 @@ export default async function TournamentsPage() {
             <div className="text-[11px] uppercase tracking-[0.24em] text-zinc-500">Community</div>
             <h1 className="text-3xl font-semibold tracking-tight text-zinc-50">Tournaments</h1>
             <p className="max-w-2xl text-sm text-zinc-400">
-              Burmese-friendly custom-lobby tournaments with signup, bracket tracking, and Riot
-              tournament codes for each round.
+              Burmese-friendly Riot-compliant tournaments with registration, check-in, transparent
+              seeding, and callback-driven match progression.
             </p>
           </div>
 
           <div className="flex flex-wrap gap-3">
-            <Link
-              href="/leaderboard"
-              className="rounded-2xl border border-zinc-800 bg-zinc-950/40 px-4 py-2.5 text-sm text-zinc-200 transition hover:bg-zinc-900/40"
-            >
-              Open leaderboard
-            </Link>
+    
             <Link
               href="/tournaments/new"
               className="rounded-2xl bg-emerald-500/90 px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-emerald-400"
@@ -105,7 +115,7 @@ export default async function TournamentsPage() {
                     </div>
                   </div>
                   <div className="rounded-full bg-zinc-950/60 px-3 py-1 text-xs uppercase tracking-[0.16em] text-zinc-300 ring-1 ring-white/6">
-                    {tournament.status}
+                    {displayTournamentStatus(tournament.status as never)}
                   </div>
                 </div>
 
@@ -119,6 +129,9 @@ export default async function TournamentsPage() {
                   </span>
                   <span className="rounded-full bg-zinc-950/60 px-3 py-1 ring-1 ring-white/6">
                     Starts: {formatWhen(tournament.startsAt)}
+                  </span>
+                  <span className="rounded-full bg-zinc-950/60 px-3 py-1 ring-1 ring-white/6">
+                    Riot: {tournament.riotApiState === "provisioned" ? "Provisioned" : "Pending"}
                   </span>
                 </div>
               </Link>

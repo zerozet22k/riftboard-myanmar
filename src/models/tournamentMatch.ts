@@ -1,5 +1,5 @@
 import mongoose, { Schema } from "mongoose";
-import type { BracketSide, TournamentMatchStatus } from "@/lib/tournaments";
+import type { BracketSide, TournamentMatchStatus, TournamentResultSource } from "@/lib/tournaments";
 
 export type TournamentMatchDoc = {
   tournamentId: mongoose.Types.ObjectId;
@@ -17,7 +17,11 @@ export type TournamentMatchDoc = {
   scoreB?: number;
   note?: string;
   tournamentCode?: string | null;
+  codeMetadata?: string | null;
+  codeGeneratedAt?: Date | null;
   linkedMatchId?: string | null;
+  resultSource?: TournamentResultSource | null;
+  completedAt?: Date | null;
   advanceToRound?: number | null;
   advanceToSlot?: number | null;
   advanceToSide?: BracketSide | null;
@@ -47,7 +51,11 @@ const TournamentMatchSchema = new Schema<TournamentMatchDoc>(
     scoreB: { type: Number, default: 0 },
     note: { type: String, trim: true },
     tournamentCode: { type: String, trim: true, default: null },
+    codeMetadata: { type: String, trim: true, default: null },
+    codeGeneratedAt: { type: Date, default: null },
     linkedMatchId: { type: String, trim: true, default: null },
+    resultSource: { type: String, enum: ["callback", "sync", "manual", null], default: null },
+    completedAt: { type: Date, default: null },
     advanceToRound: { type: Number, default: null },
     advanceToSlot: { type: Number, default: null },
     advanceToSide: { type: String, enum: ["A", "B", null], default: null },
@@ -60,7 +68,7 @@ const TournamentMatchSchema = new Schema<TournamentMatchDoc>(
 
 TournamentMatchSchema.index({ tournamentId: 1, round: 1, slot: 1 }, { unique: true });
 TournamentMatchSchema.index({ tournamentId: 1, status: 1, round: 1, slot: 1 });
-TournamentMatchSchema.index({ tournamentId: 1, tournamentCode: 1 });
+TournamentMatchSchema.index({ tournamentId: 1, tournamentCode: 1 }, { unique: true, sparse: true });
 
 export const TournamentMatch =
   (mongoose.models.TournamentMatch as mongoose.Model<TournamentMatchDoc>) ??

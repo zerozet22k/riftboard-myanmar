@@ -1,0 +1,261 @@
+import { dbConnect } from "@/lib/mongodb";
+import {
+  decryptDiscordSecret,
+  encryptDiscordSecret,
+  getDiscordGuildId,
+  getDiscordUserGuilds,
+  refreshDiscordToken,
+  type DiscordConnection,
+  type DiscordOAuthToken,
+  type DiscordUser,
+  updateDiscordRoleConnection,
+} from "@/lib/discord";
+import { buildPlayerLookupQuery } from "@/lib/playerIdentity";
+import { rankScore, TIER_SCORE } from "@/lib/rank";
+import { upsertAndRefreshByRiotId } from "@/lib/refresh";
+import { parseRiotId } from "@/lib/tournaments";
+import { DiscordLink, type DiscordLinkDoc } from "@/models/discordLink";
+import { Player } from "@/models/player";
+
+type PlayerProjection = {
+  _id: unknown;
+  gameName: string;
+  tagLine: string;
+  solo?: {
+    tier?: string | null;
+    division?: string | null;
+    lp?: number | null;
+  } | null;
+  leaderboard?: {
+    status?: string | null;
+  } | null;
+};
+
+type DiscordLinkDocument = InstanceType<typeof DiscordLink>;
+
+export type DiscordRiotCandidate = {
+  id: string;
+  riotId: string;
+  gameName: string;
+  tagLine: string;
+  connectionType: string;
+  connectionLabel: string;
+};
+
+const RIOT_CONNECTION_TYPE_PATTERN = /(riot|league)/i;
+
+function normalizeTierValue(tier?: string | null) {
+  return tier ? TIER_SCORE[String(tier).toUpperCase()] ?? 0 : 0;
+}
+
+function toDiscordLinkDocument(link: unknown) {
+  return link as DiscordLinkDocument;
+}
+
+export function buildDiscordLinkedRoleMetadata(player: PlayerProjection) {
+  const solo = player.solo ?? null;
+  const soloRanked = solo?.tier ? 1 : 0;
+  const soloTierValue = normalizeTierValue(solo?.tier ?? null);
+
+  return {
+    solo_ranked: soloRanked,
+    leaderboard_approved: player.leaderboard?.status === "approved" ? 1 : 0,
+    solo_tier_exact: soloTierValue,
+    solo_tier_plus: soloTierValue,
+    solo_rank_score: soloRanked ? rankScore(solo?.tier ?? null, solo?.division ?? null, solo?.lp ?? null) : 0,
+  };
+}
+
+export function extractRiotCandidatesFromDiscordConnections(connections: DiscordConnection[]) {
+  const deduped = new Map<string, DiscordRiotCandidate>();
+
+  for (const connection of Array.isArray(connections) ? connections : []) {
+    const connectionType = String(connection?.type ?? "").trim();
+    if (!RIOT_CONNECTION_TYPE_PATTERN.test(connectionType)) continue;
+    if (connection?.verified === false) continue;
+
+    const label = String(connection?.name ?? "").trim();
+    const parsed = parseRiotId(label);
+    if (!parsed) continue;
+
+    const riotId = `${parsed.gameName}#${parsed.tagLine}`;
+    const key = riotId.toLowerCase();
+    if (deduped.has(key)) continue;
+
+    deduped.set(key, {
+      id: key,
+      riotId,
+      gameName: parsed.gameName,
+      tagLine: parsed.tagLine,
+      connectionType,
+      connectionLabel: label,
+    });
+  }
+
+  return [...deduped.values()].sort((left, right) => left.riotId.localeCompare(right.riotId));
+}
+
+export async function resolvePlayerForDiscordLink(riotIdInput: string) {
+  const parsed = parseRiotId(riotIdInput);
+  if (!parsed) throw new Error("Discord did not provide a valid Riot ID.");
+
+  await upsertAndRefreshByRiotId(
+    { gameName: parsed.gameName, tagLine: parsed.tagLine },
+    { force: true, syncMatches: false, fullMastery: false }
+  );
+
+  const player = await Player.findOne(
+    buildPlayerLookupQuery(parsed.gameName, parsed.tagLine),
+    {
+      gameName: 1,
+      tagLine: 1,
+      solo: 1,
+      leaderboard: 1,
+    }
+  ).lean<PlayerProjection | null>();
+
+  if (!player?._id) throw new Error("Could not resolve that Discord-provided Riot account into a Riftboard profile.");
+  return player;
+}
+
+export async function ensureFreshDiscordAccessToken(linkInput: DiscordLinkDocument) {
+  const link = toDiscordLinkDocument(linkInput);
+  let accessToken = decryptDiscordSecret(link.accessTokenEnc);
+
+  if (link.expiresAt && link.expiresAt.getTime() <= Date.now()) {
+    if (!link.refreshTokenEnc) {
+      throw new Error("Discord authorization expired. Reconnect your Discord account.");
+    }
+
+    const refreshed = await refreshDiscordToken(decryptDiscordSecret(link.refreshTokenEnc));
+    accessToken = refreshed.access_token;
+    link.accessTokenEnc = encryptDiscordSecret(refreshed.access_token);
+    link.refreshTokenEnc = refreshed.refresh_token
+      ? encryptDiscordSecret(refreshed.refresh_token)
+      : link.refreshTokenEnc;
+    link.tokenType = refreshed.token_type;
+    link.scopes = String(refreshed.scope ?? "")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+    link.expiresAt = new Date(Date.now() + Math.max(0, refreshed.expires_in - 60) * 1000);
+    await link.save();
+  }
+
+  return accessToken;
+}
+
+export async function verifyDiscordGuildMembershipForLink(linkInput: DiscordLinkDocument) {
+  const link = toDiscordLinkDocument(linkInput);
+  const guildId = String(getDiscordGuildId() ?? "").trim();
+  if (!guildId) throw new Error("Missing env: DISCORD_GUILD_ID");
+
+  const accessToken = await ensureFreshDiscordAccessToken(link);
+  const guilds = await getDiscordUserGuilds(accessToken);
+  const isMember = guilds.some((guild) => String(guild?.id ?? "").trim() === guildId);
+
+  if (!isMember) {
+    throw new Error("Join the Riftboard Discord server before using this feature.");
+  }
+
+  link.lastVerifiedAt = new Date();
+  link.lastVerifiedGuildId = guildId;
+  await link.save();
+  return accessToken;
+}
+
+export async function loadVerifiedDiscordIdentity(discordUserId: string) {
+  await dbConnect();
+
+  const link = await DiscordLink.findOne({ discordUserId: String(discordUserId).trim() });
+  if (!link?._id) throw new Error("No Discord link found. Connect Discord first.");
+  if (!link.verifiedBinding || link.verificationSource !== "discord_connections") {
+    throw new Error("Reconnect your Discord account to verify your Riot binding again.");
+  }
+
+  const accessToken = await verifyDiscordGuildMembershipForLink(link);
+  const player = await Player.findById(
+    link.playerId,
+    { gameName: 1, tagLine: 1, solo: 1, leaderboard: 1 }
+  ).lean<PlayerProjection | null>();
+
+  if (!player?._id) throw new Error("Your linked Riftboard profile could not be found.");
+  return { link, player, accessToken };
+}
+
+export async function saveVerifiedDiscordLinkFromCandidate(input: {
+  discordUser: DiscordUser;
+  token: DiscordOAuthToken;
+  candidate: DiscordRiotCandidate;
+}) {
+  const player = await resolvePlayerForDiscordLink(input.candidate.riotId);
+  const guildId = String(getDiscordGuildId() ?? "").trim();
+  const now = new Date();
+
+  const saved = await DiscordLink.findOneAndUpdate(
+    { discordUserId: input.discordUser.id },
+    {
+      $set: {
+        discordUsername: input.discordUser.global_name || input.discordUser.username,
+        playerId: player._id,
+        gameName: player.gameName,
+        tagLine: player.tagLine,
+        accessTokenEnc: encryptDiscordSecret(input.token.access_token),
+        refreshTokenEnc: input.token.refresh_token ? encryptDiscordSecret(input.token.refresh_token) : null,
+        tokenType: input.token.token_type,
+        scopes: String(input.token.scope ?? "")
+          .trim()
+          .split(/\s+/)
+          .filter(Boolean),
+        expiresAt: new Date(Date.now() + Math.max(0, input.token.expires_in - 60) * 1000),
+        verifiedBinding: true,
+        verificationSource: "discord_connections",
+        lastVerifiedAt: now,
+        lastVerifiedGuildId: guildId || null,
+        proofConnectionType: input.candidate.connectionType,
+        proofConnectionLabel: input.candidate.connectionLabel,
+      },
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+
+  return { link: saved, player };
+}
+
+export async function syncDiscordLinkedRoleForStoredLink(linkId: string) {
+  await dbConnect();
+  const link = await DiscordLink.findById(linkId);
+  if (!link?._id) throw new Error("Discord link not found.");
+  if (!link.verifiedBinding || link.verificationSource !== "discord_connections") {
+    throw new Error("Reconnect Discord before syncing linked roles.");
+  }
+
+  const player = await Player.findById(
+    link.playerId,
+    { gameName: 1, tagLine: 1, solo: 1, leaderboard: 1 }
+  ).lean<PlayerProjection | null>();
+  if (!player?._id) throw new Error("Linked Riftboard profile not found.");
+
+  const accessToken = await verifyDiscordGuildMembershipForLink(link);
+  const metadata = buildDiscordLinkedRoleMetadata(player);
+  await updateDiscordRoleConnection({
+    accessToken,
+    platformName: "Riftboard Myanmar",
+    platformUsername: `${player.gameName}#${player.tagLine}`,
+    metadata,
+  });
+
+  link.gameName = player.gameName;
+  link.tagLine = player.tagLine;
+  link.metadataSnapshot = metadata;
+  link.lastSyncedAt = new Date();
+  await link.save();
+
+  return { link, player, metadata };
+}
+
+export function isVerifiedDiscordLink(
+  link: Pick<DiscordLinkDoc, "verifiedBinding" | "verificationSource"> | null | undefined
+) {
+  return !!link?.verifiedBinding && link.verificationSource === "discord_connections";
+}

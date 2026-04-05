@@ -6,7 +6,8 @@ import TournamentBracket, {
 } from "@/components/TournamentBracket";
 import TournamentManagePanel from "@/components/TournamentManagePanel";
 import { dbConnect } from "@/lib/mongodb";
-import { hashToken } from "@/lib/tournaments";
+import { isRiotTournamentApiEnabled } from "@/lib/runtimeConfig";
+import { displayTournamentStatus, hashToken } from "@/lib/tournaments";
 import { Tournament } from "@/models/tournament";
 import { TournamentMatch } from "@/models/tournamentMatch";
 import { TournamentTeam } from "@/models/tournamentTeam";
@@ -33,6 +34,11 @@ export default async function TournamentManagePage({
       name: 1,
       slug: 1,
       status: 1,
+      teamSize: 1,
+      maxTeams: 1,
+      bestOf: 1,
+      complianceStatus: 1,
+      riotApiState: 1,
       manageTokenHash: 1,
     }
   )
@@ -68,6 +74,10 @@ export default async function TournamentManagePage({
         name: 1,
         seed: 1,
         status: 1,
+        verificationMode: 1,
+        checkedIn: 1,
+        contactDiscord: 1,
+        roster: 1,
       }
     )
       .sort({ seed: 1, createdAt: 1 })
@@ -87,6 +97,9 @@ export default async function TournamentManagePage({
         scoreA: 1,
         scoreB: 1,
         tournamentCode: 1,
+        resultSource: 1,
+        linkedMatchId: 1,
+        note: 1,
       }
     )
       .sort({ round: 1, slot: 1 })
@@ -97,6 +110,26 @@ export default async function TournamentManagePage({
     id: String(team._id),
     name: team.name,
     seed: typeof team.seed === "number" ? team.seed : null,
+  }));
+
+  const manageTeams = teams.map((team) => ({
+    id: String(team._id),
+    name: team.name,
+    seed: typeof team.seed === "number" ? team.seed : null,
+    status: team.status,
+    verificationMode: team.verificationMode ?? null,
+    checkedIn: !!team.checkedIn,
+    contactDiscord: team.contactDiscord ?? null,
+    roster: Array.isArray(team.roster)
+      ? team.roster.map((entry) => ({
+          discordUserId: entry.discordUserId ? String(entry.discordUserId) : null,
+          discordUsername: entry.discordUsername ?? null,
+          gameName: entry.gameName,
+          tagLine: entry.tagLine,
+          isCaptain: !!entry.isCaptain,
+          inviteStatus: entry.inviteStatus ?? "accepted",
+        }))
+      : [],
   }));
 
   const bracketMatches: TournamentBracketMatch[] = matches.map((match) => ({
@@ -115,6 +148,25 @@ export default async function TournamentManagePage({
     tournamentCode: match.tournamentCode ?? null,
   }));
 
+  const manageMatches = matches.map((match) => ({
+    id: String(match._id),
+    round: match.round,
+    slot: match.slot,
+    bestOf: match.bestOf ?? 1,
+    status: match.status,
+    teamAId: match.teamAId ? String(match.teamAId) : null,
+    teamBId: match.teamBId ? String(match.teamBId) : null,
+    teamASeed: typeof match.teamASeed === "number" ? match.teamASeed : null,
+    teamBSeed: typeof match.teamBSeed === "number" ? match.teamBSeed : null,
+    winnerTeamId: match.winnerTeamId ? String(match.winnerTeamId) : null,
+    scoreA: match.scoreA ?? 0,
+    scoreB: match.scoreB ?? 0,
+    tournamentCode: match.tournamentCode ?? null,
+    resultSource: typeof match.resultSource === "string" ? match.resultSource : null,
+    linkedMatchId: typeof match.linkedMatchId === "string" ? match.linkedMatchId : null,
+    note: typeof match.note === "string" ? match.note : null,
+  }));
+
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
       <div className="mx-auto w-full max-w-[1500px] space-y-6 px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
@@ -128,15 +180,36 @@ export default async function TournamentManagePage({
               Manage {tournament.name}
             </h1>
             <p className="mt-2 text-sm text-zinc-400">
-              Seed the bracket, generate Riot lobby codes, and report each winner here.
+              Current stage: {displayTournamentStatus(tournament.status as never)}. Run the draft,
+              registration, check-in, seeding, Riot provisioning, and exception handling from here.
             </p>
           </div>
         </header>
 
         <TournamentManagePanel
-          tournament={{ slug: tournament.slug, path: `/tournaments/${tournament.slug}` }}
-          teams={bracketTeams}
-          matches={bracketMatches}
+          key={`${tournament.status}-${teams
+            .map(
+              (team) =>
+                `${String(team._id)}:${team.seed ?? ""}:${team.checkedIn ? 1 : 0}:${team.status}:${team.verificationMode ?? ""}`
+            )
+            .join("|")}-${matches.map((match) => `${String(match._id)}:${match.status}:${match.tournamentCode ?? ""}`).join("|")}`}
+          tournament={{
+            id: String(tournament._id),
+            slug: tournament.slug,
+            name: tournament.name,
+            path: `/tournaments/${tournament.slug}`,
+            status: tournament.status,
+            statusLabel: displayTournamentStatus(tournament.status as never),
+            teamSize: tournament.teamSize ?? 5,
+            maxTeams: tournament.maxTeams ?? 0,
+            bestOf: tournament.bestOf ?? 1,
+            complianceStatus: tournament.complianceStatus ?? "eligible",
+            riotApiState: tournament.riotApiState ?? "disabled",
+            riotTournamentApiEnabled: isRiotTournamentApiEnabled(),
+          }}
+          teams={manageTeams}
+          matches={manageMatches}
+          bracketTeams={bracketTeams}
           manageToken={token}
         />
 
@@ -148,7 +221,7 @@ export default async function TournamentManagePage({
           {bracketMatches.length ? (
             <TournamentBracket matches={bracketMatches} teams={bracketTeams} />
           ) : (
-            <div className="text-sm text-zinc-500">No bracket yet. Seed it first.</div>
+            <div className="text-sm text-zinc-500">No bracket yet. Check in teams and lock seeds first.</div>
           )}
         </section>
       </div>

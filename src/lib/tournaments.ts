@@ -2,28 +2,54 @@ import crypto from "node:crypto";
 import type { Types } from "mongoose";
 
 export type TournamentFormat = "single_elimination";
-export type TournamentStatus = "registration" | "live" | "completed";
+export type TournamentStatus =
+  | "draft"
+  | "registration"
+  | "check_in"
+  | "seeded"
+  | "live"
+  | "completed";
+export type TournamentComplianceStatus = "eligible" | "blocked";
+export type TournamentRiotState = "disabled" | "not_provisioned" | "provisioned";
 export type TournamentTeamStatus =
+  | "forming"
   | "registered"
   | "checked_in"
   | "active"
   | "eliminated"
   | "winner"
   | "dropped";
+export type TournamentTeamVerificationMode = "legacy_manual" | "discord_verified";
+export type TournamentInviteStatus = "accepted" | "pending" | "declined";
 export type TournamentMatchStatus = "pending" | "ready" | "code_ready" | "completed";
+export type TournamentResultSource = "callback" | "sync" | "manual";
 export type BracketSide = "A" | "B";
 
 export type TournamentRosterEntryInput = {
   gameName: string;
   tagLine: string;
   puuid?: string | null;
+  playerId?: string | null;
+  discordUserId?: string | null;
+  discordUsername?: string | null;
   isCaptain?: boolean;
+  inviteStatus?: TournamentInviteStatus;
+  invitedAt?: Date | null;
+  acceptedAt?: Date | null;
+  declinedAt?: Date | null;
 };
 
 export type TournamentRosterEntry = TournamentRosterEntryInput & {
   puuid?: string;
+  playerId?: string;
+  discordUserId?: string;
+  discordUsername?: string | null;
   gameNameNorm: string;
   tagLineNorm: string;
+  inviteStatus: TournamentInviteStatus;
+  invitedAt?: Date | null;
+  acceptedAt?: Date | null;
+  declinedAt?: Date | null;
 };
 
 export type BracketSeedTeam = {
@@ -49,6 +75,25 @@ export type BracketMatchSeed = {
   scoreA: number;
   scoreB: number;
 };
+
+export type TournamentCodeMetadata = {
+  tournamentId: string;
+  slug: string;
+  matchId: string;
+  round: number;
+  slot: number;
+};
+
+export const RIOT_LEGAL_BOILERPLATE =
+  "RiftBoard Myanmar is not endorsed by Riot Games and does not reflect the views or opinions of Riot Games or anyone officially involved in producing or managing League of Legends. League of Legends and Riot Games are trademarks or registered trademarks of Riot Games, Inc. League of Legends Copyright Riot Games, Inc.";
+
+export const TOURNAMENT_POLICY_SUMMARY = [
+  "This feature is only for traditional tournament formats such as single elimination.",
+  "Every participant must have free access to tournament features used in the event.",
+  "At least 20 active participants are required before the bracket can be locked.",
+  "Wagering, gambling, or money-like custom currencies are not allowed.",
+  "Organizer seeds and rulings must be transparent to all participants.",
+] as const;
 
 export function slugifyTournamentName(input: string) {
   return String(input ?? "")
@@ -93,10 +138,29 @@ export function makeRosterEntry(input: TournamentRosterEntryInput): TournamentRo
     gameName: String(input.gameName ?? "").trim(),
     tagLine: String(input.tagLine ?? "").trim(),
     puuid: input.puuid ? String(input.puuid).trim() : undefined,
+    playerId: input.playerId ? String(input.playerId).trim() : undefined,
+    discordUserId: input.discordUserId ? String(input.discordUserId).trim() : undefined,
+    discordUsername: input.discordUsername ? String(input.discordUsername).trim() : null,
     isCaptain: !!input.isCaptain,
     gameNameNorm: normalizeRiotText(input.gameName),
     tagLineNorm: normalizeRiotText(input.tagLine),
+    inviteStatus: input.inviteStatus ?? "accepted",
+    invitedAt: input.invitedAt ?? null,
+    acceptedAt: input.acceptedAt ?? null,
+    declinedAt: input.declinedAt ?? null,
   };
+}
+
+export function acceptedRosterEntries(roster: TournamentRosterEntry[] | null | undefined) {
+  return (Array.isArray(roster) ? roster : []).filter((entry) => entry.inviteStatus === "accepted");
+}
+
+export function activeRosterEntries(roster: TournamentRosterEntry[] | null | undefined) {
+  return (Array.isArray(roster) ? roster : []).filter((entry) => entry.inviteStatus !== "declined");
+}
+
+export function pendingRosterEntries(roster: TournamentRosterEntry[] | null | undefined) {
+  return (Array.isArray(roster) ? roster : []).filter((entry) => entry.inviteStatus === "pending");
 }
 
 export function parseRosterLines(text: string) {
@@ -112,6 +176,71 @@ export function makeToken() {
 
 export function hashToken(token: string) {
   return crypto.createHash("sha256").update(String(token ?? "")).digest("hex");
+}
+
+export function hashApiKey(value: string) {
+  return crypto.createHash("sha256").update(String(value ?? "")).digest("hex");
+}
+
+export function minimumTeamsForTournament(teamSize: number) {
+  return Math.ceil(20 / Math.max(1, teamSize));
+}
+
+export function activeParticipantCount(teamCount: number, teamSize: number) {
+  return Math.max(0, teamCount) * Math.max(1, teamSize);
+}
+
+export function supportsMinimumParticipants(teamSize: number, maxTeams: number) {
+  return activeParticipantCount(maxTeams, teamSize) >= 20;
+}
+
+export function validateTournamentStructure(teamSize: number, maxTeams: number) {
+  if (![1, 5].includes(teamSize)) {
+    return { ok: false, error: "Only 1v1 and 5v5 tournaments are supported right now" } as const;
+  }
+
+  if (![4, 8, 16, 32].includes(maxTeams)) {
+    return { ok: false, error: "Max teams must be one of 4, 8, 16, or 32" } as const;
+  }
+
+  if (!supportsMinimumParticipants(teamSize, maxTeams)) {
+    return {
+      ok: false,
+      error: `This setup cannot satisfy Riot's 20 participant minimum. ${teamSize}v${teamSize} needs at least ${minimumTeamsForTournament(teamSize)} active teams.`,
+    } as const;
+  }
+
+  return { ok: true } as const;
+}
+
+export function createTournamentCodeMetadata(input: TournamentCodeMetadata) {
+  return JSON.stringify({
+    tournamentId: input.tournamentId,
+    slug: input.slug,
+    matchId: input.matchId,
+    round: input.round,
+    slot: input.slot,
+  });
+}
+
+export function parseTournamentCodeMetadata(raw: unknown) {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<TournamentCodeMetadata>;
+    if (
+      typeof parsed.tournamentId !== "string" ||
+      typeof parsed.slug !== "string" ||
+      typeof parsed.matchId !== "string" ||
+      typeof parsed.round !== "number" ||
+      typeof parsed.slot !== "number"
+    ) {
+      return null;
+    }
+    return parsed as TournamentCodeMetadata;
+  } catch {
+    return null;
+  }
 }
 
 export function nextPowerOfTwo(input: number) {
@@ -229,8 +358,14 @@ export function shortRoundLabel(round: number, totalRounds: number) {
 }
 
 export function displayMatchStatus(status: TournamentMatchStatus) {
-  if (status === "code_ready") return "Lobby code ready";
+  if (status === "code_ready") return "Riot code ready";
   if (status === "completed") return "Completed";
   if (status === "ready") return "Ready";
   return "Pending";
+}
+
+export function displayTournamentStatus(status: TournamentStatus) {
+  if (status === "check_in") return "Check-in";
+  if (status === "seeded") return "Seeded";
+  return status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, " ");
 }

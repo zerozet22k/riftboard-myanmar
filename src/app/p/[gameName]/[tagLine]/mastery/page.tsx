@@ -119,12 +119,6 @@ export default async function PlayerMasteryPage({
             >
               Back to profile
             </Link>
-            <Link
-              href="/leaderboard"
-              className="rounded-2xl border border-zinc-800 bg-zinc-900/30 px-4 py-2 hover:bg-zinc-900/60"
-            >
-              Open leaderboard
-            </Link>
           </div>
         </header>
 

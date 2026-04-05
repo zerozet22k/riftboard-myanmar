@@ -41,12 +41,31 @@ export function getCommunityJoinCodes() {
   return fallback ? [fallback] : [];
 }
 
+export function getCommunityDiscordUrl() {
+  return firstNonEmpty([
+    normalizeUrl(process.env.COMMUNITY_DISCORD_URL),
+    normalizeUrl(process.env.COMMUNITY_DISCORD_INVITE_URL),
+    normalizeUrl(process.env.DISCORD_INVITE_URL),
+    normalizeUrl(process.env.NEXT_PUBLIC_COMMUNITY_DISCORD_URL),
+    normalizeUrl(process.env.NEXT_PUBLIC_DISCORD_INVITE_URL),
+  ]);
+}
+
 export function getTournamentHostCode() {
   return firstNonEmpty([
     process.env.TOURNAMENT_HOST_CODE,
     process.env.COMMUNITY_JOIN_CODE,
     process.env.SUBMIT_CODE,
   ]);
+}
+
+export function isRiotTournamentApiEnabled() {
+  const raw = firstNonEmpty([process.env.RIOT_TOURNAMENT_API_ENABLED]).toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+}
+
+export function getTournamentCallbackToken() {
+  return firstNonEmpty([process.env.RIOT_TOURNAMENT_CALLBACK_TOKEN, "riot-tournament-callback"]);
 }
 
 export function getSchedulerTokens() {

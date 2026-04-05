@@ -326,12 +326,6 @@ export default async function PlayerProfilePage({
 
                 <div className="flex flex-wrap gap-2.5">
                   <Link
-                    href="/leaderboard"
-                    className="rounded-xl bg-zinc-900/52 px-3.5 py-2 text-sm font-medium text-zinc-100 transition hover:bg-white/5"
-                  >
-                    Open leaderboard
-                  </Link>
-                  <Link
                     href={masteryPath}
                     className="rounded-xl bg-zinc-950/42 px-3.5 py-2 text-sm font-medium text-zinc-300 transition hover:bg-white/5"
                   >

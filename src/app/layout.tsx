@@ -1,5 +1,9 @@
+import Link from "next/link";
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import SiteHeader from "@/components/SiteHeader";
+import { getCommunityDiscordUrl } from "@/lib/runtimeConfig";
+import { RIOT_LEGAL_BOILERPLATE } from "@/lib/tournaments";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -47,6 +51,8 @@ export const viewport: Viewport = {
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const communityDiscordUrl = getCommunityDiscordUrl();
+
   return (
     <html lang="en" className="dark">
       <body
@@ -66,9 +72,28 @@ export default function RootLayout({
 
         {/* App frame */}
         <div className="mx-auto w-full">
+          <SiteHeader discordUrl={communityDiscordUrl} />
           {children}
           <footer className="px-4 sm:px-6 py-10 text-center text-xs text-zinc-500">
-            Not affiliated with Riot Games. League of Legends is a trademark of Riot Games, Inc.
+            <div className="mb-3 flex items-center justify-center gap-4 text-sm text-zinc-400">
+              {communityDiscordUrl ? (
+                <Link
+                  href={communityDiscordUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="transition hover:text-zinc-200"
+                >
+                  Discord
+                </Link>
+              ) : null}
+              <Link href="/terms" className="transition hover:text-zinc-200">
+                Terms
+              </Link>
+              <Link href="/privacy" className="transition hover:text-zinc-200">
+                Privacy
+              </Link>
+            </div>
+            <div>{RIOT_LEGAL_BOILERPLATE}</div>
           </footer>
         </div>
       </body>

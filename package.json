@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "discord:register": "node scripts/register-discord.mjs",
     "refresh:leaderboard:local": "node scripts/refresh-leaderboard-local.mjs",
     "refresh:leaderboard:ps": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-local-cron.ps1"
   },

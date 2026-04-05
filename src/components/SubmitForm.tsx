@@ -1,56 +1,14 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
-const ZW = /[\u200B-\u200D\uFEFF]/g;
-
-function sanitizeRiotIdPaste(v: string) {
-  return String(v || "")
-    .replace(ZW, "")
-    .replace(/\s*\/\s*/g, "#")
-    .replace(/\s*#\s*/g, "#")
-    .replace(/#+/g, "#")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function sanitizeGameName(v: string) {
-  return String(v || "")
-    .replace(ZW, "")
-    .replace(/[#/]/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 16);
-}
-
-function sanitizeTagLine(v: string) {
-  return String(v || "")
-    .replace(ZW, "")
-    .replace(/[^0-9a-zA-Z]/g, "")
-    .toUpperCase()
-    .trim()
-    .slice(0, 10);
-}
-
-function parseRiotId(input: string) {
-  const cleaned = sanitizeRiotIdPaste(input);
-  if (!cleaned) return null;
-
-  if (cleaned.includes("#")) {
-    const i = cleaned.lastIndexOf("#");
-    const gameName = cleaned.slice(0, i).trim();
-    const tagLine = cleaned.slice(i + 1).trim();
-    return gameName && tagLine ? { gameName, tagLine } : null;
-  }
-
-  const m = cleaned.match(/^(.*\S)\s+(\S+)$/);
-  if (!m) return null;
-
-  const gameName = m[1].trim();
-  const tagLine = m[2].trim();
-  return gameName && tagLine ? { gameName, tagLine } : null;
-}
+type SubmitViewer = {
+  discordUsername: string | null;
+  gameName: string;
+  tagLine: string;
+};
 
 async function safeJson(res: Response) {
   const ct = res.headers.get("content-type") || "";
@@ -63,85 +21,53 @@ async function safeJson(res: Response) {
   }
 }
 
-export default function SubmitForm({ codeRequired }: { codeRequired: boolean }) {
+export default function SubmitForm({
+  codeRequired,
+  viewer,
+  returnTo = "/submit",
+  showBindingCard = true,
+}: {
+  codeRequired: boolean;
+  viewer: SubmitViewer | null;
+  returnTo?: string;
+  showBindingCard?: boolean;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-
-  const [riotId, setRiotId] = useState("");
-  const [gameName, setGameName] = useState("");
-  const [tagLine, setTagLine] = useState("");
   const [code, setCode] = useState("");
-
-  const parsed = useMemo(() => parseRiotId(riotId), [riotId]);
-  const lockLowerFields = !!parsed;
-
-  function syncFromRiotId(v: string) {
-    const cleaned = sanitizeRiotIdPaste(v);
-    setRiotId(cleaned);
-
-    const p = parseRiotId(cleaned);
-    if (p) {
-      setGameName(p.gameName);
-      setTagLine(p.tagLine);
-    }
-  }
-
-  function validate(gn: string, tl: string, codeVal: string) {
-    if (!gn || !tl) return 'Paste like "Name#TAG" (or "Name TAG") or fill both fields.';
-    if (gn.length < 2 || gn.length > 16) return "GameName must be 2-16 characters.";
-    if (tl.length < 2 || tl.length > 10) return "TAG must be 2-10 characters.";
-    if (codeRequired && !codeVal.trim()) return "Join code is required.";
-    return null;
-  }
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (!viewer) return;
+
     setMsg(null);
     setErr(null);
-
-    const gn = sanitizeGameName(parsed?.gameName ?? gameName);
-    const tl = sanitizeTagLine(parsed?.tagLine ?? tagLine);
-    const cv = code.trim();
-
-    const v = validate(gn, tl, cv);
-    if (v) {
-      setErr(v);
-      return;
-    }
-
-    const payload: Record<string, string> = { gameName: gn, tagLine: tl };
-    if (riotId.trim()) payload.riotId = sanitizeRiotIdPaste(riotId);
-    if (codeRequired) payload.code = cv;
 
     startTransition(async () => {
       try {
         const res = await fetch("/api/submit", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            code: code.trim() || undefined,
+          }),
         });
 
         const data = await safeJson(res);
-
-        if (!res.ok || (data && data.ok === false)) {
-          setErr((data && (data.error || data.message)) || `Submit failed (${res.status})`);
+        if (!res.ok || data?.ok === false) {
+          setErr((data && (data.error || data.message)) || `Refresh failed (${res.status})`);
           return;
         }
+
+        setMsg("Refreshing your bound Riot account...");
+        setCode("");
 
         const canonicalPath =
           data && typeof data.canonicalPath === "string" && data.canonicalPath.startsWith("/p/")
             ? data.canonicalPath
             : null;
-        const renamed = !!data?.renamed;
-
-        setMsg(renamed ? "Riot ID updated. Opening profile..." : "Saved. Opening profile...");
-        setRiotId("");
-        setGameName("");
-        setTagLine("");
-        setCode("");
 
         if (canonicalPath) {
           router.push(canonicalPath);
@@ -150,10 +76,34 @@ export default function SubmitForm({ codeRequired }: { codeRequired: boolean }) 
         }
 
         router.refresh();
-      } catch (e: unknown) {
-        setErr(e instanceof Error ? e.message : "Submit failed");
+      } catch (error) {
+        setErr(error instanceof Error ? error.message : "Refresh failed");
       }
     });
+  }
+
+  if (!viewer) {
+    return (
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/30 p-4 sm:p-6 space-y-4">
+        <div>
+          <div className="text-lg font-semibold text-zinc-100">Connect Discord first</div>
+          <p className="mt-2 text-sm text-zinc-400">
+            Manual Riot ID entry is disabled. Connect Discord so Riftboard can trust the Riot
+            account exposed by your Discord profile.
+          </p>
+        </div>
+
+        <form action="/api/discord/oauth/start" method="GET">
+          <input type="hidden" name="returnTo" value={returnTo} />
+          <button
+            type="submit"
+            className="inline-flex items-center justify-center rounded-xl bg-emerald-500/90 px-4 py-2 text-sm font-semibold text-black transition hover:bg-emerald-400"
+          >
+            Connect Discord
+          </button>
+        </form>
+      </div>
+    );
   }
 
   return (
@@ -161,79 +111,32 @@ export default function SubmitForm({ codeRequired }: { codeRequired: boolean }) 
       onSubmit={onSubmit}
       className="rounded-2xl border border-zinc-800 bg-zinc-900/30 p-4 sm:p-6 space-y-4"
     >
-      <div className="space-y-2">
-        <label className="text-sm font-medium text-zinc-200">Riot ID</label>
-        <input
-          value={riotId}
-          onChange={(e) => syncFromRiotId(e.target.value)}
-          placeholder='e.g. "Hide on bush#KR1" or "Hide on bush KR1"'
-          className="w-full rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:ring-2 focus:ring-zinc-700"
-          disabled={pending}
-          inputMode="text"
-          autoComplete="off"
-        />
-        <p className="text-xs text-zinc-500">
-          Supports <span className="font-mono">Name#TAG</span>,{" "}
-          <span className="font-mono">Name TAG</span>,{" "}
-          <span className="font-mono">Name/TAG</span>
-          {parsed ? (
-            <>
-              {" - "}Parsed:{" "}
-              <span className="font-mono text-zinc-300">{parsed.gameName}</span>#
-              <span className="font-mono text-zinc-300">{parsed.tagLine}</span>
-            </>
-          ) : null}
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="space-y-1">
-          <label className="text-xs text-zinc-500">GameName</label>
-          <input
-            value={gameName}
-            onChange={(e) => setGameName(sanitizeGameName(e.target.value))}
-            placeholder="GameName"
-            className="w-full rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:ring-2 focus:ring-zinc-700 disabled:opacity-60"
-            required
-            minLength={2}
-            maxLength={16}
-            disabled={pending}
-            readOnly={lockLowerFields}
-            autoComplete="off"
-          />
+      {showBindingCard ? (
+        <div className="rounded-2xl border border-white/8 bg-zinc-950/40 p-4">
+          <div className="text-xs uppercase tracking-[0.14em] text-zinc-500">Verified binding</div>
+          <div className="mt-2 text-lg font-semibold text-zinc-100">
+            {viewer.gameName}#{viewer.tagLine}
+          </div>
+          <div className="mt-1 text-sm text-zinc-500">
+            Discord: {viewer.discordUsername ?? "Connected account"}
+          </div>
         </div>
+      ) : null}
 
+      {codeRequired ? (
         <div className="space-y-1">
-          <label className="text-xs text-zinc-500">TAG</label>
-          <input
-            value={tagLine}
-            onChange={(e) => setTagLine(sanitizeTagLine(e.target.value))}
-            placeholder="TAG"
-            className="w-full rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:ring-2 focus:ring-zinc-700 disabled:opacity-60"
-            required
-            minLength={2}
-            maxLength={10}
-            disabled={pending}
-            readOnly={lockLowerFields}
-            autoComplete="off"
-          />
-        </div>
-      </div>
-
-      {codeRequired && (
-        <div className="space-y-1">
-          <label className="text-xs text-zinc-500">Join code</label>
+          <label className="text-xs text-zinc-500">Community code</label>
           <input
             value={code}
             onChange={(e) => setCode(e.target.value)}
-            placeholder="Enter join code"
+            placeholder="Enter community code"
             className="w-full rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:ring-2 focus:ring-zinc-700"
             required
             disabled={pending}
             autoComplete="off"
           />
         </div>
-      )}
+      ) : null}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <button
@@ -241,12 +144,15 @@ export default function SubmitForm({ codeRequired }: { codeRequired: boolean }) 
           className="inline-flex items-center justify-center rounded-xl border border-zinc-800 bg-zinc-950/40 px-4 py-2 text-sm font-semibold text-zinc-100 hover:bg-white/5 disabled:opacity-50"
           disabled={pending}
         >
-          {pending ? "Submitting..." : "Add or update"}
+          {pending ? "Refreshing..." : "Refresh my account"}
         </button>
 
-        <div className="text-xs text-zinc-500">
-          SEA supported. Platform is auto-detected during refresh.
-        </div>
+        <Link
+          href={`/api/discord/oauth/start?returnTo=${encodeURIComponent(returnTo)}`}
+          className="rounded-xl border border-white/10 px-4 py-2 text-sm text-zinc-200 transition hover:bg-white/5"
+        >
+          Reconnect Discord
+        </Link>
       </div>
 
       {msg && <p className="text-sm text-zinc-200">{msg}</p>}

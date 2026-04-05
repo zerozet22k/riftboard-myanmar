@@ -39,14 +39,17 @@ export type MatchId = string;
 
 export type MatchV5 = unknown;
 
-export type StubTournamentCodeParams = {
+export type TournamentCodeParams = {
   mapType?: string;
   pickType?: string;
   spectatorType?: string;
   teamSize?: number;
   metadata?: string;
-  allowedSummonerIds?: string[];
+  allowedParticipantIds?: string[];
 };
+
+export type TournamentCodeDetails = Record<string, unknown>;
+export type TournamentLobbyEvents = Record<string, unknown>;
 
 function mustEnv(name: string) {
   const v = process.env[name];
@@ -61,6 +64,10 @@ function optEnv(name: string) {
 
 const API_KEY = () => mustEnv("RIOT_API_KEY");
 const ACCOUNT_REGIONS = ["americas", "asia", "europe"] as const;
+
+export function getRiotApiKey() {
+  return API_KEY();
+}
 
 function ACCOUNT_REGION(): "americas" | "asia" | "europe" {
   const raw = mustEnv("RIOT_ACCOUNT_REGION").toLowerCase();
@@ -128,7 +135,7 @@ function platformToTournamentRegion(platform: string):
   | "KR" {
   const p = platform.toLowerCase();
 
-  // Legacy platform mapping required by tournament-stub provider registration.
+  // Legacy provider registration still expects Riot's platform-to-region codes here.
   if (p === "br1") return "BR";
   if (p === "eun1") return "EUNE";
   if (p === "euw1") return "EUW";
@@ -386,37 +393,37 @@ export async function getMatchById(matchId: string, matchRegion?: string) {
 }
 
 // -----------------------
-// Tournament Stub-V5
+// Tournament-V5
 // -----------------------
 
-export async function createTournamentStubProvider(platform: string, callbackUrl: string) {
+export async function createTournamentProvider(platform: string, callbackUrl: string) {
   const routingHost = platformToTournamentRouting(platform);
   const providerRegion = platformToTournamentRegion(platform);
-  const url = `https://${routingHost}.api.riotgames.com/lol/tournament-stub/v5/providers`;
+  const url = `https://${routingHost}.api.riotgames.com/lol/tournament/v5/providers`;
   return riotFetchWithBody<number>(url, {
     region: providerRegion,
     url: callbackUrl,
   });
 }
 
-export async function createTournamentStub(platform: string, providerId: number, name: string) {
+export async function createTournament(platform: string, providerId: number, name: string) {
   const routingHost = platformToTournamentRouting(platform);
-  const url = `https://${routingHost}.api.riotgames.com/lol/tournament-stub/v5/tournaments`;
+  const url = `https://${routingHost}.api.riotgames.com/lol/tournament/v5/tournaments`;
   return riotFetchWithBody<number>(url, {
     name,
     providerId,
   });
 }
 
-export async function createTournamentStubCodes(
+export async function createTournamentCodes(
   platform: string,
   tournamentId: number,
   count: number,
-  params?: StubTournamentCodeParams
+  params?: TournamentCodeParams
 ) {
   const routingHost = platformToTournamentRouting(platform);
   const url =
-    `https://${routingHost}.api.riotgames.com/lol/tournament-stub/v5/codes?` +
+    `https://${routingHost}.api.riotgames.com/lol/tournament/v5/codes?` +
     new URLSearchParams({
       tournamentId: String(tournamentId),
       count: String(count),
@@ -428,22 +435,22 @@ export async function createTournamentStubCodes(
     spectatorType: params?.spectatorType ?? "ALL",
     teamSize: Math.max(1, Math.min(5, params?.teamSize ?? 5)),
     metadata: params?.metadata ?? "",
-    allowedParticipants: params?.allowedSummonerIds ?? [],
+    allowedParticipants: params?.allowedParticipantIds ?? [],
   });
 }
 
-export async function getTournamentStubCode(platform: string, tournamentCode: string) {
+export async function getTournamentCode(platform: string, tournamentCode: string) {
   const routingHost = platformToTournamentRouting(platform);
   const url =
-    `https://${routingHost}.api.riotgames.com/lol/tournament-stub/v5/codes/` +
+    `https://${routingHost}.api.riotgames.com/lol/tournament/v5/codes/` +
     `${encodeURIComponent(tournamentCode)}`;
-  return riotFetch<Record<string, unknown>>(url);
+  return riotFetch<TournamentCodeDetails>(url);
 }
 
-export async function getTournamentStubLobbyEvents(platform: string, tournamentCode: string) {
+export async function getTournamentLobbyEvents(platform: string, tournamentCode: string) {
   const routingHost = platformToTournamentRouting(platform);
   const url =
-    `https://${routingHost}.api.riotgames.com/lol/tournament-stub/v5/lobby-events/by-code/` +
+    `https://${routingHost}.api.riotgames.com/lol/tournament/v5/lobby-events/by-code/` +
     `${encodeURIComponent(tournamentCode)}`;
-  return riotFetch<Record<string, unknown>>(url);
+  return riotFetch<TournamentLobbyEvents>(url);
 }

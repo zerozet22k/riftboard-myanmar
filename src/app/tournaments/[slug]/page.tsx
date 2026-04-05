@@ -6,7 +6,15 @@ import TournamentBracket, {
 } from "@/components/TournamentBracket";
 import TournamentRegisterForm from "@/components/TournamentRegisterForm";
 import { formatCompactDateTime } from "@/lib/displayTime";
+import { getOptionalDiscordSession } from "@/lib/discordSession";
 import { dbConnect } from "@/lib/mongodb";
+import { getCommunityJoinCode } from "@/lib/runtimeConfig";
+import {
+  activeParticipantCount,
+  displayTournamentStatus,
+  TOURNAMENT_POLICY_SUMMARY,
+} from "@/lib/tournaments";
+import { acceptedRosterCount, pendingRosterCount } from "@/lib/tournamentTeams";
 import { Tournament } from "@/models/tournament";
 import { TournamentMatch } from "@/models/tournamentMatch";
 import { TournamentTeam } from "@/models/tournamentTeam";
@@ -20,6 +28,19 @@ function formatWhen(value: Date | string | null | undefined) {
   return formatCompactDateTime(value) ?? "TBA";
 }
 
+function teamStatusLabel(team: {
+  status?: string | null;
+  verificationMode?: string | null;
+  roster?: Array<{ inviteStatus?: string | null }> | null;
+}) {
+  if (team.verificationMode !== "discord_verified") return "Legacy re-link required";
+  if (team.status === "forming") {
+    const pending = pendingRosterCount(team.roster as never);
+    return pending ? `Forming • ${pending} pending` : "Forming";
+  }
+  return String(team.status ?? "unknown");
+}
+
 export default async function TournamentPage({
   params,
 }: {
@@ -29,23 +50,32 @@ export default async function TournamentPage({
   const now = new Date();
   await dbConnect();
 
-  const tournament = await Tournament.findOne(
-    { slug: String(resolved.slug).trim().toLowerCase() },
-    {
-      name: 1,
-      slug: 1,
-      description: 1,
-      organizerName: 1,
-      organizerContact: 1,
-      platform: 1,
-      teamSize: 1,
-      maxTeams: 1,
-      bestOf: 1,
-      status: 1,
-      startsAt: 1,
-      registrationClosesAt: 1,
-    }
-  ).lean();
+  const [tournament, viewer] = await Promise.all([
+    Tournament.findOne(
+      { slug: String(resolved.slug).trim().toLowerCase() },
+      {
+        name: 1,
+        slug: 1,
+        description: 1,
+        publicRulesText: 1,
+        organizerName: 1,
+        organizerContact: 1,
+        platform: 1,
+        teamSize: 1,
+        maxTeams: 1,
+        bestOf: 1,
+        status: 1,
+        complianceStatus: 1,
+        riotApiState: 1,
+        startsAt: 1,
+        registrationClosesAt: 1,
+        checkInOpensAt: 1,
+        checkInClosesAt: 1,
+      }
+    ).lean(),
+    getOptionalDiscordSession(),
+  ]);
+  const viewerDiscordUserId = viewer?.discordUserId ?? "";
 
   if (!tournament?._id) notFound();
 
@@ -56,6 +86,8 @@ export default async function TournamentPage({
         name: 1,
         seed: 1,
         status: 1,
+        verificationMode: 1,
+        checkedIn: 1,
         roster: 1,
         contactDiscord: 1,
       }
@@ -105,11 +137,25 @@ export default async function TournamentPage({
     tournamentCode: match.tournamentCode ?? null,
   }));
 
+  const verifiedTeams = teams.filter(
+    (team) => team.verificationMode === "discord_verified" && team.status !== "dropped"
+  );
+  const checkedInTeams = verifiedTeams.filter((team) => team.checkedIn);
+  const activeParticipants = activeParticipantCount(checkedInTeams.length, tournament.teamSize ?? 5);
   const registrationClosed =
     tournament.status !== "registration" ||
     (!!tournament.registrationClosesAt &&
       new Date(tournament.registrationClosesAt).getTime() < now.getTime()) ||
-    teams.length >= (tournament.maxTeams ?? 0);
+    verifiedTeams.length >= (tournament.maxTeams ?? 0);
+
+  const viewerTeam = viewer
+    ? teams.find(
+        (team) =>
+          team.status !== "dropped" &&
+          Array.isArray(team.roster) &&
+          team.roster.some((entry) => String(entry.discordUserId ?? "").trim() === viewer.discordUserId)
+      ) ?? null
+    : null;
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
@@ -124,7 +170,7 @@ export default async function TournamentPage({
                 <div className="text-[11px] uppercase tracking-[0.24em] text-zinc-500">Community tournament</div>
                 <h1 className="mt-1 text-3xl font-semibold tracking-tight text-zinc-50">{tournament.name}</h1>
                 <p className="mt-3 max-w-3xl text-sm text-zinc-400">
-                  {tournament.description?.trim() || "A Burmese-friendly custom lobby event."}
+                  {tournament.description?.trim() || "A Riot-compliant community tournament draft."}
                 </p>
               </div>
             </div>
@@ -140,30 +186,55 @@ export default async function TournamentPage({
                 BO{tournament.bestOf ?? 1}
               </span>
               <span className="rounded-full bg-zinc-950/60 px-3 py-1 ring-1 ring-white/6">
-                {tournament.status}
+                {displayTournamentStatus(tournament.status as never)}
               </span>
             </div>
           </div>
 
-          <div className="mt-5 flex flex-wrap gap-2 text-sm text-zinc-500">
-            <span className="rounded-full bg-zinc-950/60 px-3 py-1 ring-1 ring-white/6">
-              Teams {teams.length}/{tournament.maxTeams}
-            </span>
-            <span className="rounded-full bg-zinc-950/60 px-3 py-1 ring-1 ring-white/6">
-              Starts {formatWhen(tournament.startsAt)}
-            </span>
-            <span className="rounded-full bg-zinc-950/60 px-3 py-1 ring-1 ring-white/6">
-              Register until {formatWhen(tournament.registrationClosesAt)}
-            </span>
-            {tournament.organizerContact ? (
-              <span className="rounded-full bg-zinc-950/60 px-3 py-1 ring-1 ring-white/6">
-                Contact {tournament.organizerContact}
-              </span>
-            ) : null}
+          <div className="mt-5 grid gap-3 lg:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-[22px] bg-zinc-950/55 p-4 ring-1 ring-white/6">
+              <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Registration</div>
+              <div className="mt-2 text-sm text-zinc-300">
+                Teams {verifiedTeams.length}/{tournament.maxTeams}
+              </div>
+              <div className="mt-1 text-xs text-zinc-500">
+                Closes {formatWhen(tournament.registrationClosesAt)}
+              </div>
+            </div>
+            <div className="rounded-[22px] bg-zinc-950/55 p-4 ring-1 ring-white/6">
+              <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Check-in</div>
+              <div className="mt-2 text-sm text-zinc-300">
+                {checkedInTeams.length} checked-in team{checkedInTeams.length === 1 ? "" : "s"}
+              </div>
+              <div className="mt-1 text-xs text-zinc-500">
+                Window {formatWhen(tournament.checkInOpensAt)} to {formatWhen(tournament.checkInClosesAt)}
+              </div>
+            </div>
+            <div className="rounded-[22px] bg-zinc-950/55 p-4 ring-1 ring-white/6">
+              <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Participants</div>
+              <div className="mt-2 text-sm text-zinc-300">{activeParticipants} active participants</div>
+              <div className="mt-1 text-xs text-zinc-500">Riot minimum: 20 active participants</div>
+            </div>
+            <div className="rounded-[22px] bg-zinc-950/55 p-4 ring-1 ring-white/6">
+              <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">Riot state</div>
+              <div className="mt-2 text-sm text-zinc-300">
+                {tournament.riotApiState === "provisioned" ? "Provisioned" : "Not provisioned yet"}
+              </div>
+              <div className="mt-1 text-xs text-zinc-500">
+                Compliance: {tournament.complianceStatus === "eligible" ? "Eligible" : "Blocked"}
+              </div>
+            </div>
           </div>
+
+          {tournament.status === "draft" ? (
+            <div className="mt-5 rounded-[24px] bg-amber-500/10 px-4 py-4 text-sm text-amber-200 ring-1 ring-amber-500/20">
+              This tournament is still a draft. The organizer needs to open registration before
+              teams can join.
+            </div>
+          ) : null}
         </header>
 
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_360px]">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_380px]">
           <section className="space-y-6">
             <section className="rounded-[28px] bg-zinc-900/25 p-5 ring-1 ring-white/5 sm:p-6">
               <div className="mb-4">
@@ -174,7 +245,9 @@ export default async function TournamentPage({
                 <TournamentBracket matches={bracketMatches} teams={bracketTeams} />
               ) : (
                 <div className="text-sm text-zinc-500">
-                  The organizer hasn&apos;t seeded the bracket yet.
+                  {tournament.status === "seeded" || tournament.status === "live" || tournament.status === "completed"
+                    ? "Bracket will appear here once the organizer locks it."
+                    : "The organizer has not locked the bracket yet."}
                 </div>
               )}
             </section>
@@ -193,7 +266,8 @@ export default async function TournamentPage({
                         <div>
                           <div className="text-lg font-semibold text-zinc-100">{team.name}</div>
                           <div className="mt-1 text-xs text-zinc-500">
-                            {team.seed ? `Seed ${team.seed}` : "Unseeded"} • {team.status}
+                            {team.seed ? `Seed ${team.seed}` : "Seed pending"} •{" "}
+                            {team.checkedIn ? "Checked in" : "Not checked in"} • {teamStatusLabel(team)}
                           </div>
                         </div>
                         {team.contactDiscord ? (
@@ -204,18 +278,25 @@ export default async function TournamentPage({
                       <div className="mt-4 space-y-2">
                         {Array.isArray(team.roster) && team.roster.length ? (
                           team.roster.map((member, index) => (
-                            <div key={`${member.gameNameNorm}-${member.tagLineNorm}-${index}`} className="flex items-center justify-between gap-3 text-sm">
+                            <div
+                              key={`${member.gameNameNorm}-${member.tagLineNorm}-${index}`}
+                              className="flex items-center justify-between gap-3 text-sm"
+                            >
                               <div className="truncate text-zinc-200">
                                 {member.gameName}#{member.tagLine}
                               </div>
                               <div className="text-[11px] uppercase tracking-[0.14em] text-zinc-500">
-                                {member.isCaptain ? "Captain" : "Roster"}
+                                {member.isCaptain ? "Captain" : inviteStatusLabel(member.inviteStatus ?? "")}
                               </div>
                             </div>
                           ))
                         ) : (
                           <div className="text-sm text-zinc-500">No roster saved.</div>
                         )}
+                      </div>
+
+                      <div className="mt-3 text-xs text-zinc-500">
+                        Accepted roster: {acceptedRosterCount(team.roster as never)}/{tournament.teamSize}
                       </div>
                     </div>
                   ))
@@ -231,15 +312,72 @@ export default async function TournamentPage({
               slug={tournament.slug}
               teamSize={tournament.teamSize ?? 5}
               disabled={registrationClosed}
+              statusLabel={displayTournamentStatus(tournament.status as never)}
+              joinCodeRequired={!!getCommunityJoinCode()}
+              viewer={
+                viewer
+                  ? {
+                      discordUserId: viewer.discordUserId,
+                      discordUsername: viewer.discordUsername,
+                      gameName: viewer.gameName,
+                      tagLine: viewer.tagLine,
+                    }
+                  : null
+              }
+              viewerTeam={
+                viewerTeam
+                  ? {
+                      id: String(viewerTeam._id),
+                      name: viewerTeam.name,
+                      status: viewerTeam.status,
+                      verificationMode: viewerTeam.verificationMode ?? null,
+                      isCaptain:
+                        viewerTeam.roster?.some(
+                          (entry) =>
+                            String(entry.discordUserId ?? "").trim() === viewerDiscordUserId &&
+                            !!entry.isCaptain
+                        ) ?? false,
+                      viewerInviteStatus:
+                        viewerTeam.roster?.find(
+                          (entry) => String(entry.discordUserId ?? "").trim() === viewerDiscordUserId
+                        )?.inviteStatus ?? null,
+                      contactDiscord: viewerTeam.contactDiscord ?? null,
+                      roster: Array.isArray(viewerTeam.roster)
+                        ? viewerTeam.roster.map((entry) => ({
+                            discordUserId: entry.discordUserId ? String(entry.discordUserId) : null,
+                            discordUsername: entry.discordUsername ?? null,
+                            gameName: entry.gameName,
+                            tagLine: entry.tagLine,
+                            isCaptain: !!entry.isCaptain,
+                            inviteStatus: entry.inviteStatus ?? "accepted",
+                          }))
+                        : [],
+                    }
+                  : null
+              }
             />
 
             <section className="rounded-[28px] bg-zinc-900/25 p-5 ring-1 ring-white/5">
-              <div className="text-lg font-semibold text-zinc-100">Format</div>
+              <div className="text-lg font-semibold text-zinc-100">Public rules</div>
               <div className="mt-3 space-y-2 text-sm text-zinc-400">
-                <div>Single elimination bracket</div>
-                <div>Custom lobby tournament codes per match</div>
-                <div>{tournament.teamSize} players per team</div>
-                <div>Best-of-{tournament.bestOf}</div>
+                {tournament.publicRulesText?.trim() ? (
+                  tournament.publicRulesText
+                    .split(/\r?\n/)
+                    .map((line) => line.trim())
+                    .filter(Boolean)
+                    .map((line, index) => <div key={`${line}-${index}`}>{line}</div>)
+                ) : (
+                  TOURNAMENT_POLICY_SUMMARY.map((item) => <div key={item}>{item}</div>)
+                )}
+              </div>
+            </section>
+
+            <section className="rounded-[28px] bg-zinc-900/25 p-5 ring-1 ring-white/5">
+              <div className="text-lg font-semibold text-zinc-100">Organizer</div>
+              <div className="mt-3 space-y-2 text-sm text-zinc-400">
+                <div>Name: {tournament.organizerName?.trim() || "TBA"}</div>
+                <div>Contact: {tournament.organizerContact?.trim() || "TBA"}</div>
+                <div>Starts: {formatWhen(tournament.startsAt)}</div>
               </div>
             </section>
           </aside>
@@ -247,4 +385,10 @@ export default async function TournamentPage({
       </div>
     </main>
   );
+}
+
+function inviteStatusLabel(status: string) {
+  if (status === "pending") return "Pending";
+  if (status === "declined") return "Declined";
+  return "Accepted";
 }

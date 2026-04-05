@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { Types } from "mongoose";
 import { dbConnect } from "@/lib/mongodb";
 import { bestRankSnapshot } from "@/lib/rank";
+import { getCommunityDiscordUrl } from "@/lib/runtimeConfig";
 import { Player } from "@/models/player";
 import { RankEntry } from "@/models/rankEntry";
 import AutoUIRefresh from "@/components/AutoUIRefresh";
@@ -119,6 +120,7 @@ function fallbackPeak(current: {
 
 export default async function LeaderboardPage() {
   await dbConnect();
+  const communityDiscordUrl = getCommunityDiscordUrl();
 
   const q: Record<string, unknown> = {
     "leaderboard.status": "approved",
@@ -256,20 +258,6 @@ export default async function LeaderboardPage() {
         <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="space-y-2">
             <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">Leaderboard</h1>
-            <div className="flex flex-wrap gap-2 pt-1">
-              <Link
-                href="/tournaments"
-                className="rounded-2xl border border-zinc-800 bg-zinc-950/40 px-4 py-2 text-sm hover:bg-zinc-900/40"
-              >
-                Community tournaments
-              </Link>
-              <Link
-                href="/submit"
-                className="rounded-2xl border border-zinc-800 bg-zinc-950/40 px-4 py-2 text-sm hover:bg-zinc-900/40"
-              >
-                Add or update yourself
-              </Link>
-            </div>
           </div>
 
           <div className="flex flex-col sm:items-end gap-2">
