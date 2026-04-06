@@ -12,6 +12,7 @@ import {
   saveVerifiedDiscordLinkFromCandidate,
   syncDiscordLinkedRoleForStoredLink,
 } from "@/lib/discordLinkedRoles";
+import { syncDiscordGuildRankRoleForStoredLink } from "@/lib/discordGuildRoles";
 import {
   clearDiscordOAuthStateCookie,
   clearPendingDiscordBindCookie,
@@ -125,7 +126,13 @@ export async function GET(req: NextRequest) {
     try {
       await syncDiscordLinkedRoleForStoredLink(String(bound.link._id));
     } catch {
-      syncMessage = "linked-role-sync-failed";
+      syncMessage = "discord-role-sync-failed";
+    }
+
+    try {
+      await syncDiscordGuildRankRoleForStoredLink(String(bound.link._id));
+    } catch {
+      syncMessage = "discord-role-sync-failed";
     }
 
     const response = redirectToReturnPath(

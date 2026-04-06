@@ -16,6 +16,7 @@ import { refreshPlayerById, upsertAndRefreshByRiotId } from "@/lib/refresh";
 import { parseRiotId } from "@/lib/tournaments";
 import { DiscordLink, type DiscordLinkDoc } from "@/models/discordLink";
 import { Player } from "@/models/player";
+import { syncDiscordGuildRankRoleForStoredLink } from "@/lib/discordGuildRoles";
 
 type PlayerProjection = {
   _id: unknown;
@@ -302,6 +303,7 @@ export async function refreshStoredDiscordProfile(
   })) as RefreshedDiscordPlayer;
 
   let linkedRoleError: string | null = null;
+  let guildRoleError: string | null = null;
   if (opts?.syncLinkedRole !== false) {
     try {
       await syncDiscordLinkedRoleForStoredLink(String(link._id));
@@ -311,10 +313,18 @@ export async function refreshStoredDiscordProfile(
     }
   }
 
+  try {
+    await syncDiscordGuildRankRoleForStoredLink(String(link._id));
+  } catch (error) {
+    guildRoleError =
+      error instanceof Error ? error.message : "Could not refresh Discord server rank roles.";
+  }
+
   return {
     player,
     canonicalPath: canonicalPlayerPath(player.gameName, player.tagLine),
     linkedRoleError,
+    guildRoleError,
   };
 }
 

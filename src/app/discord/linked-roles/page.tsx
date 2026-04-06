@@ -19,8 +19,8 @@ function messageText(status?: string, message?: string, riotId?: string) {
     return {
       tone: "emerald",
       text: riotId
-        ? `Discord linked successfully for ${riotId}. Riftboard now trusts that Riot account only until you explicitly re-link.${message === "linked-role-sync-failed" ? " Linked-role metadata still needs a retry." : ""}`
-        : `Discord linked successfully.${message === "linked-role-sync-failed" ? " Linked-role metadata still needs a retry." : ""}`,
+        ? `Discord linked successfully for ${riotId}. Riftboard now trusts that Riot account only until you explicitly re-link.${message === "discord-role-sync-failed" ? " Discord role sync still needs a retry." : ""}`
+        : `Discord linked successfully.${message === "discord-role-sync-failed" ? " Discord role sync still needs a retry." : ""}`,
     } as const;
   }
 
@@ -45,12 +45,12 @@ function messageText(status?: string, message?: string, riotId?: string) {
                 ? "That community code was not accepted. Check it and try again."
             : message === "no-riot-connection"
               ? "Discord did not return a Riot account connection. Add your Riot account to Discord first, then try again."
-              : message === "guild-membership-required"
-                ? "You must join the Riftboard Discord server before binding your Riot account."
+            : message === "guild-membership-required"
+                ? "You must join the configured Discord server before binding your Riot account."
                 : message === "invalid-riot-candidate"
                   ? "That Riot candidate is no longer available. Restart the Discord link flow."
-                  : message === "linked-role-sync-failed"
-                    ? "Your account was linked, but Discord linked-role metadata could not be pushed yet. Run the refresh command later."
+                  : message === "discord-role-sync-failed"
+                    ? "Your account was linked, but Discord role syncing did not fully finish yet. Run the refresh command later."
                     : message || "Something went wrong while linking your Discord account.";
 
     return { tone: "red", text: friendly } as const;

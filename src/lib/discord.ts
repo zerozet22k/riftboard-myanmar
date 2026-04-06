@@ -65,13 +65,19 @@ export const DISCORD_COMMAND_DEFINITIONS = [
   },
   {
     name: "refresh-profile",
-    description: "Refresh your linked Riftboard profile from Riot and resync linked roles.",
+    description: "Refresh your linked Riftboard profile from Riot and sync Discord roles.",
     type: 1,
   },
   {
     name: "refresh-linked-role",
     description: "Push your latest stored Riftboard rank metadata to Discord linked roles.",
     type: 1,
+  },
+  {
+    name: "sync-server-roles",
+    description: "Admin command to create and sync rank roles for linked members already in this server.",
+    type: 1,
+    default_member_permissions: "8",
   },
 ] as const;
 
@@ -200,6 +206,21 @@ export type DiscordGuild = {
   permissions?: string;
 };
 
+export type DiscordGuildRole = {
+  id: string;
+  name: string;
+  color?: number;
+  managed?: boolean;
+  position?: number;
+};
+
+export type DiscordGuildMember = {
+  user?: {
+    id?: string;
+  };
+  roles: string[];
+};
+
 export async function exchangeDiscordCode(code: string) {
   const body = new URLSearchParams({
     client_id: getDiscordClientId(),
@@ -261,6 +282,98 @@ export async function getDiscordUserGuilds(accessToken: string) {
   );
 }
 
+function botAuth() {
+  return `Bot ${getDiscordBotToken()}`;
+}
+
+function guildPath(guildId?: string) {
+  const resolvedGuildId = String(guildId ?? getDiscordGuildId() ?? "").trim();
+  if (!resolvedGuildId) throw new Error("Missing env: DISCORD_GUILD_ID");
+  return encodeURIComponent(resolvedGuildId);
+}
+
+export async function listDiscordGuildRoles(guildId?: string) {
+  return discordApi<DiscordGuildRole[]>(
+    `/guilds/${guildPath(guildId)}/roles`,
+    { method: "GET" },
+    botAuth()
+  );
+}
+
+export async function createDiscordGuildRole(input: {
+  name: string;
+  color?: number;
+  guildId?: string;
+  reason?: string;
+}) {
+  const headers = new Headers({ "Content-Type": "application/json" });
+  if (input.reason) headers.set("X-Audit-Log-Reason", input.reason);
+
+  return discordApi<DiscordGuildRole>(
+    `/guilds/${guildPath(input.guildId)}/roles`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        name: input.name,
+        color: input.color ?? 0,
+        mentionable: false,
+        hoist: false,
+      }),
+    },
+    botAuth()
+  );
+}
+
+export async function getDiscordGuildMember(input: {
+  userId: string;
+  guildId?: string;
+}) {
+  return discordApi<DiscordGuildMember>(
+    `/guilds/${guildPath(input.guildId)}/members/${encodeURIComponent(String(input.userId).trim())}`,
+    { method: "GET" },
+    botAuth()
+  );
+}
+
+export async function addDiscordGuildMemberRole(input: {
+  userId: string;
+  roleId: string;
+  guildId?: string;
+  reason?: string;
+}) {
+  const headers = new Headers();
+  if (input.reason) headers.set("X-Audit-Log-Reason", input.reason);
+
+  return discordApi<unknown>(
+    `/guilds/${guildPath(input.guildId)}/members/${encodeURIComponent(String(input.userId).trim())}/roles/${encodeURIComponent(String(input.roleId).trim())}`,
+    {
+      method: "PUT",
+      headers,
+    },
+    botAuth()
+  );
+}
+
+export async function removeDiscordGuildMemberRole(input: {
+  userId: string;
+  roleId: string;
+  guildId?: string;
+  reason?: string;
+}) {
+  const headers = new Headers();
+  if (input.reason) headers.set("X-Audit-Log-Reason", input.reason);
+
+  return discordApi<unknown>(
+    `/guilds/${guildPath(input.guildId)}/members/${encodeURIComponent(String(input.userId).trim())}/roles/${encodeURIComponent(String(input.roleId).trim())}`,
+    {
+      method: "DELETE",
+      headers,
+    },
+    botAuth()
+  );
+}
+
 export async function updateDiscordRoleConnection(input: {
   accessToken: string;
   platformName: string;
@@ -317,7 +430,7 @@ export async function registerDiscordGuildCommands() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(DISCORD_COMMAND_DEFINITIONS),
     },
-    `Bot ${getDiscordBotToken()}`
+    botAuth()
   );
 }
 
@@ -332,7 +445,7 @@ export async function updateDiscordApplicationUrls() {
         role_connections_verification_url: getDiscordLinkedRolesVerificationUrl(),
       }),
     },
-    `Bot ${getDiscordBotToken()}`
+    botAuth()
   );
 }
 

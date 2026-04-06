@@ -7,6 +7,9 @@ import {
   refreshStoredDiscordProfile,
   syncDiscordLinkedRoleForStoredLink,
 } from "@/lib/discordLinkedRoles";
+import {
+  syncAllDiscordGuildRankRoles,
+} from "@/lib/discordGuildRoles";
 import { DiscordLink } from "@/models/discordLink";
 import { Player } from "@/models/player";
 import { canonicalPlayerPath } from "@/lib/playerIdentity";
@@ -22,6 +25,7 @@ type DiscordInteraction = {
   };
   member?: {
     user?: { id?: string };
+    permissions?: string;
   };
   user?: {
     id?: string;
@@ -60,7 +64,7 @@ function formatSyncTime(value: unknown) {
 }
 
 function linkInstructions(linkedRolesUrl: string) {
-  return `Join the Riftboard Myanmar server first, then finish your bind here: ${linkedRolesUrl}. Joining alone does not complete the Riot account verification.`;
+  return `Join the configured Discord server first, then finish your bind here: ${linkedRolesUrl}. Joining alone does not complete the Riot account verification.`;
 }
 
 function messageResponse(content: string) {
@@ -71,6 +75,18 @@ function messageResponse(content: string) {
       content,
     },
   });
+}
+
+function hasAdministratorPermission(interaction: DiscordInteraction) {
+  const raw = String(interaction.member?.permissions ?? "").trim();
+  if (!raw) return false;
+
+  try {
+    const administratorBit = BigInt("8");
+    return (BigInt(raw) & administratorBit) === administratorBit;
+  } catch {
+    return false;
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -102,7 +118,33 @@ export async function POST(req: NextRequest) {
   }
 
   if (allowedGuildId && interaction.guild_id !== allowedGuildId) {
-    return messageResponse("Use these Riftboard commands inside the Riftboard Myanmar server after joining it.");
+    return messageResponse("Use these commands inside the configured Discord server after joining it.");
+  }
+
+  if (commandName === "sync-server-roles") {
+    if (!hasAdministratorPermission(interaction)) {
+      return messageResponse("This command is only available to server administrators.");
+    }
+
+    try {
+      const summary = await syncAllDiscordGuildRankRoles();
+      const createdRoles =
+        summary.createdRoleNames.length
+          ? ` Created roles: ${summary.createdRoleNames.join(", ")}.`
+          : "";
+      const errors =
+        summary.errors.length
+          ? ` Errors: ${summary.errors.slice(0, 3).join(" | ")}${summary.errors.length > 3 ? " | ..." : ""}`
+          : "";
+
+      return messageResponse(
+        `Server role sync finished. Scanned ${summary.scanned}, synced ${summary.synced}, unranked ${summary.unranked}, missing members ${summary.missingMembers}, missing players ${summary.missingPlayers}.${createdRoles}${errors}`
+      );
+    } catch (error) {
+      return messageResponse(
+        error instanceof Error ? error.message : "Could not sync server rank roles."
+      );
+    }
   }
 
   if (!userId) {
@@ -157,9 +199,12 @@ export async function POST(req: NextRequest) {
       const syncSuffix = refreshed.linkedRoleError
         ? ` Linked-role sync still needs a retry: ${refreshed.linkedRoleError}`
         : " Linked-role metadata synced.";
+      const guildRoleSuffix = refreshed.guildRoleError
+        ? ` Server rank role sync still needs a retry: ${refreshed.guildRoleError}`
+        : " Server rank roles synced.";
 
       return messageResponse(
-        `Updated ${formatSoloRank(refreshed.player)} Profile: ${getAppBaseUrl()}${refreshed.canonicalPath}${syncSuffix}`
+        `Updated ${formatSoloRank(refreshed.player)} Profile: ${getAppBaseUrl()}${refreshed.canonicalPath}${syncSuffix}${guildRoleSuffix}`
       );
     } catch (error) {
       return messageResponse(
@@ -182,6 +227,6 @@ export async function POST(req: NextRequest) {
   }
 
   return messageResponse(
-    "Unknown command. Try /bind, /status, /profile, /myrank, /refresh-profile, or /refresh-linked-role."
+    "Unknown command. Try /bind, /status, /profile, /myrank, /refresh-profile, /refresh-linked-role, or /sync-server-roles."
   );
 }

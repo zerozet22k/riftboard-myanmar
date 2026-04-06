@@ -64,13 +64,19 @@ const COMMANDS = [
   },
   {
     name: "refresh-profile",
-    description: "Refresh your linked Riftboard profile from Riot and resync linked roles.",
+    description: "Refresh your linked Riftboard profile from Riot and sync Discord roles.",
     type: 1,
   },
   {
     name: "refresh-linked-role",
     description: "Push your latest stored Riftboard rank metadata to Discord linked roles.",
     type: 1,
+  },
+  {
+    name: "sync-server-roles",
+    description: "Admin command to create and sync rank roles for linked members already in this server.",
+    type: 1,
+    default_member_permissions: "8",
   },
 ];
 
