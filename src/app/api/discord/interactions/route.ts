@@ -1,7 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { dbConnect } from "@/lib/mongodb";
 import { getAppBaseUrl } from "@/lib/runtimeConfig";
-import { getDiscordGuildId, verifyDiscordInteraction } from "@/lib/discord";
+import {
+  editDiscordInteractionOriginalResponse,
+  getDiscordGuildId,
+  verifyDiscordInteraction,
+} from "@/lib/discord";
 import {
   isVerifiedDiscordLink,
   refreshStoredDiscordProfile,
@@ -18,6 +22,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type DiscordInteraction = {
+  application_id?: string;
+  token?: string;
   type?: number;
   guild_id?: string;
   data?: {
@@ -77,6 +83,57 @@ function messageResponse(content: string) {
   });
 }
 
+function deferredMessageResponse() {
+  return NextResponse.json({
+    type: 5,
+    data: {
+      flags: 64,
+    },
+  });
+}
+
+function requireDeferredIdentifiers(interaction: DiscordInteraction) {
+  const interactionToken = String(interaction.token ?? "").trim();
+  const applicationId = String(interaction.application_id ?? "").trim();
+  if (!interactionToken || !applicationId) {
+    throw new Error("Discord did not provide an interaction token for the deferred response.");
+  }
+  return { interactionToken, applicationId };
+}
+
+function scheduleDeferredReply(
+  interaction: DiscordInteraction,
+  task: () => Promise<string>
+) {
+  const { interactionToken, applicationId } = requireDeferredIdentifiers(interaction);
+
+  after(async () => {
+    try {
+      const content = await task();
+      await editDiscordInteractionOriginalResponse({
+        applicationId,
+        interactionToken,
+        content,
+      });
+    } catch (error) {
+      const content =
+        error instanceof Error ? error.message : "Discord command failed unexpectedly.";
+      console.error("[discord/interactions] deferred command failed", error);
+      try {
+        await editDiscordInteractionOriginalResponse({
+          applicationId,
+          interactionToken,
+          content,
+        });
+      } catch (editError) {
+        console.error("[discord/interactions] deferred response edit failed", editError);
+      }
+    }
+  });
+
+  return deferredMessageResponse();
+}
+
 function hasAdministratorPermission(interaction: DiscordInteraction) {
   const raw = String(interaction.member?.permissions ?? "").trim();
   if (!raw) return false;
@@ -126,7 +183,7 @@ export async function POST(req: NextRequest) {
       return messageResponse("This command is only available to server administrators.");
     }
 
-    try {
+    return scheduleDeferredReply(interaction, async () => {
       const summary = await syncAllDiscordGuildRankRoles();
       const createdRoles =
         summary.createdRoleNames.length
@@ -137,14 +194,8 @@ export async function POST(req: NextRequest) {
           ? ` Errors: ${summary.errors.slice(0, 3).join(" | ")}${summary.errors.length > 3 ? " | ..." : ""}`
           : "";
 
-      return messageResponse(
-        `Server role sync finished. Scanned ${summary.scanned}, synced ${summary.synced}, unranked ${summary.unranked}, missing members ${summary.missingMembers}, missing players ${summary.missingPlayers}.${createdRoles}${errors}`
-      );
-    } catch (error) {
-      return messageResponse(
-        error instanceof Error ? error.message : "Could not sync server rank roles."
-      );
-    }
+      return `Server role sync finished. Scanned ${summary.scanned}, synced ${summary.synced}, unranked ${summary.unranked}, missing members ${summary.missingMembers}, missing players ${summary.missingPlayers}.${createdRoles}${errors}`;
+    });
   }
 
   if (!userId) {
@@ -189,7 +240,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (commandName === "refresh-profile") {
-    try {
+    return scheduleDeferredReply(interaction, async () => {
       const refreshed = await refreshStoredDiscordProfile(userId, {
         force: true,
         syncMatches: false,
@@ -203,27 +254,15 @@ export async function POST(req: NextRequest) {
         ? ` Server rank role sync still needs a retry: ${refreshed.guildRoleError}`
         : " Server rank roles synced.";
 
-      return messageResponse(
-        `Updated ${formatSoloRank(refreshed.player)} Profile: ${getAppBaseUrl()}${refreshed.canonicalPath}${syncSuffix}${guildRoleSuffix}`
-      );
-    } catch (error) {
-      return messageResponse(
-        error instanceof Error ? error.message : "Could not refresh your linked Riftboard profile."
-      );
-    }
+      return `Updated ${formatSoloRank(refreshed.player)} Profile: ${getAppBaseUrl()}${refreshed.canonicalPath}${syncSuffix}${guildRoleSuffix}`;
+    });
   }
 
   if (commandName === "refresh-linked-role") {
-    try {
+    return scheduleDeferredReply(interaction, async () => {
       const synced = await syncDiscordLinkedRoleForStoredLink(String(link._id));
-      return messageResponse(
-        `Linked role metadata refreshed for ${synced.player.gameName}#${synced.player.tagLine}.`
-      );
-    } catch (error) {
-      return messageResponse(
-        error instanceof Error ? error.message : "Could not refresh linked role metadata."
-      );
-    }
+      return `Linked role metadata refreshed for ${synced.player.gameName}#${synced.player.tagLine}.`;
+    });
   }
 
   return messageResponse(

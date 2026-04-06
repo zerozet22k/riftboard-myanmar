@@ -395,6 +395,29 @@ export async function updateDiscordRoleConnection(input: {
   );
 }
 
+export async function editDiscordInteractionOriginalResponse(input: {
+  applicationId?: string;
+  interactionToken: string;
+  content: string;
+}) {
+  const applicationId = String(input.applicationId ?? getDiscordClientId()).trim();
+  const interactionToken = String(input.interactionToken ?? "").trim();
+  if (!applicationId || !interactionToken) {
+    throw new Error("Missing Discord interaction response identifiers.");
+  }
+
+  return discordApi<Record<string, unknown>>(
+    `/webhooks/${encodeURIComponent(applicationId)}/${encodeURIComponent(interactionToken)}/messages/@original`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        content: String(input.content ?? "").trim() || "Done.",
+      }),
+    }
+  );
+}
+
 export async function registerDiscordMetadataSchema() {
   return discordApi<unknown>(
     `/applications/${encodeURIComponent(getDiscordClientId())}/role-connections/metadata`,
