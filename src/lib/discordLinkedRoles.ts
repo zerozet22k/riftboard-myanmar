@@ -10,9 +10,9 @@ import {
   type DiscordUser,
   updateDiscordRoleConnection,
 } from "@/lib/discord";
-import { buildPlayerLookupQuery } from "@/lib/playerIdentity";
+import { buildPlayerLookupQuery, canonicalPlayerPath } from "@/lib/playerIdentity";
 import { rankScore, TIER_SCORE } from "@/lib/rank";
-import { upsertAndRefreshByRiotId } from "@/lib/refresh";
+import { refreshPlayerById, upsertAndRefreshByRiotId } from "@/lib/refresh";
 import { parseRiotId } from "@/lib/tournaments";
 import { DiscordLink, type DiscordLinkDoc } from "@/models/discordLink";
 import { Player } from "@/models/player";
@@ -32,6 +32,19 @@ type PlayerProjection = {
 };
 
 type DiscordLinkDocument = InstanceType<typeof DiscordLink>;
+
+type RefreshedDiscordPlayer = {
+  gameName: string;
+  tagLine: string;
+  solo?: {
+    tier?: string | null;
+    division?: string | null;
+    lp?: number | null;
+  } | null;
+  _skipped?: boolean;
+  _cooldownSecondsLeft?: number;
+  _nextRefreshAt?: string;
+};
 
 export type DiscordRiotCandidate = {
   id: string;
@@ -268,6 +281,41 @@ export async function syncDiscordLinkedRoleForStoredLink(linkId: string) {
   await link.save();
 
   return { link, player, metadata };
+}
+
+export async function refreshStoredDiscordProfile(
+  discordUserId: string,
+  opts?: {
+    force?: boolean;
+    syncMatches?: boolean;
+    matchesCount?: number;
+    fullMastery?: boolean;
+    syncLinkedRole?: boolean;
+  }
+) {
+  const { link } = await loadStoredDiscordIdentity(discordUserId);
+  const player = (await refreshPlayerById(String(link.playerId), {
+    force: opts?.force ?? true,
+    syncMatches: opts?.syncMatches ?? false,
+    matchesCount: opts?.matchesCount ?? 10,
+    fullMastery: opts?.fullMastery ?? false,
+  })) as RefreshedDiscordPlayer;
+
+  let linkedRoleError: string | null = null;
+  if (opts?.syncLinkedRole !== false) {
+    try {
+      await syncDiscordLinkedRoleForStoredLink(String(link._id));
+    } catch (error) {
+      linkedRoleError =
+        error instanceof Error ? error.message : "Could not refresh linked-role metadata.";
+    }
+  }
+
+  return {
+    player,
+    canonicalPath: canonicalPlayerPath(player.gameName, player.tagLine),
+    linkedRoleError,
+  };
 }
 
 export function isVerifiedDiscordLink(

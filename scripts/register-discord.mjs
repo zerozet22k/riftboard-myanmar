@@ -43,8 +43,28 @@ const COMMANDS = [
     type: 1,
   },
   {
+    name: "bind",
+    description: "Alias for /link so members can finish the Riot account bind faster.",
+    type: 1,
+  },
+  {
+    name: "status",
+    description: "Show which Riot ID is currently bound to your Discord account.",
+    type: 1,
+  },
+  {
+    name: "profile",
+    description: "Get the Riftboard profile URL for your linked Riot ID.",
+    type: 1,
+  },
+  {
     name: "myrank",
     description: "Show the current Riftboard rank for your linked Riot ID.",
+    type: 1,
+  },
+  {
+    name: "refresh-profile",
+    description: "Refresh your linked Riftboard profile from Riot and resync linked roles.",
     type: 1,
   },
   {
@@ -117,7 +137,10 @@ async function main() {
   ]);
   if (!applicationId) throw new Error("Missing env: DISCORD_APPLICATION_ID or DISCORD_CLIENT_ID");
 
-  const guildId = mustEnv("DISCORD_GUILD_ID");
+  const guildId = firstNonEmpty([
+    process.env.DISCORD_GUILD_ID,
+    process.env.DISCORD_SERVER_GUILD_ID,
+  ]);
   const appBaseUrl = firstNonEmpty([
     process.env.APP_BASE_URL,
     process.env.NEXT_PUBLIC_APP_URL,
@@ -136,11 +159,21 @@ async function main() {
     body: JSON.stringify(LINKED_ROLE_METADATA),
   });
 
-  console.log(`Registering guild commands for guild ${guildId}...`);
-  await discordApi(`/applications/${applicationId}/guilds/${guildId}/commands`, {
+  console.log("Registering global commands...");
+  await discordApi(`/applications/${applicationId}/commands`, {
     method: "PUT",
     body: JSON.stringify(COMMANDS),
   });
+
+  if (guildId) {
+    console.log(`Registering guild commands for guild ${guildId}...`);
+    await discordApi(`/applications/${applicationId}/guilds/${guildId}/commands`, {
+      method: "PUT",
+      body: JSON.stringify(COMMANDS),
+    });
+  } else {
+    console.log("Skipping guild command registration because DISCORD_GUILD_ID is not set.");
+  }
 
   console.log("Updating application URLs...");
   await discordApi("/applications/@me", {
@@ -152,6 +185,7 @@ async function main() {
   });
 
   console.log("Discord registration complete.");
+  console.log("Global commands can take a little while to propagate across Discord.");
   console.log(`Interactions Endpoint URL: ${interactionsEndpointUrl}`);
   console.log(`Linked Roles Verification URL: ${linkedRolesVerificationUrl}`);
 }

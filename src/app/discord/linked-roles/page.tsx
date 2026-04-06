@@ -110,8 +110,8 @@ export default async function DiscordLinkedRolesPage({
             </h1>
             <p className="mt-3 max-w-3xl text-sm text-zinc-400">
               {communityCodeRequired
-                ? "Enter your private Myanmar community code once to continue. After that, you can open the community Discord and connect the Riot account already linked to your Discord profile."
-                : "Join the community Discord, then connect the Riot account Discord already exposes on your profile. Manual Riot ID entry is disabled for protected community features."}
+                ? "Enter your private Myanmar community code once to continue. After that, you can open the community Discord and connect the Riot account already linked to your Discord profile. Joining the server alone does not finish the bind because Discord still needs one quick OAuth approval."
+                : "Join the community Discord, then connect the Riot account Discord already exposes on your profile. Joining the server alone does not finish the bind because Discord still needs one quick OAuth approval. Manual Riot ID entry is disabled for protected community features."}
             </p>
           </div>
         </header>
@@ -155,7 +155,7 @@ export default async function DiscordLinkedRolesPage({
             <p className="mt-2 text-sm text-zinc-400">
               {viewer
                 ? "Riftboard will use this Discord-linked Riot account for leaderboard refreshes, linked roles, and tournament actions."
-                : "Open the community Discord first if you need the invite, then connect the Riot account already attached to your Discord profile."}
+                : "Open the community Discord first if you need the invite, then connect the Riot account already attached to your Discord profile. Joining the server is required, but the OAuth bind is still what confirms ownership."}
             </p>
 
             {!viewer && communityDiscordUrl ? (

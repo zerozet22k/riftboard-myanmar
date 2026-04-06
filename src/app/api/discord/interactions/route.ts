@@ -2,9 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { dbConnect } from "@/lib/mongodb";
 import { getAppBaseUrl } from "@/lib/runtimeConfig";
 import { getDiscordGuildId, verifyDiscordInteraction } from "@/lib/discord";
-import { isVerifiedDiscordLink, syncDiscordLinkedRoleForStoredLink } from "@/lib/discordLinkedRoles";
+import {
+  isVerifiedDiscordLink,
+  refreshStoredDiscordProfile,
+  syncDiscordLinkedRoleForStoredLink,
+} from "@/lib/discordLinkedRoles";
 import { DiscordLink } from "@/models/discordLink";
 import { Player } from "@/models/player";
+import { canonicalPlayerPath } from "@/lib/playerIdentity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,6 +32,10 @@ function interactionUserId(interaction: DiscordInteraction) {
   return String(interaction.member?.user?.id ?? interaction.user?.id ?? "").trim();
 }
 
+function formatRiotId(player: { gameName: string; tagLine: string }) {
+  return `${player.gameName}#${player.tagLine}`;
+}
+
 function formatSoloRank(player: {
   gameName: string;
   tagLine: string;
@@ -38,6 +47,20 @@ function formatSoloRank(player: {
   const division = solo.division ? ` ${String(solo.division).toUpperCase()}` : "";
   const lp = solo.lp != null ? ` - ${solo.lp} LP` : "";
   return `${player.gameName}#${player.tagLine}: ${String(solo.tier).toUpperCase()}${division}${lp}`;
+}
+
+function formatProfileUrl(player: { gameName: string; tagLine: string }) {
+  return `${getAppBaseUrl()}${canonicalPlayerPath(player.gameName, player.tagLine)}`;
+}
+
+function formatSyncTime(value: unknown) {
+  const date = value instanceof Date ? value : new Date(String(value ?? ""));
+  if (Number.isNaN(date.getTime())) return "not yet synced";
+  return date.toISOString().replace("T", " ").replace(".000Z", " UTC");
+}
+
+function linkInstructions(linkedRolesUrl: string) {
+  return `Join the Riftboard Myanmar server first, then finish your bind here: ${linkedRolesUrl}. Joining alone does not complete the Riot account verification.`;
 }
 
 function messageResponse(content: string) {
@@ -70,16 +93,16 @@ export async function POST(req: NextRequest) {
   }
 
   const allowedGuildId = getDiscordGuildId();
-  if (allowedGuildId && interaction.guild_id && interaction.guild_id !== allowedGuildId) {
-    return messageResponse("This bot is only configured for the Riftboard Myanmar server.");
-  }
-
   const commandName = String(interaction.data?.name ?? "").trim().toLowerCase();
   const userId = interactionUserId(interaction);
   const linkedRolesUrl = `${getAppBaseUrl()}/discord/linked-roles`;
 
-  if (commandName === "link") {
-    return messageResponse(`Link your Riftboard profile here: ${linkedRolesUrl}`);
+  if (commandName === "link" || commandName === "bind") {
+    return messageResponse(linkInstructions(linkedRolesUrl));
+  }
+
+  if (allowedGuildId && interaction.guild_id !== allowedGuildId) {
+    return messageResponse("Use these Riftboard commands inside the Riftboard Myanmar server after joining it.");
   }
 
   if (!userId) {
@@ -96,6 +119,19 @@ export async function POST(req: NextRequest) {
     return messageResponse(`Reconnect your Discord account at ${linkedRolesUrl} to verify your Riot binding again.`);
   }
 
+  if (commandName === "status") {
+    const syncedText = link.lastSyncedAt
+      ? `Last linked-role sync: ${formatSyncTime(link.lastSyncedAt)}.`
+      : "Linked-role metadata has not been synced yet.";
+    return messageResponse(
+      `Bound Riot ID: ${formatRiotId(link)}. ${syncedText} Profile: ${formatProfileUrl(link)}`
+    );
+  }
+
+  if (commandName === "profile") {
+    return messageResponse(`Profile for ${formatRiotId(link)}: ${formatProfileUrl(link)}`);
+  }
+
   if (commandName === "myrank") {
     const player = await Player.findById(link.playerId, {
       gameName: 1,
@@ -107,7 +143,29 @@ export async function POST(req: NextRequest) {
       return messageResponse("Your linked Riftboard profile could not be found.");
     }
 
-    return messageResponse(formatSoloRank(player));
+    return messageResponse(`${formatSoloRank(player)} Profile: ${formatProfileUrl(player)}`);
+  }
+
+  if (commandName === "refresh-profile") {
+    try {
+      const refreshed = await refreshStoredDiscordProfile(userId, {
+        force: true,
+        syncMatches: false,
+        fullMastery: false,
+        syncLinkedRole: true,
+      });
+      const syncSuffix = refreshed.linkedRoleError
+        ? ` Linked-role sync still needs a retry: ${refreshed.linkedRoleError}`
+        : " Linked-role metadata synced.";
+
+      return messageResponse(
+        `Updated ${formatSoloRank(refreshed.player)} Profile: ${getAppBaseUrl()}${refreshed.canonicalPath}${syncSuffix}`
+      );
+    } catch (error) {
+      return messageResponse(
+        error instanceof Error ? error.message : "Could not refresh your linked Riftboard profile."
+      );
+    }
   }
 
   if (commandName === "refresh-linked-role") {
@@ -123,5 +181,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return messageResponse("Unknown command.");
+  return messageResponse(
+    "Unknown command. Try /bind, /status, /profile, /myrank, /refresh-profile, or /refresh-linked-role."
+  );
 }

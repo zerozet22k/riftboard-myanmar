@@ -44,8 +44,28 @@ export const DISCORD_COMMAND_DEFINITIONS = [
     type: 1,
   },
   {
+    name: "bind",
+    description: "Alias for /link so members can finish the Riot account bind faster.",
+    type: 1,
+  },
+  {
+    name: "status",
+    description: "Show which Riot ID is currently bound to your Discord account.",
+    type: 1,
+  },
+  {
+    name: "profile",
+    description: "Get the Riftboard profile URL for your linked Riot ID.",
+    type: 1,
+  },
+  {
     name: "myrank",
     description: "Show the current Riftboard rank for your linked Riot ID.",
+    type: 1,
+  },
+  {
+    name: "refresh-profile",
+    description: "Refresh your linked Riftboard profile from Riot and resync linked roles.",
     type: 1,
   },
   {
@@ -269,6 +289,18 @@ export async function registerDiscordMetadataSchema() {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(DISCORD_LINKED_ROLE_METADATA),
+    },
+    `Bot ${getDiscordBotToken()}`
+  );
+}
+
+export async function registerDiscordGlobalCommands() {
+  return discordApi<unknown>(
+    `/applications/${encodeURIComponent(getDiscordClientId())}/commands`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(DISCORD_COMMAND_DEFINITIONS),
     },
     `Bot ${getDiscordBotToken()}`
   );
