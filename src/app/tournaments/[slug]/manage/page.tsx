@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import TournamentBracket, {
   type TournamentBracketMatch,
@@ -14,6 +15,13 @@ import { TournamentTeam } from "@/models/tournamentTeam";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const metadata: Metadata = {
+  title: "Manage Tournament",
+  robots: {
+    index: false,
+    follow: false,
+  },
+};
 
 type RouteParams = { slug: string };
 

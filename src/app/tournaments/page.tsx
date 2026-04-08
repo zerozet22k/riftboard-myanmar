@@ -1,11 +1,29 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { dbConnect } from "@/lib/mongodb";
+import { absoluteUrl } from "@/lib/seo";
 import { displayTournamentStatus } from "@/lib/tournaments";
 import { Tournament } from "@/models/tournament";
 import { TournamentTeam } from "@/models/tournamentTeam";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = {
+  title: "Tournaments",
+  description:
+    "Browse community League of Legends tournaments on RiftBoard Myanmar with registration, check-in, brackets, and team status.",
+  alternates: {
+    canonical: "/tournaments",
+  },
+  openGraph: {
+    type: "website",
+    url: absoluteUrl("/tournaments"),
+    title: "RiftBoard Myanmar Tournaments",
+    description:
+      "Browse community League of Legends tournaments on RiftBoard Myanmar with registration, check-in, brackets, and team status.",
+  },
+};
 
 type TournamentListRow = {
   _id: unknown;

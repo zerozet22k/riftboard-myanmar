@@ -1,9 +1,17 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import TournamentCreateForm from "@/components/TournamentCreateForm";
 import { getTournamentHostCode, isRiotTournamentApiEnabled } from "@/lib/runtimeConfig";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const metadata: Metadata = {
+  title: "Create Tournament",
+  robots: {
+    index: false,
+    follow: false,
+  },
+};
 
 export default function NewTournamentPage() {
   const hostCodeRequired = !!getTournamentHostCode();

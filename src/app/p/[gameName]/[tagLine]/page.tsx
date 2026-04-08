@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import MatchHistory, { type MatchRow } from "@/components/MatchHistory";
@@ -14,6 +15,7 @@ import {
 import { dbConnect } from "@/lib/mongodb";
 import { buildPlayerLookupQuery, canonicalPlayerPath } from "@/lib/playerIdentity";
 import { bestRankSnapshot } from "@/lib/rank";
+import { absoluteUrl } from "@/lib/seo";
 import { Player } from "@/models/player";
 import { PlayerMatch } from "@/models/playerMatch";
 import { RankEntry } from "@/models/rankEntry";
@@ -118,7 +120,7 @@ function peakSeenLabel(snapshot?: PeakRankLike | null) {
 
 function cursorFromLast(last: MatchDoc | undefined) {
   if (!last || typeof last.gameCreation !== "number") return null;
-  const payload = { gc: last.gameCreation, id: String(last._id) };
+  const payload = { gc: last.gameCreation, id: String(last._id), matchId: String(last.matchId ?? "") };
   return Buffer.from(JSON.stringify(payload))
     .toString("base64")
     .replace(/\+/g, "-")
@@ -144,6 +146,77 @@ async function getChampNameMap() {
 function champIconUrl(championId: number | null | undefined) {
   if (championId == null) return null;
   return `${CHAMP_ICON_BASE}/${championId}.png`;
+}
+
+function playerMetaDescription(player: Pick<PlayerView, "gameName" | "tagLine" | "solo" | "flex">) {
+  const soloLine = rankLine(player.solo?.tier ?? null, player.solo?.division ?? null, player.solo?.lp ?? null);
+  const flexLine = rankLine(player.flex?.tier ?? null, player.flex?.division ?? null, player.flex?.lp ?? null);
+  return `${player.gameName}#${player.tagLine} on RiftBoard Myanmar. Solo: ${soloLine}. Flex: ${flexLine}. View LP, match history, and champion mastery.`;
+}
+
+export async function generateMetadata({
+  params,
+}: {
+  params: RouteParams | Promise<RouteParams>;
+}): Promise<Metadata> {
+  const resolved = (await params) as Partial<RouteParams>;
+  const gameNameRaw = safeDecode(resolved.gameName).trim();
+  const tagLineRaw = safeDecode(resolved.tagLine).trim().toLowerCase();
+
+  if (!gameNameRaw || !tagLineRaw) {
+    return {
+      title: "Player Profile",
+      robots: {
+        index: false,
+        follow: false,
+      },
+    };
+  }
+
+  await dbConnect();
+
+  const player = (await Player.findOne(
+    buildPlayerLookupQuery(gameNameRaw, tagLineRaw),
+    {
+      gameName: 1,
+      tagLine: 1,
+      solo: 1,
+      flex: 1,
+    }
+  ).lean()) as Pick<PlayerView, "gameName" | "tagLine" | "solo" | "flex"> | null;
+
+  if (!player?.gameName || !player.tagLine) {
+    return {
+      title: "Player Not Found",
+      robots: {
+        index: false,
+        follow: false,
+      },
+    };
+  }
+
+  const canonicalPath = canonicalPlayerPath(player.gameName, player.tagLine);
+  const description = playerMetaDescription(player);
+  const title = `${player.gameName}#${player.tagLine} Profile`;
+
+  return {
+    title,
+    description,
+    alternates: {
+      canonical: canonicalPath,
+    },
+    openGraph: {
+      type: "profile",
+      url: absoluteUrl(canonicalPath),
+      title,
+      description,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+    },
+  };
 }
 
 export default async function PlayerProfilePage({
@@ -273,9 +346,24 @@ export default async function PlayerProfilePage({
   const masteryUpdatedShort = formatDisplayMetaDateTime(player.masterySyncedAt);
   const masteryPath = `${canonicalPath}/mastery`;
   const initialCursor = cursorFromLast(matchDocs[matchDocs.length - 1]);
+  const profileJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "ProfilePage",
+    url: absoluteUrl(canonicalPath),
+    name: `${player.gameName}#${player.tagLine}`,
+    description: playerMetaDescription(player),
+    mainEntity: {
+      "@type": "Thing",
+      name: `${player.gameName}#${player.tagLine}`,
+    },
+  };
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(30,41,59,0.42),transparent_34%),radial-gradient(circle_at_18%_18%,rgba(16,185,129,0.14),transparent_22%),#09090b] text-zinc-100">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(profileJsonLd) }}
+      />
       <div className="mx-auto w-full max-w-[1400px] space-y-3 px-4 py-3 sm:px-5 sm:py-4 lg:px-6">
         <section className="relative overflow-hidden rounded-[24px] bg-zinc-950/62 p-4 ring-1 ring-white/5 sm:p-5">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(16,185,129,0.16),transparent_30%),radial-gradient(circle_at_bottom_left,rgba(59,130,246,0.14),transparent_26%)]" />

@@ -12,6 +12,10 @@ import {
 export const metadata: Metadata = {
   title: "Discord Access",
   description: "Unlock Discord access and connect the Riot account already attached to your Discord profile.",
+  robots: {
+    index: false,
+    follow: false,
+  },
 };
 
 function messageText(status?: string, message?: string, riotId?: string) {

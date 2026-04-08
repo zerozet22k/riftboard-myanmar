@@ -1,9 +1,11 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import MasteryTable, { type MasteryRow } from "@/components/MasteryTable";
 import { formatFullDateTime } from "@/lib/displayTime";
 import { dbConnect } from "@/lib/mongodb";
 import { buildPlayerLookupQuery, canonicalPlayerPath } from "@/lib/playerIdentity";
+import { absoluteUrl } from "@/lib/seo";
 import { Player } from "@/models/player";
 import { PlayerMastery } from "@/models/playerMastery";
 
@@ -41,6 +43,66 @@ async function getChampionNameMap() {
     map[String(champion.id)] = champion.name;
   }
   return map;
+}
+
+export async function generateMetadata({
+  params,
+}: {
+  params: RouteParams | Promise<RouteParams>;
+}): Promise<Metadata> {
+  const resolved = (await params) as Partial<RouteParams>;
+  const gameNameRaw = safeDecode(resolved.gameName).trim();
+  const tagLineRaw = safeDecode(resolved.tagLine).trim().toLowerCase();
+
+  if (!gameNameRaw || !tagLineRaw) {
+    return {
+      title: "Champion Mastery",
+      robots: {
+        index: false,
+        follow: false,
+      },
+    };
+  }
+
+  await dbConnect();
+
+  const player = await Player.findOne(
+    buildPlayerLookupQuery(gameNameRaw, tagLineRaw),
+    { gameName: 1, tagLine: 1 }
+  ).lean<{ gameName?: string; tagLine?: string } | null>();
+
+  if (!player?.gameName || !player.tagLine) {
+    return {
+      title: "Champion Mastery",
+      robots: {
+        index: false,
+        follow: false,
+      },
+    };
+  }
+
+  const canonicalPath = `${canonicalPlayerPath(player.gameName, player.tagLine)}/mastery`;
+  const title = `${player.gameName}#${player.tagLine} Champion Mastery`;
+  const description = `Champion mastery table for ${player.gameName}#${player.tagLine} on RiftBoard Myanmar, including points, levels, and tracked mastery progress.`;
+
+  return {
+    title,
+    description,
+    alternates: {
+      canonical: canonicalPath,
+    },
+    openGraph: {
+      type: "article",
+      url: absoluteUrl(canonicalPath),
+      title,
+      description,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+    },
+  };
 }
 
 export default async function PlayerMasteryPage({

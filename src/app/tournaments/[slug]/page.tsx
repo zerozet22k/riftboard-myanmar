@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import TournamentBracket, {
   type TournamentBracketMatch,
@@ -9,6 +10,7 @@ import { formatCompactDateTime } from "@/lib/displayTime";
 import { getOptionalDiscordSession } from "@/lib/discordSession";
 import { dbConnect } from "@/lib/mongodb";
 import { getCommunityJoinCode } from "@/lib/runtimeConfig";
+import { absoluteUrl } from "@/lib/seo";
 import {
   activeParticipantCount,
   displayTournamentStatus,
@@ -23,6 +25,79 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type RouteParams = { slug: string };
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<RouteParams>;
+}): Promise<Metadata> {
+  const resolved = await params;
+  const slug = String(resolved.slug ?? "").trim().toLowerCase();
+
+  if (!slug) {
+    return {
+      title: "Tournament",
+      robots: {
+        index: false,
+        follow: false,
+      },
+    };
+  }
+
+  await dbConnect();
+
+  const tournament = await Tournament.findOne(
+    { slug },
+    {
+      name: 1,
+      slug: 1,
+      description: 1,
+      status: 1,
+      startsAt: 1,
+    }
+  ).lean<{
+    name?: string;
+    slug?: string;
+    description?: string;
+    status?: string;
+    startsAt?: Date | null;
+  } | null>();
+
+  if (!tournament?.name || !tournament.slug) {
+    return {
+      title: "Tournament Not Found",
+      robots: {
+        index: false,
+        follow: false,
+      },
+    };
+  }
+
+  const canonicalPath = `/tournaments/${encodeURIComponent(tournament.slug)}`;
+  const statusText = tournament.status ? displayTournamentStatus(tournament.status as never) : "Tournament";
+  const startsText = tournament.startsAt ? ` Starts ${formatWhen(tournament.startsAt)}.` : "";
+  const description =
+    `${tournament.description?.trim() || "Community League of Legends tournament on RiftBoard Myanmar."} ${statusText}.${startsText}`.trim();
+
+  return {
+    title: tournament.name,
+    description,
+    alternates: {
+      canonical: canonicalPath,
+    },
+    openGraph: {
+      type: "website",
+      url: absoluteUrl(canonicalPath),
+      title: tournament.name,
+      description,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: tournament.name,
+      description,
+    },
+  };
+}
 
 function formatWhen(value: Date | string | null | undefined) {
   return formatCompactDateTime(value) ?? "TBA";

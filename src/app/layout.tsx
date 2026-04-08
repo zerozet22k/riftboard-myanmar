@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import SiteHeader from "@/components/SiteHeader";
+import { absoluteUrl, getSiteUrl, SITE_DESCRIPTION, SITE_NAME } from "@/lib/seo";
 import { getCommunityDiscordUrl, isCommunityCodeRequired } from "@/lib/runtimeConfig";
 import { RIOT_LEGAL_BOILERPLATE } from "@/lib/tournaments";
 import "./globals.css";
@@ -19,27 +20,43 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://rift-board-myanmar.vercel.app/"),
+  metadataBase: new URL(getSiteUrl()),
   title: {
-    default: "RiftBoard Myanmar",
-    template: "%s | RiftBoard Myanmar",
+    default: SITE_NAME,
+    template: `%s | ${SITE_NAME}`,
   },
-  description:
-    "RiftBoard Myanmar — a community League of Legends LP leaderboard and champion mains tracker.",
-  applicationName: "RiftBoard Myanmar",
+  description: SITE_DESCRIPTION,
+  applicationName: SITE_NAME,
+  keywords: [
+    "Myanmar League of Legends",
+    "LoL leaderboard Myanmar",
+    "RiftBoard Myanmar",
+    "League of Legends player profiles",
+    "LoL match history",
+    "LoL champion mastery",
+    "Myanmar esports tournaments",
+  ],
+  alternates: {
+    canonical: "/",
+  },
+  robots: {
+    index: true,
+    follow: true,
+  },
+  verification: {
+    google: process.env.GOOGLE_SITE_VERIFICATION || undefined,
+  },
   openGraph: {
     type: "website",
-    url: "https://rift-board-myanmar.vercel.app/",
-    title: "RiftBoard Myanmar",
-    description:
-      "Community League of Legends LP leaderboard and champion mains tracker.",
-    siteName: "RiftBoard Myanmar",
+    url: absoluteUrl("/"),
+    title: SITE_NAME,
+    description: SITE_DESCRIPTION,
+    siteName: SITE_NAME,
   },
   twitter: {
     card: "summary_large_image",
-    title: "RiftBoard Myanmar",
-    description:
-      "Community League of Legends LP leaderboard and champion mains tracker.",
+    title: SITE_NAME,
+    description: SITE_DESCRIPTION,
   },
 };
 
@@ -53,6 +70,14 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   const communityCodeRequired = isCommunityCodeRequired();
   const communityDiscordUrl = communityCodeRequired ? "" : getCommunityDiscordUrl();
+  const siteJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    name: SITE_NAME,
+    url: getSiteUrl(),
+    description: SITE_DESCRIPTION,
+    inLanguage: "en",
+  };
 
   return (
     <html lang="en" className="dark">
@@ -64,21 +89,24 @@ export default function RootLayout({
           "bg-zinc-950 text-zinc-100",
         ].join(" ")}
       >
-        {/* Background */}
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(siteJsonLd) }}
+        />
+
         <div className="fixed inset-0 -z-10">
           <div className="absolute inset-0 bg-gradient-to-b from-zinc-950 via-zinc-950 to-black" />
           <div className="absolute inset-0 opacity-[0.08] [background-image:linear-gradient(to_right,rgba(255,255,255,.12)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,.12)_1px,transparent_1px)] [background-size:48px_48px]" />
           <div className="absolute -top-40 left-1/2 h-[520px] w-[520px] -translate-x-1/2 rounded-full bg-white/5 blur-3xl" />
         </div>
 
-        {/* App frame */}
         <div className="mx-auto w-full">
           <SiteHeader
             discordUrl={communityDiscordUrl}
             accessLabel={communityCodeRequired ? "Join Community" : "Link Account"}
           />
           {children}
-          <footer className="px-4 sm:px-6 py-10 text-center text-xs text-zinc-500">
+          <footer className="px-4 py-10 text-center text-xs text-zinc-500 sm:px-6">
             <div className="mb-3 flex items-center justify-center gap-4 text-sm text-zinc-400">
               {communityDiscordUrl ? (
                 <Link

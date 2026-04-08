@@ -23,9 +23,11 @@ function safeDecode(seg: unknown) {
 function safeNum(v: any) {
   return typeof v === "number" ? v : null;
 }
+
 function safeBool(v: any) {
   return typeof v === "boolean" ? v : null;
 }
+
 function safeStr(v: any) {
   return typeof v === "string" ? v : null;
 }
@@ -36,14 +38,15 @@ function b64urlDecodeToString(input: string) {
   return Buffer.from(s + pad, "base64").toString("utf8");
 }
 
-function parseCursor(cursor: string | null): { gc: number; id: string } | null {
+function parseCursor(cursor: string | null): { gc: number; id: string; matchId: string | null } | null {
   if (!cursor) return null;
   try {
     const obj = JSON.parse(b64urlDecodeToString(cursor));
     const gc = Number(obj?.gc);
     const id = String(obj?.id ?? "");
+    const matchId = String(obj?.matchId ?? "").trim() || null;
     if (!Number.isFinite(gc) || !id) return null;
-    return { gc, id };
+    return { gc, id, matchId };
   } catch {
     return null;
   }
@@ -54,7 +57,7 @@ function makeCursorFromDoc(last: any): string | null {
   const gc = typeof last.gameCreation === "number" ? last.gameCreation : null;
   if (gc == null) return null;
 
-  const payload = { gc, id: String(last._id) };
+  const payload = { gc, id: String(last._id), matchId: String(last.matchId ?? "") };
   return Buffer.from(JSON.stringify(payload))
     .toString("base64")
     .replace(/\+/g, "-")
@@ -62,22 +65,18 @@ function makeCursorFromDoc(last: any): string | null {
     .replace(/=+$/g, "");
 }
 
-// --- Riot helpers ---
 function matchRoutingFromPlayerRegion(v: unknown): "americas" | "asia" | "europe" | "sea" {
   const s = String(v ?? "").trim().toLowerCase();
-  // if you store SEA/sea -> ok
   if (s === "sea") return "sea";
   if (s === "asia") return "asia";
   if (s === "europe") return "europe";
   if (s === "americas") return "americas";
 
-  // if you store platform-ish values, map them:
   if (s === "sg2" || s === "th2" || s === "vn2" || s === "ph2" || s === "tw2" || s === "oc1") return "sea";
   if (s === "kr" || s === "jp1") return "asia";
   if (s === "euw1" || s === "eun1" || s === "tr1" || s === "ru") return "europe";
   if (s === "na1" || s === "br1" || s === "la1" || s === "la2") return "americas";
 
-  // default to sea for your setup
   return "sea";
 }
 
@@ -89,10 +88,12 @@ async function riotFetchJson<T>(url: string): Promise<T> {
     headers: { "X-Riot-Token": key },
     cache: "no-store",
   });
+
   if (!r.ok) {
     const text = await r.text().catch(() => "");
     throw new Error(`Riot ${r.status}: ${text || "request failed"}`);
   }
+
   return (await r.json()) as T;
 }
 
@@ -124,13 +125,18 @@ function extractPlayerRowFromMatch(matchId: string, matchRegion: string, playerI
   const subStyle = safeNum(styles?.[1]?.style);
 
   const items = [
-    safeNum(me?.item0), safeNum(me?.item1), safeNum(me?.item2),
-    safeNum(me?.item3), safeNum(me?.item4), safeNum(me?.item5),
+    safeNum(me?.item0),
+    safeNum(me?.item1),
+    safeNum(me?.item2),
+    safeNum(me?.item3),
+    safeNum(me?.item4),
+    safeNum(me?.item5),
     safeNum(me?.item6),
   ].filter((x): x is number => typeof x === "number" && x > 0);
 
-  const summonerSpells = [safeNum(me?.summoner1Id), safeNum(me?.summoner2Id)]
-    .filter((x): x is number => typeof x === "number" && x > 0);
+  const summonerSpells = [safeNum(me?.summoner1Id), safeNum(me?.summoner2Id)].filter(
+    (x): x is number => typeof x === "number" && x > 0
+  );
 
   const cs =
     (typeof me?.totalMinionsKilled === "number" ? me.totalMinionsKilled : 0) +
@@ -140,30 +146,22 @@ function extractPlayerRowFromMatch(matchId: string, matchRegion: string, playerI
     playerId,
     matchId,
     region: matchRegion,
-
     fetchedAt: new Date(),
-
     queueId: safeNum(info?.queueId),
-    gameCreation: safeNum(info?.gameCreation), // ms
-    gameDuration: safeNum(info?.gameDuration), // sec
-
+    gameCreation: safeNum(info?.gameCreation),
+    gameDuration: safeNum(info?.gameDuration),
     championId: safeNum(me?.championId),
     teamId: safeNum(me?.teamId),
     teamPosition: safeStr(me?.teamPosition),
-
     primaryStyle,
     primaryRune,
     subStyle,
-
     win: safeBool(me?.win),
-
     kills: safeNum(me?.kills),
     deaths: safeNum(me?.deaths),
     assists: safeNum(me?.assists),
-
     cs: Number.isFinite(cs) ? cs : null,
     gold: safeNum(me?.goldEarned),
-
     items,
     summonerSpells,
   };
@@ -174,57 +172,71 @@ async function syncOlderMatchesFromRiot(opts: {
   puuid: string;
   matchRegion: string;
   batch: number;
+  afterMatchId?: string | null;
 }): Promise<number> {
-  const { playerId, puuid, matchRegion, batch } = opts;
+  const { playerId, puuid, matchRegion, batch, afterMatchId } = opts;
 
   const routing = matchRoutingFromPlayerRegion(matchRegion);
   const base = `https://${routing}.api.riotgames.com`;
+  let ids: string[] = [];
 
-  // Use current DB count as start offset (works as long as you’ve been inserting from newest -> older)
-  const existingCount = await PlayerMatch.countDocuments({ playerId });
+  if (afterMatchId) {
+    const scanCount = Math.max(20, Math.min(100, batch * 2));
 
-  // Retry a couple times in case of duplicates / mismatched offset
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const start = existingCount + attempt * batch;
+    for (let start = 0; start < 1000; start += scanCount) {
+      const pageIds = await riotFetchJson<string[]>(
+        `${base}/lol/match/v5/matches/by-puuid/${encodeURIComponent(puuid)}/ids?start=${start}&count=${scanCount}`
+      );
 
-    const ids = await riotFetchJson<string[]>(
-      `${base}/lol/match/v5/matches/by-puuid/${encodeURIComponent(puuid)}/ids?start=${start}&count=${batch}`
+      if (!Array.isArray(pageIds) || pageIds.length === 0) break;
+
+      const anchorIndex = pageIds.indexOf(afterMatchId);
+      if (anchorIndex >= 0) {
+        ids = pageIds.slice(anchorIndex + 1, anchorIndex + 1 + batch);
+        break;
+      }
+
+      if (pageIds.length < scanCount) break;
+    }
+  } else {
+    ids = await riotFetchJson<string[]>(
+      `${base}/lol/match/v5/matches/by-puuid/${encodeURIComponent(puuid)}/ids?start=0&count=${batch}`
     );
-
-    if (!Array.isArray(ids) || ids.length === 0) return 0;
-
-    const existing = await PlayerMatch.find(
-      { playerId, matchId: { $in: ids } },
-      { matchId: 1 }
-    ).lean();
-
-    const have = new Set(existing.map((x: any) => String(x.matchId)));
-    const newIds = ids.filter((id) => !have.has(id));
-
-    if (newIds.length === 0) continue;
-
-    const matches = await mapLimit(newIds, 3, async (id) => {
-      const match = await riotFetchJson<any>(`${base}/lol/match/v5/matches/${encodeURIComponent(id)}`);
-      return { id, match };
-    });
-
-    const ops = matches
-      .map(({ id, match }) => extractPlayerRowFromMatch(id, routing, playerId, puuid, match))
-      .filter(Boolean)
-      .map((doc: any) => ({
-        updateOne: {
-          filter: { playerId: doc.playerId, matchId: doc.matchId },
-          update: { $set: doc },
-          upsert: true,
-        },
-      }));
-
-    if (ops.length) await PlayerMatch.bulkWrite(ops, { ordered: false });
-
-    return ops.length;
   }
 
-  return 0;
+  if (!Array.isArray(ids) || ids.length === 0) return 0;
+
+  const existing = await PlayerMatch.find(
+    { playerId, matchId: { $in: ids } },
+    { matchId: 1 }
+  ).lean();
+
+  const have = new Set(existing.map((x: any) => String(x.matchId)));
+  const newIds = ids.filter((id) => !have.has(id));
+
+  if (newIds.length === 0) return 0;
+
+  const matches = await mapLimit(newIds, 3, async (id) => {
+    const match = await riotFetchJson<any>(`${base}/lol/match/v5/matches/${encodeURIComponent(id)}`);
+    return { id, match };
+  });
+
+  const ops = matches
+    .map(({ id, match }) => extractPlayerRowFromMatch(id, routing, playerId, puuid, match))
+    .filter(Boolean)
+    .map((doc: any) => ({
+      updateOne: {
+        filter: { playerId: doc.playerId, matchId: doc.matchId },
+        update: { $set: doc },
+        upsert: true,
+      },
+    }));
+
+  if (ops.length) {
+    await PlayerMatch.bulkWrite(ops, { ordered: false });
+  }
+
+  return ops.length;
 }
 
 type Params = { gameName: string; tagLine: string };
@@ -246,7 +258,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
     const url = new URL(req.url);
     const limitRaw = Number(url.searchParams.get("limit") ?? url.searchParams.get("count") ?? 20);
     const limit = Math.max(1, Math.min(50, Number.isFinite(limitRaw) ? limitRaw : 20));
-
     const autosync = url.searchParams.get("autosync") === "1";
     const cursor = parseCursor(url.searchParams.get("cursor"));
 
@@ -262,12 +273,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
     }
 
     const playerId = new mongoose.Types.ObjectId(String(player._id));
-
-    const puuid =
-      String(player.puuid ?? player.riotPuuid ?? player.raw?.puuid ?? "").trim() || null;
-
-    const matchRegion =
-      String(player.matchRegion ?? player.raw?.matchRegion ?? "sea").trim().toLowerCase();
+    const puuid = String(player.puuid ?? player.riotPuuid ?? player.raw?.puuid ?? "").trim() || null;
+    const matchRegion = String(player.matchRegion ?? player.raw?.matchRegion ?? "sea")
+      .trim()
+      .toLowerCase();
 
     function buildFilter() {
       const filter: any = { playerId };
@@ -290,7 +299,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
     }
 
     async function queryPage() {
-      const docs = await PlayerMatch.find(
+      return PlayerMatch.find(
         buildFilter(),
         {
           matchId: 1,
@@ -298,15 +307,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
           queueId: 1,
           gameCreation: 1,
           gameDuration: 1,
-
           championId: 1,
           teamId: 1,
           teamPosition: 1,
-
           primaryStyle: 1,
           primaryRune: 1,
           subStyle: 1,
-
           win: 1,
           kills: 1,
           deaths: 1,
@@ -320,14 +326,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
         .sort({ gameCreation: -1, _id: -1 })
         .limit(limit + 1)
         .lean();
-
-      return docs;
     }
 
     let inserted = 0;
     let docs = await queryPage();
 
-    // If we hit DB end and autosync is requested, fetch older matches from Riot and try again
     if (autosync && docs.length <= limit) {
       if (!puuid) {
         return NextResponse.json(
@@ -340,7 +343,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
         playerId,
         puuid,
         matchRegion,
-        batch: Math.max(20, limit * 3),
+        batch: limit,
+        afterMatchId: cursor?.matchId ?? null,
       });
 
       if (inserted > 0) {
@@ -350,18 +354,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
 
     const hasMore = docs.length > limit;
     const page = hasMore ? docs.slice(0, limit) : docs;
-
-    // IMPORTANT:
-    // If autosync=1 and we’re at DB end, keep a cursor so the user can click again,
-    // unless Riot inserted nothing (likely remote end).
     const nextCursor =
       page.length === 0
         ? null
         : hasMore
-        ? makeCursorFromDoc(page[page.length - 1])
-        : autosync && inserted > 0
-        ? makeCursorFromDoc(page[page.length - 1])
-        : null;
+          ? makeCursorFromDoc(page[page.length - 1])
+          : autosync && inserted > 0
+            ? makeCursorFromDoc(page[page.length - 1])
+            : null;
 
     const matches = page.map((m: any) => ({
       _id: String(m._id),
@@ -370,22 +370,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
       queueId: safeNum(m.queueId),
       gameCreation: safeNum(m.gameCreation),
       gameDuration: safeNum(m.gameDuration),
-
       championId: safeNum(m.championId),
       teamId: safeNum(m.teamId),
       teamPosition: safeStr(m.teamPosition),
-
       primaryStyle: safeNum(m.primaryStyle),
       primaryRune: safeNum(m.primaryRune),
       subStyle: safeNum(m.subStyle),
-
       win: safeBool(m.win),
       kills: safeNum(m.kills),
       deaths: safeNum(m.deaths),
       assists: safeNum(m.assists),
       cs: safeNum(m.cs),
       gold: safeNum(m.gold),
-
       items: Array.isArray(m.items) ? m.items.filter((x: any) => typeof x === "number") : [],
       summonerSpells: Array.isArray(m.summonerSpells)
         ? m.summonerSpells.filter((x: any) => typeof x === "number")
@@ -398,7 +394,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
       ok: true,
       total,
       count: matches.length,
-      inserted,     // how many we pulled from Riot this request
+      inserted,
       matches,
       nextCursor,
     });

@@ -1,6 +1,8 @@
+import type { Metadata } from "next";
 import type { Types } from "mongoose";
 import { dbConnect } from "@/lib/mongodb";
 import { bestRankSnapshot } from "@/lib/rank";
+import { absoluteUrl } from "@/lib/seo";
 import { Player } from "@/models/player";
 import { RankEntry } from "@/models/rankEntry";
 import AutoUIRefresh from "@/components/AutoUIRefresh";
@@ -8,6 +10,28 @@ import LeaderboardTable, { type LeaderboardRow } from "@/components/LeaderboardT
 
 export const runtime = "nodejs";
 export const revalidate = 300;
+
+export const metadata: Metadata = {
+  title: "Leaderboard",
+  description:
+    "Browse the RiftBoard Myanmar leaderboard for tracked League of Legends players, current solo queue LP, flex rank, champion mains, and profile links.",
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    type: "website",
+    url: absoluteUrl("/"),
+    title: "RiftBoard Myanmar Leaderboard",
+    description:
+      "Browse tracked League of Legends players in Myanmar with current LP, rank snapshots, champion mains, and profile links.",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "RiftBoard Myanmar Leaderboard",
+    description:
+      "Browse tracked League of Legends players in Myanmar with current LP, rank snapshots, champion mains, and profile links.",
+  },
+};
 
 const TIER_ORDER: Record<string, number> = {
   CHALLENGER: 9,
@@ -247,14 +271,32 @@ export default async function LeaderboardPage() {
     return Number.isFinite(ms) && ms > max ? ms : max;
   }, 0);
   const tableKey = `${rows.length}-${latestUpdatedMs}`;
+  const collectionJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    name: "RiftBoard Myanmar Leaderboard",
+    url: absoluteUrl("/"),
+    description:
+      "Community leaderboard for tracked Myanmar League of Legends players with LP, rank, and champion data.",
+  };
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(collectionJsonLd) }}
+      />
       <AutoUIRefresh everyMs={60000} />
       <div className="mx-auto max-w-full p-4 sm:p-6 space-y-6">
         <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="space-y-2">
-            <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">Leaderboard</h1>
+            <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">
+              Myanmar League of Legends Leaderboard
+            </h1>
+            <p className="max-w-3xl text-sm text-zinc-400">
+              Track current LP, ranked snapshots, champion mains, and player profiles across the
+              RiftBoard Myanmar community.
+            </p>
           </div>
 
           <div className="flex flex-col sm:items-end gap-2">

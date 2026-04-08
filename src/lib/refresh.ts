@@ -28,6 +28,21 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>) {
+  const out: R[] = [];
+  let index = 0;
+
+  const workers = Array.from({ length: Math.max(1, limit) }, async () => {
+    while (index < items.length) {
+      const current = index++;
+      out[current] = await fn(items[current]);
+    }
+  });
+
+  await Promise.all(workers);
+  return out;
+}
+
 function errToString(e: unknown) {
   if (e instanceof Error) return e.message;
   try {
@@ -54,6 +69,7 @@ const COOLDOWN_MS = 2 * 60 * 1000;
 
 // ✅ Riot matchlist supports up to 100 per request
 const MAX_MATCH_SYNC_COUNT = 100;
+const MATCH_SYNC_CONCURRENCY = 3;
 
 function lastSuccessfulRefreshAt(p: any): Date | null {
   const candidates = [p?.lastRefreshAt, p?.solo?.fetchedAt, p?.flex?.fetchedAt]
@@ -203,7 +219,7 @@ async function syncRecentMatches(params: { player: any; puuid: string; matchRegi
   const existing = await Match.find({ matchId: { $in: ids } }, { matchId: 1 }).lean();
   const have = new Set(existing.map((x: any) => x.matchId));
 
-  for (const matchId of ids) {
+  await mapLimit(ids, MATCH_SYNC_CONCURRENCY, async (matchId) => {
     try {
       let payload: any | null = null;
 
@@ -239,8 +255,6 @@ async function syncRecentMatches(params: { player: any; puuid: string; matchRegi
           },
           { upsert: true }
         );
-
-        have.add(matchId);
       }
 
       const summary = extractPlayerMatchSummary(payload, puuid);
@@ -283,9 +297,8 @@ async function syncRecentMatches(params: { player: any; puuid: string; matchRegi
       );
     } catch (e) {
       if (isRateLimit(e)) await sleep(rateLimitWaitMs(e, 2500));
-      continue;
     }
-  }
+  });
 
   player.matchSync = { ...(player.matchSync ?? {}), lastSyncAt: now };
   await player.save();
@@ -462,6 +475,8 @@ export async function refreshAllPlayers(opts?: {
   delayMs?: number;
   force?: boolean;
   cooldownMs?: number;
+  syncMatches?: boolean;
+  matchesCount?: number;
 }) {
   await dbConnect();
 
@@ -492,7 +507,8 @@ export async function refreshAllPlayers(opts?: {
       const out: any = await refreshPlayerById(String(p._id), {
         force: opts?.force,
         cooldownMs: opts?.cooldownMs,
-        syncMatches: false,
+        syncMatches: opts?.syncMatches === true,
+        matchesCount: opts?.matchesCount,
         fullMastery: false,
       });
 
