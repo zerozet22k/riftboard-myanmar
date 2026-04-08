@@ -10,7 +10,7 @@ import { formatCompactDateTime } from "@/lib/displayTime";
 import { getOptionalDiscordSession } from "@/lib/discordSession";
 import { dbConnect } from "@/lib/mongodb";
 import { getCommunityJoinCode } from "@/lib/runtimeConfig";
-import { absoluteUrl } from "@/lib/seo";
+import { absoluteUrl, organizationSchemaId, websiteSchemaId } from "@/lib/seo";
 import {
   activeParticipantCount,
   displayTournamentStatus,
@@ -231,9 +231,31 @@ export default async function TournamentPage({
           team.roster.some((entry) => String(entry.discordUserId ?? "").trim() === viewer.discordUserId)
       ) ?? null
     : null;
+  const tournamentJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Event",
+    name: tournament.name,
+    url: absoluteUrl(`/tournaments/${encodeURIComponent(tournament.slug)}`),
+    description: tournament.description?.trim() || "Community League of Legends tournament on RiftBoard Myanmar.",
+    eventStatus: `https://schema.org/${tournament.status === "completed" ? "EventCompleted" : tournament.status === "live" ? "EventInProgress" : "EventScheduled"}`,
+    organizer: {
+      "@id": organizationSchemaId(),
+    },
+    publisher: {
+      "@id": organizationSchemaId(),
+    },
+    isPartOf: {
+      "@id": websiteSchemaId(),
+    },
+    startDate: tournament.startsAt ? new Date(tournament.startsAt).toISOString() : undefined,
+  };
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(tournamentJsonLd) }}
+      />
       <div className="mx-auto w-full max-w-[1500px] space-y-6 px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
         <header className="rounded-[32px] bg-zinc-900/30 p-5 ring-1 ring-white/5 sm:p-6 lg:p-8">
           <div className="flex flex-wrap items-start justify-between gap-4">

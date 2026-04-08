@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import type { Types } from "mongoose";
 import { dbConnect } from "@/lib/mongodb";
 import { bestRankSnapshot } from "@/lib/rank";
-import { absoluteUrl } from "@/lib/seo";
+import { absoluteUrl, organizationSchemaId, websiteSchemaId } from "@/lib/seo";
 import { Player } from "@/models/player";
 import { RankEntry } from "@/models/rankEntry";
 import AutoUIRefresh from "@/components/AutoUIRefresh";
@@ -278,6 +278,12 @@ export default async function LeaderboardPage() {
     url: absoluteUrl("/"),
     description:
       "Community leaderboard for tracked Myanmar League of Legends players with LP, rank, and champion data.",
+    isPartOf: {
+      "@id": websiteSchemaId(),
+    },
+    publisher: {
+      "@id": organizationSchemaId(),
+    },
   };
 
   return (

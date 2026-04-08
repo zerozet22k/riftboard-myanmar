@@ -15,7 +15,7 @@ import {
 import { dbConnect } from "@/lib/mongodb";
 import { buildPlayerLookupQuery, canonicalPlayerPath } from "@/lib/playerIdentity";
 import { bestRankSnapshot } from "@/lib/rank";
-import { absoluteUrl } from "@/lib/seo";
+import { absoluteUrl, organizationSchemaId, websiteSchemaId } from "@/lib/seo";
 import { Player } from "@/models/player";
 import { PlayerMatch } from "@/models/playerMatch";
 import { RankEntry } from "@/models/rankEntry";
@@ -352,6 +352,12 @@ export default async function PlayerProfilePage({
     url: absoluteUrl(canonicalPath),
     name: `${player.gameName}#${player.tagLine}`,
     description: playerMetaDescription(player),
+    isPartOf: {
+      "@id": websiteSchemaId(),
+    },
+    publisher: {
+      "@id": organizationSchemaId(),
+    },
     mainEntity: {
       "@type": "Thing",
       name: `${player.gameName}#${player.tagLine}`,

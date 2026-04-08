@@ -2,7 +2,15 @@ import Link from "next/link";
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import SiteHeader from "@/components/SiteHeader";
-import { absoluteUrl, getSiteUrl, SITE_DESCRIPTION, SITE_NAME } from "@/lib/seo";
+import {
+  absoluteUrl,
+  getOrganizationJsonLd,
+  getSiteUrl,
+  getWebsiteJsonLd,
+  SITE_DESCRIPTION,
+  SITE_NAME,
+  SITE_PUBLISHER,
+} from "@/lib/seo";
 import { getCommunityDiscordUrl, isCommunityCodeRequired } from "@/lib/runtimeConfig";
 import { RIOT_LEGAL_BOILERPLATE } from "@/lib/tournaments";
 import "./globals.css";
@@ -27,6 +35,7 @@ export const metadata: Metadata = {
   },
   description: SITE_DESCRIPTION,
   applicationName: SITE_NAME,
+  publisher: SITE_PUBLISHER,
   keywords: [
     "Myanmar League of Legends",
     "LoL leaderboard Myanmar",
@@ -70,14 +79,7 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   const communityCodeRequired = isCommunityCodeRequired();
   const communityDiscordUrl = communityCodeRequired ? "" : getCommunityDiscordUrl();
-  const siteJsonLd = {
-    "@context": "https://schema.org",
-    "@type": "WebSite",
-    name: SITE_NAME,
-    url: getSiteUrl(),
-    description: SITE_DESCRIPTION,
-    inLanguage: "en",
-  };
+  const siteJsonLd = [getOrganizationJsonLd(), getWebsiteJsonLd()];
 
   return (
     <html lang="en" className="dark">
@@ -96,7 +98,7 @@ export default function RootLayout({
 
         <div className="fixed inset-0 -z-10">
           <div className="absolute inset-0 bg-gradient-to-b from-zinc-950 via-zinc-950 to-black" />
-          <div className="absolute inset-0 opacity-[0.08] [background-image:linear-gradient(to_right,rgba(255,255,255,.12)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,.12)_1px,transparent_1px)] [background-size:48px_48px]" />
+          <div className="absolute inset-0 opacity-[0.08] bg-[linear-gradient(to_right,rgba(255,255,255,.12)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,.12)_1px,transparent_1px)] [background-size:48px_48px]" />
           <div className="absolute -top-40 left-1/2 h-[520px] w-[520px] -translate-x-1/2 rounded-full bg-white/5 blur-3xl" />
         </div>
 
