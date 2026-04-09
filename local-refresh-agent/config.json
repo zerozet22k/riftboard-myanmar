@@ -1,8 +1,8 @@
 {
   "localAppUrl": "http://127.0.0.1:43117",
-  "limit": 5,
+  "limit": 10,
   "delayMs": 900,
-  "intervalSec": 300,
+  "intervalSec": 60,
   "cooldownMs": null,
   "force": false,
   "syncMatches": true,
