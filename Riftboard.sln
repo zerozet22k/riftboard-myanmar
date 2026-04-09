@@ -1,0 +1,32 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "local-refresh-agent", "local-refresh-agent", "{B7A9EEA8-7E3A-E854-E981-6BD8BDF605FA}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{B622CC2F-F3A0-5D3B-43C5-D713216A6A4C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RiftBoardRefreshTray", "local-refresh-agent\src\RiftBoardRefreshTray\RiftBoardRefreshTray.csproj", "{893E0F51-2C42-4F9D-E0F4-678E3FDB7DD4}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{893E0F51-2C42-4F9D-E0F4-678E3FDB7DD4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{893E0F51-2C42-4F9D-E0F4-678E3FDB7DD4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{893E0F51-2C42-4F9D-E0F4-678E3FDB7DD4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{893E0F51-2C42-4F9D-E0F4-678E3FDB7DD4}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{B622CC2F-F3A0-5D3B-43C5-D713216A6A4C} = {B7A9EEA8-7E3A-E854-E981-6BD8BDF605FA}
+		{893E0F51-2C42-4F9D-E0F4-678E3FDB7DD4} = {B622CC2F-F3A0-5D3B-43C5-D713216A6A4C}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {8984CE7E-C3FB-4DF8-A266-14920EFC2C58}
+	EndGlobalSection
+EndGlobal
