@@ -1,13 +1,16 @@
 import Link from "next/link";
+import Image from "next/image";
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import SiteHeader from "@/components/SiteHeader";
 import {
   absoluteUrl,
   getGoogleSiteVerification,
+  getSiteOpenGraphImages,
   getOrganizationJsonLd,
   getSiteUrl,
   getWebsiteJsonLd,
+  SITE_LOGO_PATH,
   SITE_DESCRIPTION,
   SITE_NAME,
   SITE_PUBLISHER,
@@ -62,11 +65,13 @@ export const metadata: Metadata = {
     title: SITE_NAME,
     description: SITE_DESCRIPTION,
     siteName: SITE_NAME,
+    images: getSiteOpenGraphImages(),
   },
   twitter: {
     card: "summary_large_image",
     title: SITE_NAME,
     description: SITE_DESCRIPTION,
+    images: [absoluteUrl(SITE_LOGO_PATH), ...getSiteOpenGraphImages().map((image) => image.url)],
   },
 };
 
@@ -110,6 +115,19 @@ export default function RootLayout({
           />
           {children}
           <footer className="px-4 py-10 text-center text-xs text-zinc-500 sm:px-6">
+            <div className="mb-4 flex items-center justify-center gap-3">
+              <Image
+                src={SITE_LOGO_PATH}
+                alt="RiftBoard Myanmar logo"
+                width={40}
+                height={40}
+                className="rounded-xl ring-1 ring-white/10"
+              />
+              <div className="text-left">
+                <div className="text-[11px] uppercase tracking-[0.24em] text-zinc-600">Myanmar Community</div>
+                <div className="text-sm font-semibold text-zinc-300">RiftBoard Myanmar</div>
+              </div>
+            </div>
             <div className="mb-3 flex items-center justify-center gap-4 text-sm text-zinc-400">
               {communityDiscordUrl ? (
                 <Link

@@ -10,7 +10,14 @@ import { formatCompactDateTime } from "@/lib/displayTime";
 import { getOptionalDiscordSession } from "@/lib/discordSession";
 import { dbConnect } from "@/lib/mongodb";
 import { getCommunityJoinCode } from "@/lib/runtimeConfig";
-import { absoluteUrl, organizationSchemaId, websiteSchemaId } from "@/lib/seo";
+import {
+  absoluteUrl,
+  getSiteBannerUrl,
+  getSiteOpenGraphImages,
+  organizationSchemaId,
+  SITE_LOGO_PATH,
+  websiteSchemaId,
+} from "@/lib/seo";
 import {
   activeParticipantCount,
   displayTournamentStatus,
@@ -90,11 +97,13 @@ export async function generateMetadata({
       url: absoluteUrl(canonicalPath),
       title: tournament.name,
       description,
+      images: getSiteOpenGraphImages(),
     },
     twitter: {
       card: "summary_large_image",
       title: tournament.name,
       description,
+      images: [absoluteUrl(SITE_LOGO_PATH), ...getSiteOpenGraphImages().map((image) => image.url)],
     },
   };
 }
@@ -244,6 +253,7 @@ export default async function TournamentPage({
     publisher: {
       "@id": organizationSchemaId(),
     },
+    image: [getSiteBannerUrl()],
     isPartOf: {
       "@id": websiteSchemaId(),
     },

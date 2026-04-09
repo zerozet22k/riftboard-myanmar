@@ -8,12 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "discord:register": "node scripts/register-discord.mjs",
-    "refresh:leaderboard:local": "node scripts/refresh-leaderboard-local.mjs",
-    "refresh:leaderboard:ps": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-local-cron.ps1",
-    "refresh:leaderboard:standalone": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-local-cron.ps1 -SyncMatches -MatchesCount 10",
-    "refresh:service:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-refresh-service.ps1 -Limit 5 -IntervalSec 300 -SyncMatches -MatchesCount 10",
-    "refresh:service:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-refresh-service.ps1"
+    "discord:register": "node scripts/register-discord.mjs"
   },
   "dependencies": {
     "mongoose": "^9.0.1",

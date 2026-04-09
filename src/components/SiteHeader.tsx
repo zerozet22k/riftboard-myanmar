@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
+import { SITE_LOGO_PATH } from "@/lib/seo";
 
 type SiteHeaderProps = {
   discordUrl?: string;
@@ -37,12 +39,22 @@ export default function SiteHeader({
     <header className="sticky top-0 z-40 border-b border-white/8 bg-zinc-950/80 backdrop-blur-xl">
       <div className="mx-auto flex w-full flex-col gap-3 px-4 py-3 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
         <div className="flex items-center justify-between gap-4">
-          <Link href="/" className="min-w-0">
-            <div className="text-[11px] uppercase tracking-[0.28em] text-zinc-500">
-              Myanmar Community
-            </div>
-            <div className="truncate text-lg font-semibold tracking-tight text-zinc-50">
-              RiftBoard
+          <Link href="/" className="flex min-w-0 items-center gap-3">
+            <Image
+              src={SITE_LOGO_PATH}
+              alt="RiftBoard Myanmar logo"
+              width={44}
+              height={44}
+              className="h-11 w-11 rounded-2xl object-cover ring-1 ring-white/10"
+              priority
+            />
+            <div className="min-w-0">
+              <div className="text-[11px] uppercase tracking-[0.28em] text-zinc-500">
+                Myanmar Community
+              </div>
+              <div className="truncate text-lg font-semibold tracking-tight text-zinc-50">
+                RiftBoard
+              </div>
             </div>
           </Link>
 

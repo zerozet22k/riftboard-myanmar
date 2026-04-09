@@ -4,6 +4,8 @@ export const SITE_NAME = "RiftBoard Myanmar";
 export const SITE_DESCRIPTION =
   "Myanmar League of Legends leaderboard, player profiles, LP tracking, match history, champion mastery, and community tournaments.";
 export const SITE_PUBLISHER = SITE_NAME;
+export const SITE_LOGO_PATH = "/logo.png";
+export const SITE_BANNER_PATH = "/banner.png";
 const GOOGLE_SITE_VERIFICATION_FALLBACK = "4nPX8Ok4DvtWgJbLn6wOWqfQ5iw9t7DPbthiMlHP3gc";
 
 export function getSiteUrl() {
@@ -23,6 +25,25 @@ export function websiteSchemaId() {
   return absoluteUrl("/#website");
 }
 
+export function getSiteLogoUrl() {
+  return absoluteUrl(SITE_LOGO_PATH);
+}
+
+export function getSiteBannerUrl() {
+  return absoluteUrl(SITE_BANNER_PATH);
+}
+
+export function getSiteOpenGraphImages() {
+  return [
+    {
+      url: getSiteBannerUrl(),
+      width: 1200,
+      height: 630,
+      alt: `${SITE_NAME} banner`,
+    },
+  ];
+}
+
 export function getOrganizationJsonLd() {
   return {
     "@context": "https://schema.org",
@@ -30,6 +51,11 @@ export function getOrganizationJsonLd() {
     "@id": organizationSchemaId(),
     name: SITE_PUBLISHER,
     url: getSiteUrl(),
+    logo: {
+      "@type": "ImageObject",
+      url: getSiteLogoUrl(),
+    },
+    image: [getSiteBannerUrl()],
   };
 }
 
@@ -42,6 +68,7 @@ export function getWebsiteJsonLd() {
     url: getSiteUrl(),
     description: SITE_DESCRIPTION,
     inLanguage: "en",
+    image: [getSiteBannerUrl()],
     publisher: {
       "@id": organizationSchemaId(),
     },

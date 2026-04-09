@@ -2,7 +2,14 @@ import type { Metadata } from "next";
 import type { Types } from "mongoose";
 import { dbConnect } from "@/lib/mongodb";
 import { bestRankSnapshot } from "@/lib/rank";
-import { absoluteUrl, organizationSchemaId, websiteSchemaId } from "@/lib/seo";
+import {
+  absoluteUrl,
+  getSiteBannerUrl,
+  getSiteOpenGraphImages,
+  organizationSchemaId,
+  SITE_LOGO_PATH,
+  websiteSchemaId,
+} from "@/lib/seo";
 import { Player } from "@/models/player";
 import { RankEntry } from "@/models/rankEntry";
 import AutoUIRefresh from "@/components/AutoUIRefresh";
@@ -24,12 +31,14 @@ export const metadata: Metadata = {
     title: "RiftBoard Myanmar Leaderboard",
     description:
       "Browse tracked League of Legends players in Myanmar with current LP, rank snapshots, champion mains, and profile links.",
+    images: getSiteOpenGraphImages(),
   },
   twitter: {
     card: "summary_large_image",
     title: "RiftBoard Myanmar Leaderboard",
     description:
       "Browse tracked League of Legends players in Myanmar with current LP, rank snapshots, champion mains, and profile links.",
+    images: [absoluteUrl(SITE_LOGO_PATH), ...getSiteOpenGraphImages().map((image) => image.url)],
   },
 };
 
@@ -278,6 +287,7 @@ export default async function LeaderboardPage() {
     url: absoluteUrl("/"),
     description:
       "Community leaderboard for tracked Myanmar League of Legends players with LP, rank, and champion data.",
+    image: [getSiteBannerUrl()],
     isPartOf: {
       "@id": websiteSchemaId(),
     },

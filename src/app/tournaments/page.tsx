@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { dbConnect } from "@/lib/mongodb";
-import { absoluteUrl } from "@/lib/seo";
+import { absoluteUrl, getSiteOpenGraphImages, SITE_LOGO_PATH } from "@/lib/seo";
 import { displayTournamentStatus } from "@/lib/tournaments";
 import { Tournament } from "@/models/tournament";
 import { TournamentTeam } from "@/models/tournamentTeam";
@@ -22,6 +22,14 @@ export const metadata: Metadata = {
     title: "RiftBoard Myanmar Tournaments",
     description:
       "Browse community League of Legends tournaments on RiftBoard Myanmar with registration, check-in, brackets, and team status.",
+    images: getSiteOpenGraphImages(),
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "RiftBoard Myanmar Tournaments",
+    description:
+      "Browse community League of Legends tournaments on RiftBoard Myanmar with registration, check-in, brackets, and team status.",
+    images: [absoluteUrl(SITE_LOGO_PATH), ...getSiteOpenGraphImages().map((image) => image.url)],
   },
 };
 

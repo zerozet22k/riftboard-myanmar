@@ -15,7 +15,14 @@ import {
 import { dbConnect } from "@/lib/mongodb";
 import { buildPlayerLookupQuery, canonicalPlayerPath } from "@/lib/playerIdentity";
 import { bestRankSnapshot } from "@/lib/rank";
-import { absoluteUrl, organizationSchemaId, websiteSchemaId } from "@/lib/seo";
+import {
+  absoluteUrl,
+  getSiteBannerUrl,
+  getSiteOpenGraphImages,
+  organizationSchemaId,
+  SITE_LOGO_PATH,
+  websiteSchemaId,
+} from "@/lib/seo";
 import { Player } from "@/models/player";
 import { PlayerMatch } from "@/models/playerMatch";
 import { RankEntry } from "@/models/rankEntry";
@@ -210,11 +217,13 @@ export async function generateMetadata({
       url: absoluteUrl(canonicalPath),
       title,
       description,
+      images: getSiteOpenGraphImages(),
     },
     twitter: {
       card: "summary_large_image",
       title,
       description,
+      images: [absoluteUrl(SITE_LOGO_PATH), ...getSiteOpenGraphImages().map((image) => image.url)],
     },
   };
 }
@@ -352,6 +361,7 @@ export default async function PlayerProfilePage({
     url: absoluteUrl(canonicalPath),
     name: `${player.gameName}#${player.tagLine}`,
     description: playerMetaDescription(player),
+    image: [getSiteBannerUrl()],
     isPartOf: {
       "@id": websiteSchemaId(),
     },
