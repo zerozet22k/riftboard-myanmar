@@ -15,6 +15,30 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptDir
 $serverOutLog = Join-Path $repoRoot ".standalone-refresh-server.out.log"
 $serverErrLog = Join-Path $repoRoot ".standalone-refresh-server.err.log"
+$nextCliPath = Join-Path $repoRoot "node_modules\next\dist\bin\next"
+$nextBuildIdPath = Join-Path $repoRoot ".next\BUILD_ID"
+
+function Resolve-NodeExe {
+    $command = Get-Command node -ErrorAction SilentlyContinue
+    if ($command -and $command.Source) {
+        return $command.Source
+    }
+
+    $fallback = Join-Path ${env:ProgramFiles} "nodejs\node.exe"
+    if (Test-Path $fallback) {
+        return $fallback
+    }
+
+    throw "Could not find node.exe on PATH."
+}
+
+function Assert-NextBuildExists {
+    if (Test-Path $nextBuildIdPath) {
+        return
+    }
+
+    throw "Could not find a Next.js production build at $nextBuildIdPath. Run npm run build once before starting the refresh service."
+}
 
 function Test-AppReady {
     param([Uri]$Uri)
@@ -33,6 +57,24 @@ function Test-PortListening {
 
     $port = if ($Uri.Port -gt 0) { $Uri.Port } else { 3000 }
     return [bool](Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
+}
+
+function Get-FreeAppUrl {
+    param([Uri]$BaseUri)
+
+    $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+    $listener.Start()
+
+    try {
+        $port = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
+    }
+    finally {
+        $listener.Stop()
+    }
+
+    $builder = [System.UriBuilder]$BaseUri
+    $builder.Port = $port
+    return $builder.Uri.AbsoluteUri.TrimEnd("/")
 }
 
 function Get-ProcessTreeIds {
@@ -80,21 +122,34 @@ function Start-StandaloneServer {
 
     $uri = [Uri]$AppUrl
     if (Test-AppReady -Uri $uri) {
-        return $null
+        return [pscustomobject]@{
+            AppUrl = $uri.AbsoluteUri.TrimEnd("/")
+            RootPid = $null
+        }
     }
 
     if (Test-PortListening -Uri $uri) {
-        throw "Port $($uri.Port) is already in use, but $AppUrl is not responding as the local app. Pick another port or stop the conflicting process."
+        $fallbackUrl = Get-FreeAppUrl -BaseUri $uri
+        Write-Host "Port $($uri.Port) is busy; using $fallbackUrl for the hidden refresh server." -ForegroundColor Yellow
+        $uri = [Uri]$fallbackUrl
     }
 
     $port = if ($uri.Port -gt 0) { $uri.Port } else { 3000 }
+    $nodeExe = Resolve-NodeExe
+
+    if (-not (Test-Path $nextCliPath)) {
+        throw "Could not find Next.js CLI at $nextCliPath. Run npm install first."
+    }
+
+    Assert-NextBuildExists
 
     Remove-Item -LiteralPath $serverOutLog, $serverErrLog -Force -ErrorAction SilentlyContinue
 
     $proc = Start-Process `
-        -FilePath "C:\Windows\System32\cmd.exe" `
-        -ArgumentList "/d", "/s", "/c", "set PORT=$port&& npm.cmd run server" `
+        -FilePath $nodeExe `
+        -ArgumentList $nextCliPath, "start", "-H", "127.0.0.1", "-p", "$port" `
         -WorkingDirectory $WorkingDirectory `
+        -WindowStyle Hidden `
         -RedirectStandardOutput $serverOutLog `
         -RedirectStandardError $serverErrLog `
         -PassThru
@@ -104,7 +159,10 @@ function Start-StandaloneServer {
         Start-Sleep -Seconds 1
 
         if (Test-AppReady -Uri $uri) {
-            return $proc.Id
+            return [pscustomobject]@{
+                AppUrl = $uri.AbsoluteUri.TrimEnd("/")
+                RootPid = $proc.Id
+            }
         }
 
         if ($proc.HasExited) {
@@ -115,7 +173,7 @@ function Start-StandaloneServer {
     $outTail = if (Test-Path $serverOutLog) { (Get-Content $serverOutLog -Tail 40) -join [Environment]::NewLine } else { "" }
     $errTail = if (Test-Path $serverErrLog) { (Get-Content $serverErrLog -Tail 40) -join [Environment]::NewLine } else { "" }
 
-    throw "Could not start local server at $AppUrl within ${TimeoutSec}s.`nSTDOUT:`n$outTail`nSTDERR:`n$errTail"
+    throw "Could not start local server at $($uri.AbsoluteUri.TrimEnd('/')) within ${TimeoutSec}s.`nSTDOUT:`n$outTail`nSTDERR:`n$errTail"
 }
 
 $argsList = @("--limit=$Limit", "--delayMs=$DelayMs")
@@ -138,18 +196,22 @@ Write-Host "Args: $($argsList -join ' ')" -ForegroundColor DarkGray
 
 $serverRootPid = $null
 $serverStartedHere = $false
+$effectiveAppUrl = $LocalAppUrl
 
 Push-Location $repoRoot
 try {
-    $serverRootPid = Start-StandaloneServer -AppUrl $LocalAppUrl -WorkingDirectory $repoRoot -TimeoutSec $StartupTimeoutSec
+    $serverInfo = Start-StandaloneServer -AppUrl $LocalAppUrl -WorkingDirectory $repoRoot -TimeoutSec $StartupTimeoutSec
+    $effectiveAppUrl = $serverInfo.AppUrl
+    $serverRootPid = $serverInfo.RootPid
+
     if ($serverRootPid) {
         $serverStartedHere = $true
-        Write-Host "Started standalone local server at $LocalAppUrl (PID $serverRootPid)" -ForegroundColor Green
+        Write-Host "Started standalone local server at $effectiveAppUrl (PID $serverRootPid)" -ForegroundColor Green
     } else {
-        Write-Host "Using existing local server at $LocalAppUrl" -ForegroundColor DarkGray
+        Write-Host "Using existing local server at $effectiveAppUrl" -ForegroundColor DarkGray
     }
 
-    $env:LOCAL_APP_URL = $LocalAppUrl
+    $env:LOCAL_APP_URL = $effectiveAppUrl
     & npm.cmd run refresh:leaderboard:local -- @argsList
 }
 finally {

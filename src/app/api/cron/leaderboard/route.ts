@@ -27,10 +27,12 @@ function getToken(req: NextRequest): string {
 }
 
 function isLocalDevRequest(req: NextRequest) {
-    if (process.env.NODE_ENV === "production") return false;
-
     const hostname = req.nextUrl.hostname.toLowerCase();
-    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+    const isLoopback = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+    if (!isLoopback) return false;
+
+    if (process.env.VERCEL === "1") return false;
+    return true;
 }
 
 function assertCronAuth(req: NextRequest) {
