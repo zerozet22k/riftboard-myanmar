@@ -27,7 +27,6 @@ import {
   getSiteBannerUrl,
   getSiteOpenGraphImages,
   organizationSchemaId,
-  SITE_LOGO_PATH,
   websiteSchemaId,
 } from "@/lib/seo";
 import { Player } from "@/models/player";
@@ -231,7 +230,7 @@ export async function generateMetadata({
       card: "summary_large_image",
       title,
       description,
-      images: [absoluteUrl(SITE_LOGO_PATH), ...getSiteOpenGraphImages().map((image) => image.url)],
+      images: getSiteOpenGraphImages().map((image) => image.url),
     },
   };
 }

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import LeaderboardPage from "./leaderboard/page";
-import { absoluteUrl, getSiteOpenGraphImages, SITE_DESCRIPTION, SITE_LOGO_PATH } from "@/lib/seo";
+import { absoluteUrl, getSiteOpenGraphImages, SITE_DESCRIPTION } from "@/lib/seo";
 
 export const runtime = "nodejs";
 export const revalidate = 300;
@@ -22,7 +22,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Myanmar League of Legends Leaderboard",
     description: SITE_DESCRIPTION,
-    images: [absoluteUrl(SITE_LOGO_PATH), ...getSiteOpenGraphImages().map((image) => image.url)],
+    images: getSiteOpenGraphImages().map((image) => image.url),
   },
 };
 

@@ -7,7 +7,6 @@ import {
   getSiteBannerUrl,
   getSiteOpenGraphImages,
   organizationSchemaId,
-  SITE_LOGO_PATH,
   websiteSchemaId,
 } from "@/lib/seo";
 import { Player } from "@/models/player";
@@ -38,7 +37,7 @@ export const metadata: Metadata = {
     title: "RiftBoard Myanmar Leaderboard",
     description:
       "Browse tracked League of Legends players in Myanmar with current LP, rank snapshots, champion mains, and profile links.",
-    images: [absoluteUrl(SITE_LOGO_PATH), ...getSiteOpenGraphImages().map((image) => image.url)],
+    images: getSiteOpenGraphImages().map((image) => image.url),
   },
 };
 

@@ -5,7 +5,7 @@ import MasteryTable, { type MasteryRow } from "@/components/MasteryTable";
 import { formatFullDateTime } from "@/lib/displayTime";
 import { dbConnect } from "@/lib/mongodb";
 import { buildPlayerLookupQuery, canonicalPlayerPath } from "@/lib/playerIdentity";
-import { absoluteUrl, getSiteOpenGraphImages, SITE_LOGO_PATH } from "@/lib/seo";
+import { absoluteUrl, getSiteOpenGraphImages } from "@/lib/seo";
 import { Player } from "@/models/player";
 import { PlayerMastery } from "@/models/playerMastery";
 
@@ -102,7 +102,7 @@ export async function generateMetadata({
       card: "summary_large_image",
       title,
       description,
-      images: [absoluteUrl(SITE_LOGO_PATH), ...getSiteOpenGraphImages().map((image) => image.url)],
+      images: getSiteOpenGraphImages().map((image) => image.url),
     },
   };
 }
