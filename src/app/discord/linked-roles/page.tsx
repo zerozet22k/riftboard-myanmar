@@ -18,7 +18,7 @@ import {
 
 export const metadata: Metadata = {
   title: "Discord Access",
-  description: "Unlock Discord access and connect the Riot account already attached to your Discord profile.",
+  description: "Connect Discord and unlock Burma-only community access for your linked Riot account.",
   robots: {
     index: false,
     follow: false,
@@ -126,12 +126,12 @@ export default async function DiscordLinkedRolesPage({
             <div className="text-[11px] uppercase tracking-[0.24em] text-zinc-500">Join community</div>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight text-zinc-50">
               {communityCodeRequired
-                ? "Unlock Discord access"
+                ? "Connect Discord for Burma-only access"
                 : "Connect Discord and your Riot account"}
             </h1>
             <p className="mt-3 max-w-3xl text-sm text-zinc-400">
               {communityCodeRequired
-                ? "Enter your private Myanmar community code once to continue. After that, you can open the community Discord and connect the Riot account already linked to your Discord profile. Joining the server alone does not finish the bind because Discord still needs one quick OAuth approval."
+                ? "Connect the Riot account already linked to your Discord profile first. If this Discord account has never been approved for the Myanmar community before, Riftboard will ask for the private code once and then remember it for both the protected Discord invite and Burma-only account actions."
                 : "Join the community Discord, then connect the Riot account Discord already exposes on your profile. Joining the server alone does not finish the bind because Discord still needs one quick OAuth approval. Manual Riot ID entry is disabled for protected community features."}
             </p>
           </div>
@@ -289,37 +289,6 @@ export default async function DiscordLinkedRolesPage({
             )}
           </section>
         )}
-
-        {!viewer && !communityUnlocked && communityCodeRequired ? (
-          <section className="rounded-[28px] bg-zinc-900/25 p-5 ring-1 ring-white/5 sm:p-6">
-            <div className="text-xl font-semibold text-zinc-50">Need the private Discord invite?</div>
-            <p className="mt-2 text-sm text-zinc-400">
-              If you want Riftboard to reveal the protected invite on this browser before logging
-              in, you can still unlock it here.
-            </p>
-
-            <form action="/api/community/access" method="POST" className="mt-5 space-y-3">
-              <input type="hidden" name="returnTo" value="/discord/linked-roles" />
-              <label className="block space-y-1.5 text-sm">
-                <div className="text-zinc-400">Private community code</div>
-                <input
-                  name="code"
-                  type="password"
-                  placeholder="Enter code"
-                  autoComplete="off"
-                  required
-                  className="w-full rounded-2xl bg-zinc-950/55 px-4 py-3 text-zinc-100 outline-none ring-1 ring-white/8 focus:ring-white/15"
-                />
-              </label>
-              <button
-                type="submit"
-                className="rounded-2xl bg-emerald-500/90 px-5 py-3 text-sm font-semibold text-black transition hover:bg-emerald-400"
-              >
-                Unlock browser invite
-              </button>
-            </form>
-          </section>
-        ) : null}
 
         {communityUnlocked && pending ? (
           <section className="rounded-[28px] bg-zinc-900/25 p-5 ring-1 ring-white/5 sm:p-6">
