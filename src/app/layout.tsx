@@ -4,6 +4,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import SiteHeader from "@/components/SiteHeader";
 import {
   absoluteUrl,
+  getGoogleSiteVerification,
   getOrganizationJsonLd,
   getSiteUrl,
   getWebsiteJsonLd,
@@ -53,7 +54,7 @@ export const metadata: Metadata = {
     follow: true,
   },
   verification: {
-    google: process.env.GOOGLE_SITE_VERIFICATION || undefined,
+    google: getGoogleSiteVerification(),
   },
   openGraph: {
     type: "website",

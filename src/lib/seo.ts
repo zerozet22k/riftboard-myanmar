@@ -4,6 +4,7 @@ export const SITE_NAME = "RiftBoard Myanmar";
 export const SITE_DESCRIPTION =
   "Myanmar League of Legends leaderboard, player profiles, LP tracking, match history, champion mastery, and community tournaments.";
 export const SITE_PUBLISHER = SITE_NAME;
+const GOOGLE_SITE_VERIFICATION_FALLBACK = "4nPX8Ok4DvtWgJbLn6wOWqfQ5iw9t7DPbthiMlHP3gc";
 
 export function getSiteUrl() {
   return getAppBaseUrl().replace(/\/+$/, "");
@@ -45,4 +46,14 @@ export function getWebsiteJsonLd() {
       "@id": organizationSchemaId(),
     },
   };
+}
+
+export function getGoogleSiteVerification() {
+  const raw =
+    process.env.GOOGLE_SITE_VERIFICATION?.trim() ||
+    process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION?.trim() ||
+    GOOGLE_SITE_VERIFICATION_FALLBACK;
+
+  const normalized = raw.replace(/^google-site-verification\s*=\s*/i, "").trim();
+  return normalized || undefined;
 }
