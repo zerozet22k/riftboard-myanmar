@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { setCommunityAccessCookie } from "@/lib/communityAccess";
-import { normalizeReturnTo } from "@/lib/discordSession";
+import {
+  grantStoredCommunityAccessForDiscordUser,
+  setCommunityAccessCookie,
+} from "@/lib/communityAccess";
+import { getOptionalDiscordSessionFromRequest, normalizeReturnTo } from "@/lib/discordSession";
 import { getCommunityJoinCodes } from "@/lib/runtimeConfig";
 
 export const runtime = "nodejs";
@@ -21,6 +24,10 @@ export async function POST(req: NextRequest) {
   }
 
   const response = NextResponse.redirect(target);
+  const session = await getOptionalDiscordSessionFromRequest(req);
+  if (session?.discordUserId) {
+    await grantStoredCommunityAccessForDiscordUser(session.discordUserId);
+  }
   setCommunityAccessCookie(response, req.nextUrl.protocol === "https:");
   return response;
 }

@@ -17,6 +17,8 @@ export type DiscordLinkDoc = {
   lastVerifiedGuildId?: string | null;
   proofConnectionType?: string | null;
   proofConnectionLabel?: string | null;
+  communityAccessCodeHash?: string | null;
+  communityAccessGrantedAt?: Date | null;
   metadataSnapshot?: Record<string, unknown> | null;
   lastSyncedAt?: Date | null;
 };
@@ -43,6 +45,8 @@ const DiscordLinkSchema = new Schema<DiscordLinkDoc>(
     lastVerifiedGuildId: { type: String, trim: true, default: null },
     proofConnectionType: { type: String, trim: true, default: null },
     proofConnectionLabel: { type: String, trim: true, default: null },
+    communityAccessCodeHash: { type: String, trim: true, default: null },
+    communityAccessGrantedAt: { type: Date, default: null },
     metadataSnapshot: { type: Schema.Types.Mixed, default: null },
     lastSyncedAt: { type: Date, default: null },
   },

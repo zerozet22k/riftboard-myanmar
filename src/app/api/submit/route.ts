@@ -1,7 +1,12 @@
 import { revalidatePath } from "next/cache";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { hasCommunityAccessFromRequest } from "@/lib/communityAccess";
+import {
+  grantStoredCommunityAccessForDiscordUser,
+  hasCommunityAccessFromRequest,
+  hasStoredCommunityAccessForDiscordUser,
+  setCommunityAccessCookie,
+} from "@/lib/communityAccess";
 import { dbConnect } from "@/lib/mongodb";
 import { canonicalPlayerPath } from "@/lib/playerIdentity";
 import { refreshPlayerById } from "@/lib/refresh";
@@ -37,8 +42,10 @@ export async function POST(req: NextRequest) {
 
     const requiredCodes = getCommunityJoinCodes();
     const unlockedBrowser = hasCommunityAccessFromRequest(req);
+    const unlockedAccount = await hasStoredCommunityAccessForDiscordUser(session.discordUserId);
     const providedCode = String(parsed.data.code ?? "").trim();
-    if (requiredCodes.length && !unlockedBrowser && !requiredCodes.includes(providedCode)) {
+    const acceptedCode = requiredCodes.includes(providedCode);
+    if (requiredCodes.length && !unlockedBrowser && !unlockedAccount && !acceptedCode) {
       return NextResponse.json({ ok: false, error: "Wrong community code" }, { status: 401 });
     }
 
@@ -80,7 +87,7 @@ export async function POST(req: NextRequest) {
     const canonicalPath = canonicalPlayerPath(player.gameName, player.tagLine);
     revalidatePath(canonicalPath);
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       ok: true,
       playerId: String(player._id),
       canonicalPath,
@@ -94,6 +101,15 @@ export async function POST(req: NextRequest) {
       cooldownSecondsLeft: refreshOut?._cooldownSecondsLeft ?? null,
       refreshError: refreshOut?._refreshError ?? null,
     });
+
+    if (acceptedCode) {
+      await grantStoredCommunityAccessForDiscordUser(session.discordUserId);
+      setCommunityAccessCookie(response, req.nextUrl.protocol === "https:");
+    } else if (!unlockedBrowser && unlockedAccount) {
+      setCommunityAccessCookie(response, req.nextUrl.protocol === "https:");
+    }
+
+    return response;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Error";
     const status = /Connect Discord/i.test(message) ? 401 : 500;

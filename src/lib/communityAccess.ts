@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
+import { dbConnect } from "@/lib/mongodb";
+import { DiscordLink } from "@/models/discordLink";
 import { getCommunityJoinCodes, isCommunityCodeRequired } from "@/lib/runtimeConfig";
 
 const COMMUNITY_ACCESS_COOKIE = "community_access";
@@ -10,6 +12,10 @@ type CommunityAccessPayload = {
   v: 1;
   codeHash: string;
   grantedAt: number;
+};
+
+type StoredCommunityAccessRecord = {
+  communityAccessCodeHash?: string | null;
 };
 
 function firstNonEmpty(values: Array<string | undefined>) {
@@ -32,6 +38,10 @@ function signingSecret() {
 function communityCodeHash() {
   const codes = getCommunityJoinCodes();
   return crypto.createHash("sha256").update(codes.join("|")).digest("hex");
+}
+
+export function currentCommunityCodeHash() {
+  return communityCodeHash();
 }
 
 function sign(body: string) {
@@ -97,6 +107,11 @@ export function hasCommunityAccessCookieValue(token: string | undefined | null) 
   return payload?.v === 1 && payload.codeHash === communityCodeHash();
 }
 
+export function hasStoredCommunityAccessRecord(record: StoredCommunityAccessRecord | null | undefined) {
+  if (!isCommunityCodeRequired()) return true;
+  return String(record?.communityAccessCodeHash ?? "").trim() === communityCodeHash();
+}
+
 export async function hasCommunityAccess() {
   if (!isCommunityCodeRequired()) return true;
   const store = await cookies();
@@ -106,4 +121,34 @@ export async function hasCommunityAccess() {
 export function hasCommunityAccessFromRequest(req: NextRequest) {
   if (!isCommunityCodeRequired()) return true;
   return hasCommunityAccessCookieValue(req.cookies.get(COMMUNITY_ACCESS_COOKIE)?.value);
+}
+
+export async function hasStoredCommunityAccessForDiscordUser(discordUserId: string) {
+  if (!isCommunityCodeRequired()) return true;
+
+  await dbConnect();
+  const link = await DiscordLink.findOne(
+    { discordUserId: String(discordUserId).trim() },
+    { communityAccessCodeHash: 1 }
+  ).lean<StoredCommunityAccessRecord | null>();
+
+  return hasStoredCommunityAccessRecord(link);
+}
+
+export async function grantStoredCommunityAccessForDiscordUser(discordUserId: string) {
+  if (!isCommunityCodeRequired()) return true;
+
+  await dbConnect();
+  const updated = await DiscordLink.findOneAndUpdate(
+    { discordUserId: String(discordUserId).trim() },
+    {
+      $set: {
+        communityAccessCodeHash: communityCodeHash(),
+        communityAccessGrantedAt: new Date(),
+      },
+    },
+    { new: true, projection: { _id: 1 } }
+  ).lean<{ _id?: unknown } | null>();
+
+  return !!updated?._id;
 }

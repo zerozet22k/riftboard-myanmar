@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { hasStoredCommunityAccessRecord } from "@/lib/communityAccess";
 import { dbConnect } from "@/lib/mongodb";
 import {
   exchangeDiscordCode,
@@ -22,6 +23,7 @@ import {
   setDiscordSessionCookie,
   setPendingDiscordBindCookie,
 } from "@/lib/discordSession";
+import { isCommunityCodeRequired } from "@/lib/runtimeConfig";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,6 +43,15 @@ function redirectToReturnPath(req: NextRequest, returnTo: string, riotId: string
     target.searchParams.set("riotId", riotId);
     if (message) target.searchParams.set("message", message);
   }
+  return NextResponse.redirect(target);
+}
+
+function redirectToCommunityCodeStep(req: NextRequest, returnTo: string, riotId: string) {
+  const target = new URL("/discord/linked-roles", req.url);
+  target.searchParams.set("status", "linked");
+  target.searchParams.set("message", "community-code-required");
+  target.searchParams.set("riotId", riotId);
+  target.searchParams.set("returnTo", normalizeReturnTo(returnTo));
   return NextResponse.redirect(target);
 }
 
@@ -135,12 +146,12 @@ export async function GET(req: NextRequest) {
       syncMessage = "discord-role-sync-failed";
     }
 
-    const response = redirectToReturnPath(
-      req,
-      storedState.returnTo,
-      `${bound.player.gameName}#${bound.player.tagLine}`,
-      syncMessage
-    );
+    const riotId = `${bound.player.gameName}#${bound.player.tagLine}`;
+    const requiresCommunityCode =
+      isCommunityCodeRequired() && !hasStoredCommunityAccessRecord(bound.link);
+    const response = requiresCommunityCode
+      ? redirectToCommunityCodeStep(req, storedState.returnTo, riotId)
+      : redirectToReturnPath(req, storedState.returnTo, riotId, syncMessage);
     setDiscordSessionCookie(
       response,
       { discordUserId: discordUser.id },

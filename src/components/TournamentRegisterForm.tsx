@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
@@ -224,12 +223,15 @@ export default function TournamentRegisterForm({
           <div className="text-sm text-zinc-300">
             Connect Discord before joining this tournament. Manual Riot roster entry is disabled.
           </div>
-          <Link
-            href={`/api/discord/oauth/start?returnTo=${encodeURIComponent(`/tournaments/${slug}`)}`}
-            className="mt-4 inline-flex rounded-2xl bg-emerald-500/90 px-4 py-3 text-sm font-semibold text-black transition hover:bg-emerald-400"
-          >
-            Connect Discord
-          </Link>
+          <form action="/api/discord/oauth/start" method="GET" className="mt-4">
+            <input type="hidden" name="returnTo" value={`/tournaments/${slug}`} />
+            <button
+              type="submit"
+              className="inline-flex rounded-2xl bg-emerald-500/90 px-4 py-3 text-sm font-semibold text-black transition hover:bg-emerald-400"
+            >
+              Connect Discord
+            </button>
+          </form>
         </div>
       ) : viewerTeam ? (
         <div className="space-y-4">

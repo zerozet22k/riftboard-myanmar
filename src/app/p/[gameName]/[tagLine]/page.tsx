@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import MatchHistory, { type MatchRow } from "@/components/MatchHistory";
 import ProfileAvatar from "@/components/ProfileAvatar";
+import ProfileCommentsSection from "@/components/ProfileCommentsSection";
 import ProfileRefreshButton from "@/components/ProfileRefreshButton";
 import RankEmblem from "@/components/RankEmblem";
 import { getLatestDdragonVersion } from "@/lib/ddragon";
@@ -12,8 +13,14 @@ import {
   formatMetaDateTime as formatDisplayMetaDateTime,
   formatNumber,
 } from "@/lib/displayTime";
+import { getOptionalDiscordSession } from "@/lib/discordSession";
 import { dbConnect } from "@/lib/mongodb";
 import { buildPlayerLookupQuery, canonicalPlayerPath } from "@/lib/playerIdentity";
+import {
+  serializeProfileComment,
+  type ProfileCommentView,
+  type StoredProfileComment,
+} from "@/lib/profileComments";
 import { bestRankSnapshot } from "@/lib/rank";
 import {
   absoluteUrl,
@@ -24,6 +31,7 @@ import {
   websiteSchemaId,
 } from "@/lib/seo";
 import { Player } from "@/models/player";
+import { ProfileComment } from "@/models/profileComment";
 import { PlayerMatch } from "@/models/playerMatch";
 import { RankEntry } from "@/models/rankEntry";
 
@@ -268,7 +276,7 @@ export default async function PlayerProfilePage({
     redirect(canonicalPath);
   }
 
-  const [ddVer, champNames, rankHistory, matchDocs] = await Promise.all([
+  const [ddVer, champNames, rankHistory, matchDocs, viewer, commentDocs] = await Promise.all([
     getLatestDdragonVersion(),
     getChampNameMap(),
     RankEntry.find(
@@ -306,6 +314,20 @@ export default async function PlayerProfilePage({
       .sort({ gameCreation: -1, _id: -1 })
       .limit(10)
       .lean() as Promise<MatchDoc[]>,
+    getOptionalDiscordSession(),
+    ProfileComment.find(
+      { profilePlayerId: player._id },
+      {
+        authorDiscordUsername: 1,
+        authorGameName: 1,
+        authorTagLine: 1,
+        body: 1,
+        createdAt: 1,
+      }
+    )
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(100)
+      .lean() as Promise<StoredProfileComment[]>,
   ]);
 
   const initialMatches: MatchRow[] = matchDocs.map((match) => ({
@@ -355,6 +377,7 @@ export default async function PlayerProfilePage({
   const masteryUpdatedShort = formatDisplayMetaDateTime(player.masterySyncedAt);
   const masteryPath = `${canonicalPath}/mastery`;
   const initialCursor = cursorFromLast(matchDocs[matchDocs.length - 1]);
+  const initialComments: ProfileCommentView[] = commentDocs.map(serializeProfileComment);
   const profileJsonLd = {
     "@context": "https://schema.org",
     "@type": "ProfilePage",
@@ -549,6 +572,23 @@ export default async function PlayerProfilePage({
                 )}
               </div>
             </section>
+
+            <ProfileCommentsSection
+              gameName={canonicalGameName}
+              tagLine={canonicalTagLineLower}
+              profilePath={canonicalPath}
+              initialComments={initialComments}
+              viewer={
+                viewer
+                  ? {
+                      discordUsername: viewer.discordUsername,
+                      gameName: viewer.gameName,
+                      tagLine: viewer.tagLine,
+                      isProfileOwner: viewer.playerId === String(player._id),
+                    }
+                  : null
+              }
+            />
 
             <section className="space-y-3">
               <div className="flex items-center justify-between gap-3">

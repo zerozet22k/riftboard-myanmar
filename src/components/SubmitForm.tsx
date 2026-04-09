@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
@@ -159,12 +158,15 @@ export default function SubmitForm({
         </button>
 
         {showReconnectLink ? (
-          <Link
-            href={`/api/discord/oauth/start?returnTo=${encodeURIComponent(returnTo)}`}
-            className="rounded-xl border border-white/10 px-4 py-2 text-sm text-zinc-200 transition hover:bg-white/5"
-          >
-            Reconnect Discord
-          </Link>
+          <form action="/api/discord/oauth/start" method="GET">
+            <input type="hidden" name="returnTo" value={returnTo} />
+            <button
+              type="submit"
+              className="rounded-xl border border-white/10 px-4 py-2 text-sm text-zinc-200 transition hover:bg-white/5"
+            >
+              Reconnect Discord
+            </button>
+          </form>
         ) : null}
       </div>
 

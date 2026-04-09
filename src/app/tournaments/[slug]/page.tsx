@@ -6,6 +6,7 @@ import TournamentBracket, {
   type TournamentBracketTeam,
 } from "@/components/TournamentBracket";
 import TournamentRegisterForm from "@/components/TournamentRegisterForm";
+import { hasCommunityAccess, hasStoredCommunityAccessForDiscordUser } from "@/lib/communityAccess";
 import { formatCompactDateTime } from "@/lib/displayTime";
 import { getOptionalDiscordSession } from "@/lib/discordSession";
 import { dbConnect } from "@/lib/mongodb";
@@ -134,7 +135,7 @@ export default async function TournamentPage({
   const now = new Date();
   await dbConnect();
 
-  const [tournament, viewer] = await Promise.all([
+  const [tournament, viewer, browserCommunityAccess] = await Promise.all([
     Tournament.findOne(
       { slug: String(resolved.slug).trim().toLowerCase() },
       {
@@ -158,8 +159,13 @@ export default async function TournamentPage({
       }
     ).lean(),
     getOptionalDiscordSession(),
+    hasCommunityAccess(),
   ]);
   const viewerDiscordUserId = viewer?.discordUserId ?? "";
+  const storedCommunityAccess = viewer?.discordUserId
+    ? await hasStoredCommunityAccessForDiscordUser(viewer.discordUserId)
+    : false;
+  const joinCodeRequired = !!getCommunityJoinCode() && !(browserCommunityAccess || storedCommunityAccess);
 
   if (!tournament?._id) notFound();
 
@@ -420,7 +426,7 @@ export default async function TournamentPage({
               teamSize={tournament.teamSize ?? 5}
               disabled={registrationClosed}
               statusLabel={displayTournamentStatus(tournament.status as never)}
-              joinCodeRequired={!!getCommunityJoinCode()}
+              joinCodeRequired={joinCodeRequired}
               viewer={
                 viewer
                   ? {

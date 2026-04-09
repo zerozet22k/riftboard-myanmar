@@ -1,6 +1,12 @@
 import { revalidatePath } from "next/cache";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import {
+  grantStoredCommunityAccessForDiscordUser,
+  hasCommunityAccessFromRequest,
+  hasStoredCommunityAccessForDiscordUser,
+  setCommunityAccessCookie,
+} from "@/lib/communityAccess";
 import { recordIntegrationEvent } from "@/lib/integrationEvents";
 import { dbConnect } from "@/lib/mongodb";
 import { requireDiscordSessionFromRequest } from "@/lib/discordSession";
@@ -32,7 +38,11 @@ export async function POST(
     }
 
     const requiredCodes = getCommunityJoinCodes();
-    if (requiredCodes.length && !requiredCodes.includes(String(parsed.data.code ?? "").trim())) {
+    const unlockedBrowser = hasCommunityAccessFromRequest(req);
+    const unlockedAccount = await hasStoredCommunityAccessForDiscordUser(session.discordUserId);
+    const providedCode = String(parsed.data.code ?? "").trim();
+    const acceptedCode = requiredCodes.includes(providedCode);
+    if (requiredCodes.length && !unlockedBrowser && !unlockedAccount && !acceptedCode) {
       return NextResponse.json({ ok: false, error: "Wrong community code" }, { status: 401 });
     }
 
@@ -155,12 +165,21 @@ export async function POST(
     revalidatePath(`/tournaments/${tournament.slug}`);
     revalidatePath(`/tournaments/${tournament.slug}/manage`);
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       ok: true,
       teamId: String(created._id),
       status: created.status,
       message: (tournament.teamSize ?? 1) === 1 ? "You are registered." : "Team created. Invite teammates next.",
     });
+
+    if (acceptedCode) {
+      await grantStoredCommunityAccessForDiscordUser(session.discordUserId);
+      setCommunityAccessCookie(response, req.nextUrl.protocol === "https:");
+    } else if (!unlockedBrowser && unlockedAccount) {
+      setCommunityAccessCookie(response, req.nextUrl.protocol === "https:");
+    }
+
+    return response;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Registration failed";
     return NextResponse.json(
