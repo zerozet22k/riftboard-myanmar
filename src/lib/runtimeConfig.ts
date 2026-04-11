@@ -84,6 +84,10 @@ export function getSchedulerTokens() {
   return Array.from(new Set(values));
 }
 
+export function getAdminSecret() {
+  return firstNonEmpty([process.env.ADMIN_SECRET]);
+}
+
 export function getAppBaseUrl() {
   return firstNonEmpty([
     normalizeUrl(process.env.APP_BASE_URL),
