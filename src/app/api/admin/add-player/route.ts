@@ -81,6 +81,7 @@ export async function POST(req: NextRequest) {
 
     revalidatePath("/");
     revalidatePath("/leaderboard");
+    revalidatePath("/tft");
     revalidatePath(canonicalPath);
 
     return NextResponse.json({

@@ -12,6 +12,7 @@ type SiteHeaderProps = {
 
 const NAV_ITEMS = [
   { href: "/leaderboard", label: "Leaderboard" },
+  { href: "/tft", label: "TFT" },
   { href: "/tournaments", label: "Tournaments" },
 ];
 

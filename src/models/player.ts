@@ -51,6 +51,7 @@ export type PlayerDoc = {
 
   solo: RankSnapshot;
   flex: RankSnapshot;
+  tft: RankSnapshot;
 
 
   mains?: MainChampion[];
@@ -138,6 +139,7 @@ const PlayerSchema = new Schema<PlayerDoc>(
 
     solo: { type: RankSnapshotSchema, default: () => ({}) },
     flex: { type: RankSnapshotSchema, default: () => ({}) },
+    tft: { type: RankSnapshotSchema, default: () => ({}) },
 
     mains: { type: [MainChampionSchema], default: () => [] },
     masterySyncedAt: Date,
@@ -151,7 +153,7 @@ const PlayerSchema = new Schema<PlayerDoc>(
 
     track: {
       lol: { type: Boolean, default: true },
-      tft: { type: Boolean, default: false },
+      tft: { type: Boolean, default: true },
     },
   },
   { timestamps: true }

@@ -84,6 +84,7 @@ export async function GET(req: NextRequest) {
 
         revalidatePath("/");
         revalidatePath("/leaderboard");
+        revalidatePath("/tft");
 
         return NextResponse.json({ ok: true, result });
     } catch (e: unknown) {

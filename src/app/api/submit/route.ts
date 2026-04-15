@@ -83,6 +83,7 @@ export async function POST(req: NextRequest) {
 
     revalidatePath("/");
     revalidatePath("/leaderboard");
+    revalidatePath("/tft");
 
     const canonicalPath = canonicalPlayerPath(player.gameName, player.tagLine);
     revalidatePath(canonicalPath);

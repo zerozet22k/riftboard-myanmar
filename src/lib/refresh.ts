@@ -1,11 +1,12 @@
 // src/lib/refresh.ts
 import { dbConnect } from "@/lib/mongodb";
 import { Player } from "@/models/player";
-import { RankEntry, LOL_QUEUES } from "@/models/rankEntry";
+import { RankEntry, RANK_QUEUES } from "@/models/rankEntry";
 import { PlayerMastery } from "@/models/playerMastery";
 import { Match } from "@/models/match";
 import { PlayerMatch } from "@/models/playerMatch";
 import {
+  getActiveShardByPuuid,
   getAccountByPuuid,
   findSeaPlatformByPuuid,
   getLeagueEntriesByPuuid,
@@ -14,6 +15,8 @@ import {
   getChampionMasteriesByPuuid,
   getMatchIdsByPuuid,
   getMatchById,
+  getTftLeagueEntriesByPuuid,
+  hasTftApiKey,
   platformToMatchRegion,
   isRiot404,
   isRiot429,
@@ -23,6 +26,7 @@ import { mergePlayers } from "@/lib/playerMerge";
 
 const SOLO = "RANKED_SOLO_5x5";
 const FLEX = "RANKED_FLEX_SR";
+const TFT = "RANKED_TFT";
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -72,7 +76,7 @@ const MAX_MATCH_SYNC_COUNT = 100;
 const MATCH_SYNC_CONCURRENCY = 3;
 
 function lastSuccessfulRefreshAt(p: any): Date | null {
-  const candidates = [p?.lastRefreshAt, p?.solo?.fetchedAt, p?.flex?.fetchedAt]
+  const candidates = [p?.lastRefreshAt, p?.solo?.fetchedAt, p?.flex?.fetchedAt, p?.tft?.fetchedAt]
     .filter(Boolean)
     .map((d: any) => new Date(d));
   if (!candidates.length) return null;
@@ -101,7 +105,7 @@ async function insertRankIfChanged(input: {
   losses?: number;
   fetchedAt: Date;
 }) {
-  if (!LOL_QUEUES.includes(input.queue as any)) return;
+  if (!RANK_QUEUES.includes(input.queue as any)) return;
 
   const prev = await RankEntry.findOne({ playerId: input.playerId, queue: input.queue })
     .sort({ fetchedAt: -1 })
@@ -415,6 +419,44 @@ export async function refreshPlayerById(
   player.flex = flex
     ? { tier: flex.tier, division: flex.rank, lp: flex.leaguePoints, wins: flex.wins, losses: flex.losses, fetchedAt: now }
     : { fetchedAt: now };
+
+  if (hasTftApiKey() && player?.track?.tft !== false) {
+    try {
+      const shard = await getActiveShardByPuuid("tft", puuid);
+      const tftPlatform = String(shard.activeShard ?? "").trim().toLowerCase();
+      const tftEntries = tftPlatform ? await getTftLeagueEntriesByPuuid(tftPlatform, puuid) : [];
+      const tft = tftEntries.find((entry) => entry.queueType === TFT);
+
+      player.tft = tft
+        ? {
+            tier: tft.tier,
+            division: tft.rank,
+            lp: tft.leaguePoints,
+            wins: tft.wins,
+            losses: tft.losses,
+            fetchedAt: now,
+          }
+        : { fetchedAt: now };
+
+      if (tft) {
+        await insertRankIfChanged({
+          playerId: player._id,
+          queue: TFT,
+          tier: tft.tier,
+          division: tft.rank,
+          lp: tft.leaguePoints,
+          wins: tft.wins,
+          losses: tft.losses,
+          fetchedAt: now,
+        });
+      }
+    } catch (e) {
+      if (!isRiot404(e)) {
+        console.error("TFT sync failed:", e);
+      }
+      player.tft = { fetchedAt: now };
+    }
+  }
 
   // ✅ FIX: don’t silently swallow mastery write errors anymore
   try {

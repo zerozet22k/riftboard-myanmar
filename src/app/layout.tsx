@@ -43,6 +43,8 @@ export const metadata: Metadata = {
   keywords: [
     "Myanmar League of Legends",
     "LoL leaderboard Myanmar",
+    "Myanmar TFT leaderboard",
+    "Teamfight Tactics Myanmar",
     "RiftBoard Myanmar",
     "League of Legends player profiles",
     "LoL match history",

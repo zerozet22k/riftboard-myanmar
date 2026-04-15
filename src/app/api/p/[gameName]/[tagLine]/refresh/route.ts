@@ -79,6 +79,7 @@ export async function POST(
 
     revalidatePath(canonicalPath);
     revalidatePath("/leaderboard");
+    revalidatePath("/tft");
     revalidatePath("/");
 
     return NextResponse.json({ ok: true, player: out });

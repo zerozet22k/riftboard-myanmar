@@ -48,6 +48,12 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.8,
     },
     {
+      url: absoluteUrl("/tft"),
+      lastModified: new Date(),
+      changeFrequency: "daily",
+      priority: 0.7,
+    },
+    {
       url: absoluteUrl("/privacy"),
       lastModified: new Date(),
       changeFrequency: "yearly",

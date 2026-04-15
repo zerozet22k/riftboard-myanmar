@@ -38,6 +38,11 @@ export type ChampionMastery = {
 export type MatchId = string;
 
 export type MatchV5 = unknown;
+export type ActiveShard = {
+  puuid: string;
+  game: string;
+  activeShard: string;
+};
 
 export type TournamentCodeParams = {
   mapType?: string;
@@ -62,11 +67,24 @@ function optEnv(name: string) {
   return v ? v.trim() : undefined;
 }
 
-const API_KEY = () => mustEnv("RIOT_API_KEY");
 const ACCOUNT_REGIONS = ["americas", "asia", "europe"] as const;
 
-export function getRiotApiKey() {
-  return API_KEY();
+function getLolApiKey() {
+  return mustEnv("RIOT_API_KEY");
+}
+
+function getTftApiKey() {
+  const key = optEnv("RIOT_TFT_API_KEY") || optEnv("TFT_API_KEY");
+  if (!key) throw new Error("Missing env: RIOT_TFT_API_KEY");
+  return key;
+}
+
+export function hasTftApiKey() {
+  return !!(optEnv("RIOT_TFT_API_KEY") || optEnv("TFT_API_KEY"));
+}
+
+export function getRiotApiKey(game: "lol" | "tft" = "lol") {
+  return game === "tft" ? getTftApiKey() : getLolApiKey();
 }
 
 function ACCOUNT_REGION(): "americas" | "asia" | "europe" {
@@ -190,13 +208,14 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function riotFetch<T>(url: string, opts?: { maxRetries?: number }): Promise<T> {
+async function riotFetch<T>(url: string, opts?: { maxRetries?: number; apiKey?: string }): Promise<T> {
   const maxRetries = opts?.maxRetries ?? 3;
+  const apiKey = opts?.apiKey ?? getLolApiKey();
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const res = await fetch(url, {
       headers: {
-        "X-Riot-Token": API_KEY(),
+        "X-Riot-Token": apiKey,
         "Accept-Language": "en-US,en;q=0.9",
       },
       cache: "no-store",
@@ -244,15 +263,16 @@ export async function getPuuidByRiotId(gameName: string, tagLine: string) {
 async function riotFetchWithBody<T>(
   url: string,
   body: unknown,
-  opts?: { maxRetries?: number }
+  opts?: { maxRetries?: number; apiKey?: string }
 ): Promise<T> {
   const maxRetries = opts?.maxRetries ?? 3;
+  const apiKey = opts?.apiKey ?? getLolApiKey();
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const res = await fetch(url, {
       method: "POST",
       headers: {
-        "X-Riot-Token": API_KEY(),
+        "X-Riot-Token": apiKey,
         "Accept-Language": "en-US,en;q=0.9",
         "Content-Type": "application/json",
       },
@@ -302,6 +322,23 @@ export async function getAccountByPuuid(puuid: string) {
   throw new RiotApiError(404, "Riot account not found for puuid");
 }
 
+export async function getActiveShardByPuuid(game: "lol" | "tft", puuid: string) {
+  for (const region of ACCOUNT_REGIONS) {
+    const url =
+      `https://${region}.api.riotgames.com/riot/account/v1/active-shards/by-game/` +
+      `${encodeURIComponent(game)}/by-puuid/${encodeURIComponent(puuid)}`;
+
+    try {
+      return await riotFetch<ActiveShard>(url);
+    } catch (e) {
+      if (isRiot404(e)) continue;
+      throw e;
+    }
+  }
+
+  throw new RiotApiError(404, `Active shard not found for ${game} account`);
+}
+
 export async function getSummonerByPuuid(platform: string, puuid: string) {
   const host = platform.toLowerCase();
   const url = `https://${host}.api.riotgames.com/lol/summoner/v4/summoners/by-puuid/${encodeURIComponent(
@@ -316,6 +353,14 @@ export async function getLeagueEntriesByPuuid(platform: string, puuid: string) {
     puuid
   )}`;
   return riotFetch<LeagueEntry[]>(url);
+}
+
+export async function getTftLeagueEntriesByPuuid(platform: string, puuid: string) {
+  const host = platform.toLowerCase();
+  const url = `https://${host}.api.riotgames.com/tft/league/v1/entries/by-puuid/${encodeURIComponent(
+    puuid
+  )}`;
+  return riotFetch<LeagueEntry[]>(url, { apiKey: getRiotApiKey("tft") });
 }
 
 export async function findSeaPlatformByPuuid(puuid: string) {
