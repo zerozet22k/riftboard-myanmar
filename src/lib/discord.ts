@@ -573,6 +573,18 @@ export async function registerDiscordGlobalCommands() {
   );
 }
 
+export async function clearDiscordGlobalCommands() {
+  return discordApi<unknown>(
+    `/applications/${encodeURIComponent(getDiscordClientId())}/commands`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify([]),
+    },
+    `Bot ${getDiscordBotToken()}`
+  );
+}
+
 export async function registerDiscordGuildCommands() {
   const guildId = getDiscordGuildId();
   if (!guildId) throw new Error("Missing env: DISCORD_GUILD_ID");

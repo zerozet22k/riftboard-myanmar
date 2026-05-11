@@ -129,6 +129,12 @@ function mustEnv(name) {
   return value;
 }
 
+function envFlag(name, defaultValue = false) {
+  const raw = process.env[name]?.trim().toLowerCase();
+  if (!raw) return defaultValue;
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+}
+
 async function discordApi(pathname, init) {
   const res = await fetch(`${DISCORD_API_BASE}${pathname}`, {
     ...init,
@@ -181,19 +187,34 @@ async function main() {
     body: JSON.stringify(LINKED_ROLE_METADATA),
   });
 
-  console.log("Registering global commands...");
-  await discordApi(`/applications/${applicationId}/commands`, {
-    method: "PUT",
-    body: JSON.stringify(COMMANDS),
-  });
+  const registerGlobalCommands = envFlag("DISCORD_REGISTER_GLOBAL_COMMANDS", !guildId);
 
   if (guildId) {
+    if (registerGlobalCommands) {
+      console.log("Registering global commands...");
+      await discordApi(`/applications/${applicationId}/commands`, {
+        method: "PUT",
+        body: JSON.stringify(COMMANDS),
+      });
+    } else {
+      console.log("Clearing global commands to avoid duplicate global + guild slash commands...");
+      await discordApi(`/applications/${applicationId}/commands`, {
+        method: "PUT",
+        body: JSON.stringify([]),
+      });
+    }
+
     console.log(`Registering guild commands for guild ${guildId}...`);
     await discordApi(`/applications/${applicationId}/guilds/${guildId}/commands`, {
       method: "PUT",
       body: JSON.stringify(COMMANDS),
     });
   } else {
+    console.log("Registering global commands because DISCORD_GUILD_ID is not set...");
+    await discordApi(`/applications/${applicationId}/commands`, {
+      method: "PUT",
+      body: JSON.stringify(COMMANDS),
+    });
     console.log("Skipping guild command registration because DISCORD_GUILD_ID is not set.");
   }
 
@@ -207,7 +228,11 @@ async function main() {
   });
 
   console.log("Discord registration complete.");
-  console.log("Global commands can take a little while to propagate across Discord.");
+  if (guildId && !registerGlobalCommands) {
+    console.log("Using guild commands only. If duplicates remain in Discord, restart the client or wait a few minutes.");
+  } else {
+    console.log("Global commands can take a little while to propagate across Discord.");
+  }
   console.log(`Interactions Endpoint URL: ${interactionsEndpointUrl}`);
   console.log(`Linked Roles Verification URL: ${linkedRolesVerificationUrl}`);
 }

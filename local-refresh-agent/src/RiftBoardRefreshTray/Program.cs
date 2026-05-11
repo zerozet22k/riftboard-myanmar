@@ -1198,7 +1198,7 @@ internal sealed class AgentConfig
     public bool Force { get; init; }
     public bool SyncMatches { get; init; } = true;
     public int MatchesCount { get; init; } = 10;
-    public int StartupTimeoutSec { get; init; } = 45;
+    public int StartupTimeoutSec { get; init; } = 120;
 
     public AgentConfig Normalize()
     {
@@ -1212,7 +1212,7 @@ internal sealed class AgentConfig
             Force = Force,
             SyncMatches = SyncMatches,
             MatchesCount = Math.Max(1, Math.Min(100, MatchesCount)),
-            StartupTimeoutSec = Math.Max(10, Math.Min(120, StartupTimeoutSec)),
+            StartupTimeoutSec = Math.Max(10, Math.Min(300, StartupTimeoutSec)),
         };
     }
 

@@ -329,7 +329,7 @@ export async function getActiveShardByPuuid(game: "lol" | "tft", puuid: string) 
       `${encodeURIComponent(game)}/by-puuid/${encodeURIComponent(puuid)}`;
 
     try {
-      return await riotFetch<ActiveShard>(url);
+      return await riotFetch<ActiveShard>(url, { apiKey: getRiotApiKey(game) });
     } catch (e) {
       if (isRiot404(e)) continue;
       throw e;
@@ -361,6 +361,41 @@ export async function getTftLeagueEntriesByPuuid(platform: string, puuid: string
     puuid
   )}`;
   return riotFetch<LeagueEntry[]>(url, { apiKey: getRiotApiKey("tft") });
+}
+
+export async function findTftLeagueEntriesByPuuid(puuid: string, preferredPlatform?: string | null) {
+  const candidates = new Set<string>();
+  const preferred = String(preferredPlatform ?? "").trim().toLowerCase();
+  if (preferred && preferred !== "auto") candidates.add(preferred);
+
+  try {
+    const shard = await getActiveShardByPuuid("tft", puuid);
+    const shardPlatform = String(shard.activeShard ?? "").trim().toLowerCase();
+    if (shardPlatform) candidates.add(shardPlatform);
+  } catch (e) {
+    if (!isRiot404(e)) throw e;
+  }
+
+  for (const platform of ["sg2", "th2", "ph2", "vn2", "tw2"]) {
+    candidates.add(platform);
+  }
+
+  for (const platform of candidates) {
+    try {
+      return {
+        platform,
+        entries: await getTftLeagueEntriesByPuuid(platform, puuid),
+      };
+    } catch (e) {
+      if (isRiot404(e)) continue;
+      throw e;
+    }
+  }
+
+  return {
+    platform: preferred || null,
+    entries: [],
+  };
 }
 
 export async function findSeaPlatformByPuuid(puuid: string) {

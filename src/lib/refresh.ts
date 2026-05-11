@@ -15,7 +15,7 @@ import {
   getChampionMasteriesByPuuid,
   getMatchIdsByPuuid,
   getMatchById,
-  getTftLeagueEntriesByPuuid,
+  findTftLeagueEntriesByPuuid,
   hasTftApiKey,
   platformToMatchRegion,
   isRiot404,
@@ -423,9 +423,7 @@ export async function refreshPlayerById(
 
   if (hasTftApiKey() && player?.track?.tft !== false) {
     try {
-      const shard = await getActiveShardByPuuid("tft", puuid);
-      const tftPlatform = String(shard.activeShard ?? "").trim().toLowerCase();
-      const tftEntries = tftPlatform ? await getTftLeagueEntriesByPuuid(tftPlatform, puuid) : [];
+      const { entries: tftEntries } = await findTftLeagueEntriesByPuuid(puuid, platform);
       const tft = tftEntries.find((entry) => entry.queueType === TFT);
 
       player.tft = tft

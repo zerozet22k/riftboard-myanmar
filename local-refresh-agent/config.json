@@ -7,5 +7,5 @@
   "force": false,
   "syncMatches": true,
   "matchesCount": 10,
-  "startupTimeoutSec": 45
+  "startupTimeoutSec": 120
 }
