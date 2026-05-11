@@ -8,12 +8,16 @@ import {
 } from "@/lib/discord";
 import {
   extractRiotCandidatesFromDiscordConnections,
+  saveVerifiedDiscordLinkFromCandidate,
+  syncDiscordLinkedRoleForStoredLink,
 } from "@/lib/discordLinkedRoles";
+import { syncDiscordGuildRankRoleForStoredLink } from "@/lib/discordGuildRoles";
 import {
   clearDiscordOAuthStateCookie,
   clearPendingDiscordBindCookie,
   makePendingDiscordBindPayload,
   readDiscordOAuthStateCookieValue,
+  setDiscordSessionCookie,
   setPendingDiscordBindCookie,
 } from "@/lib/discordSession";
 
@@ -26,6 +30,26 @@ function redirectWithStatus(req: NextRequest, status: string, message?: string, 
   if (message) url.searchParams.set("message", message);
   if (riotId) url.searchParams.set("riotId", riotId);
   return NextResponse.redirect(url);
+}
+
+async function syncDiscordRoles(linkId: string) {
+  let failed = false;
+
+  try {
+    await syncDiscordLinkedRoleForStoredLink(linkId, { force: true });
+  } catch (error) {
+    failed = true;
+    console.error("[discord/oauth] linked role sync failed", error);
+  }
+
+  try {
+    await syncDiscordGuildRankRoleForStoredLink(linkId, { force: true });
+  } catch (error) {
+    failed = true;
+    console.error("[discord/oauth] guild rank role sync failed", error);
+  }
+
+  return failed;
 }
 
 export async function GET(req: NextRequest) {
@@ -70,6 +94,26 @@ export async function GET(req: NextRequest) {
     const candidates = extractRiotCandidatesFromDiscordConnections(connections);
     if (!candidates.length) {
       const response = redirectWithStatus(req, "error", "no-riot-connection");
+      clearDiscordOAuthStateCookie(response);
+      clearPendingDiscordBindCookie(response);
+      return response;
+    }
+
+    if (candidates.length === 1) {
+      const bound = await saveVerifiedDiscordLinkFromCandidate({
+        discordUser,
+        token,
+        candidate: candidates[0],
+      });
+      const syncFailed = await syncDiscordRoles(String(bound.link._id));
+      const response = redirectWithStatus(
+        req,
+        "linked",
+        syncFailed ? "discord-role-sync-failed" : undefined,
+        `${bound.player.gameName}#${bound.player.tagLine}`
+      );
+
+      setDiscordSessionCookie(response, { discordUserId: discordUser.id }, req.nextUrl.protocol === "https:");
       clearDiscordOAuthStateCookie(response);
       clearPendingDiscordBindCookie(response);
       return response;

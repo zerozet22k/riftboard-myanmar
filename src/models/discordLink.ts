@@ -22,6 +22,7 @@ export type DiscordLinkDoc = {
   metadataSnapshot?: Record<string, unknown> | null;
   guildRankRoleTier?: string | null;
   guildRankRoleName?: string | null;
+  guildRankRolesSnapshot?: Record<string, string | null> | null;
   guildRankRolesSyncedAt?: Date | null;
   lastSyncedAt?: Date | null;
 };
@@ -53,6 +54,7 @@ const DiscordLinkSchema = new Schema<DiscordLinkDoc>(
     metadataSnapshot: { type: Schema.Types.Mixed, default: null },
     guildRankRoleTier: { type: String, trim: true, default: null },
     guildRankRoleName: { type: String, trim: true, default: null },
+    guildRankRolesSnapshot: { type: Schema.Types.Mixed, default: null },
     guildRankRolesSyncedAt: { type: Date, default: null },
     lastSyncedAt: { type: Date, default: null },
   },

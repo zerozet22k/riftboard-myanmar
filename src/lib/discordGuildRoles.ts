@@ -18,6 +18,12 @@ type GuildRolePlayerProjection = {
   solo?: {
     tier?: string | null;
   } | null;
+  tft?: {
+    tier?: string | null;
+  } | null;
+  flex?: {
+    tier?: string | null;
+  } | null;
 };
 
 type ManagedRoleSpec = {
@@ -25,10 +31,18 @@ type ManagedRoleSpec = {
   color: number;
 };
 
+type ManagedRankQueueKey = "solo" | "tft" | "flex";
+
+type ManagedRankQueue = {
+  key: ManagedRankQueueKey;
+  label: string;
+  roleLabel: string | null;
+};
+
 type ManagedRoleContext = {
   guildId: string;
   rolesByName: Map<string, DiscordGuildRole>;
-  managedRoles: DiscordGuildRole[];
+  managedRolesByQueue: Map<ManagedRankQueueKey, DiscordGuildRole[]>;
   createdRoleNames: string[];
 };
 
@@ -49,6 +63,12 @@ const MANAGED_RANK_ROLE_SPECS: ManagedRoleSpec[] = [
   { tier: "IRON", color: 0x5d6d7e },
 ];
 
+const MANAGED_RANK_QUEUES: ManagedRankQueue[] = [
+  { key: "solo", label: "Solo Queue", roleLabel: null },
+  { key: "tft", label: "TFT", roleLabel: "TFT" },
+  { key: "flex", label: "Ranked Flex", roleLabel: "Flex" },
+];
+
 function toTitleCase(value: string) {
   return value
     .toLowerCase()
@@ -62,14 +82,11 @@ function rankRolePrefix() {
   return String(process.env.DISCORD_RANK_ROLE_PREFIX ?? "Rank").trim();
 }
 
-function managedRoleName(tier: string) {
+function managedRoleName(queue: ManagedRankQueue, tier: string) {
   const prettyTier = toTitleCase(tier);
   const prefix = rankRolePrefix();
-  return prefix ? `${prefix}: ${prettyTier}` : prettyTier;
-}
-
-function managedRoleNames() {
-  return MANAGED_RANK_ROLE_SPECS.map((spec) => managedRoleName(spec.tier));
+  const queueTier = queue.roleLabel ? `${queue.roleLabel} ${prettyTier}` : prettyTier;
+  return prefix ? `${prefix}: ${queueTier}` : queueTier;
 }
 
 function normalizeManagedTier(tier?: string | null) {
@@ -82,6 +99,35 @@ function isUnknownMemberError(error: unknown) {
   return /Unknown Member/i.test(message) || /Discord API 404/i.test(message);
 }
 
+function playerTierForQueue(player: GuildRolePlayerProjection, queueKey: ManagedRankQueueKey) {
+  return normalizeManagedTier(player[queueKey]?.tier ?? null);
+}
+
+function guildRankRoleSnapshot(player: GuildRolePlayerProjection) {
+  return Object.fromEntries(
+    MANAGED_RANK_QUEUES.map((queue) => [queue.key, playerTierForQueue(player, queue.key)])
+  ) as Record<ManagedRankQueueKey, string | null>;
+}
+
+function sameGuildRankRoleSnapshot(
+  left: Record<string, string | null> | null | undefined,
+  right: Record<ManagedRankQueueKey, string | null>
+) {
+  if (!left) return false;
+  return MANAGED_RANK_QUEUES.every((queue) =>
+    String(left[queue.key] ?? "") === String(right[queue.key] ?? "")
+  );
+}
+
+function assignedRoleNamesFromSnapshot(snapshot: Record<ManagedRankQueueKey, string | null>) {
+  return Object.fromEntries(
+    MANAGED_RANK_QUEUES.map((queue) => {
+      const tier = snapshot[queue.key];
+      return [queue.key, tier ? managedRoleName(queue, tier) : null];
+    })
+  ) as Record<ManagedRankQueueKey, string | null>;
+}
+
 async function ensureManagedRoleContext(existingRoles?: DiscordGuildRole[]) {
   const guildId = String(getDiscordGuildId() ?? "").trim();
   if (!guildId) throw new Error("Missing env: DISCORD_GUILD_ID");
@@ -90,27 +136,33 @@ async function ensureManagedRoleContext(existingRoles?: DiscordGuildRole[]) {
   const roles = [...(existingRoles ?? (await listDiscordGuildRoles(guildId)))];
   const byName = new Map(roles.map((role) => [String(role.name ?? "").trim(), role]));
 
-  for (const spec of MANAGED_RANK_ROLE_SPECS) {
-    const name = managedRoleName(spec.tier);
-    if (byName.has(name)) continue;
+  for (const queue of MANAGED_RANK_QUEUES) {
+    for (const spec of MANAGED_RANK_ROLE_SPECS) {
+      const name = managedRoleName(queue, spec.tier);
+      if (byName.has(name)) continue;
 
-    const created = await createDiscordGuildRole({
-      guildId,
-      name,
-      color: spec.color,
-      reason: "Create managed Riftboard rank role",
-    });
-    roles.push(created);
-    byName.set(name, created);
-    createdRoleNames.push(name);
+      const created = await createDiscordGuildRole({
+        guildId,
+        name,
+        color: spec.color,
+        reason: `Create managed Riftboard ${queue.label} rank role`,
+      });
+      roles.push(created);
+      byName.set(name, created);
+      createdRoleNames.push(name);
+    }
   }
 
   return {
     guildId,
     rolesByName: byName,
-    managedRoles: managedRoleNames()
-      .map((name) => byName.get(name))
-      .filter((role): role is DiscordGuildRole => !!role?.id),
+    managedRolesByQueue: new Map(
+      MANAGED_RANK_QUEUES.map((queue) => [
+        queue.key,
+        MANAGED_RANK_ROLE_SPECS.map((spec) => byName.get(managedRoleName(queue, spec.tier)))
+          .filter((role): role is DiscordGuildRole => !!role?.id),
+      ])
+    ),
     createdRoleNames,
   } satisfies ManagedRoleContext;
 }
@@ -129,43 +181,52 @@ export async function syncDiscordGuildRankRoleForIdentity(input: {
     Array.isArray(member.roles) ? member.roles.map((roleId) => String(roleId)) : []
   );
 
-  const wantedTier = normalizeManagedTier(input.player.solo?.tier ?? null);
-  const wantedRole = wantedTier ? context.rolesByName.get(managedRoleName(wantedTier)) ?? null : null;
-
   let addedRoleName: string | null = null;
   let removedRoles = 0;
+  const assignedRoleNames = Object.fromEntries(
+    MANAGED_RANK_QUEUES.map((queue) => [queue.key, null])
+  ) as Record<ManagedRankQueueKey, string | null>;
 
-  for (const role of context.managedRoles) {
-    const shouldHave = !!wantedRole && role.id === wantedRole.id;
-    const hasRole = existingRoleIds.has(role.id);
+  for (const queue of MANAGED_RANK_QUEUES) {
+    const wantedTier = playerTierForQueue(input.player, queue.key);
+    const wantedRole = wantedTier
+      ? context.rolesByName.get(managedRoleName(queue, wantedTier)) ?? null
+      : null;
+    assignedRoleNames[queue.key] = wantedRole?.name ?? null;
 
-    if (shouldHave && !hasRole) {
-      await addDiscordGuildMemberRole({
-        guildId: context.guildId,
-        userId: input.discordUserId,
-        roleId: role.id,
-        reason: `Sync Riftboard rank role for ${input.player.gameName}#${input.player.tagLine}`,
-      });
-      addedRoleName = role.name;
-      existingRoleIds.add(role.id);
-      continue;
-    }
+    for (const role of context.managedRolesByQueue.get(queue.key) ?? []) {
+      const shouldHave = !!wantedRole && role.id === wantedRole.id;
+      const hasRole = existingRoleIds.has(role.id);
 
-    if (!shouldHave && hasRole) {
-      await removeDiscordGuildMemberRole({
-        guildId: context.guildId,
-        userId: input.discordUserId,
-        roleId: role.id,
-        reason: `Remove stale Riftboard rank role for ${input.player.gameName}#${input.player.tagLine}`,
-      });
-      removedRoles++;
-      existingRoleIds.delete(role.id);
+      if (shouldHave && !hasRole) {
+        await addDiscordGuildMemberRole({
+          guildId: context.guildId,
+          userId: input.discordUserId,
+          roleId: role.id,
+          reason: `Sync Riftboard ${queue.label} rank role for ${input.player.gameName}#${input.player.tagLine}`,
+        });
+        addedRoleName = role.name;
+        existingRoleIds.add(role.id);
+        continue;
+      }
+
+      if (!shouldHave && hasRole) {
+        await removeDiscordGuildMemberRole({
+          guildId: context.guildId,
+          userId: input.discordUserId,
+          roleId: role.id,
+          reason: `Remove stale Riftboard ${queue.label} rank role for ${input.player.gameName}#${input.player.tagLine}`,
+        });
+        removedRoles++;
+        existingRoleIds.delete(role.id);
+      }
     }
   }
 
   return {
     createdRoleNames: context.createdRoleNames,
-    assignedRoleName: wantedRole?.name ?? null,
+    assignedRoleName: assignedRoleNames.solo,
+    assignedRoleNames,
     addedRoleName,
     removedRoles,
   };
@@ -187,19 +248,22 @@ export async function syncDiscordGuildRankRoleForStoredLink(
     gameName: 1,
     tagLine: 1,
     solo: 1,
+    tft: 1,
+    flex: 1,
   }).lean<GuildRolePlayerProjection | null>();
   if (!player?._id) throw new Error("Linked Riftboard profile not found.");
 
-  const wantedTier = normalizeManagedTier(player.solo?.tier ?? null);
+  const wantedSnapshot = guildRankRoleSnapshot(player);
   if (
     !opts?.force &&
     link.gameName === player.gameName &&
     link.tagLine === player.tagLine &&
-    String(link.guildRankRoleTier ?? "") === String(wantedTier ?? "")
+    sameGuildRankRoleSnapshot(link.guildRankRolesSnapshot, wantedSnapshot)
   ) {
     return {
       createdRoleNames: [],
       assignedRoleName: link.guildRankRoleName ?? null,
+      assignedRoleNames: assignedRoleNamesFromSnapshot(wantedSnapshot),
       addedRoleName: null,
       removedRoles: 0,
       skipped: true,
@@ -213,8 +277,9 @@ export async function syncDiscordGuildRankRoleForStoredLink(
 
   link.gameName = player.gameName;
   link.tagLine = player.tagLine;
-  link.guildRankRoleTier = wantedTier;
+  link.guildRankRoleTier = wantedSnapshot.solo;
   link.guildRankRoleName = result.assignedRoleName;
+  link.guildRankRolesSnapshot = wantedSnapshot;
   link.guildRankRolesSyncedAt = new Date();
   await link.save();
 
@@ -245,7 +310,7 @@ export async function syncAllDiscordGuildRankRoles() {
 
   const players = await Player.find(
     { _id: { $in: playerIds } },
-    { gameName: 1, tagLine: 1, solo: 1 }
+    { gameName: 1, tagLine: 1, solo: 1, tft: 1, flex: 1 }
   ).lean<GuildRolePlayerProjection[]>();
   const playersById = new Map(players.map((player) => [String(player._id), player]));
 
@@ -271,6 +336,20 @@ export async function syncAllDiscordGuildRankRoles() {
       });
       synced++;
       if (!result.assignedRoleName) unranked++;
+      const snapshot = guildRankRoleSnapshot(player);
+      await DiscordLink.updateOne(
+        { _id: link._id },
+        {
+          $set: {
+            gameName: player.gameName,
+            tagLine: player.tagLine,
+            guildRankRoleTier: snapshot.solo,
+            guildRankRoleName: result.assignedRoleName,
+            guildRankRolesSnapshot: snapshot,
+            guildRankRolesSyncedAt: new Date(),
+          },
+        }
+      );
     } catch (error) {
       if (isUnknownMemberError(error)) {
         missingMembers++;
