@@ -9,6 +9,7 @@ import {
   organizationSchemaId,
   websiteSchemaId,
 } from "@/lib/seo";
+import { approvedCommunityLeaderboardQuery } from "@/lib/communityLeaderboard";
 import { Player } from "@/models/player";
 import ProfileAvatar from "@/components/ProfileAvatar";
 import RankEmblem from "@/components/RankEmblem";
@@ -134,13 +135,8 @@ export default async function TftPage() {
 
   const players = await Player.find(
     {
-      "leaderboard.status": "approved",
+      ...approvedCommunityLeaderboardQuery(),
       "track.tft": { $ne: false },
-      $or: [
-        { "leaderboard.group": "burmese" },
-        { "leaderboard.group": null },
-        { leaderboard: { $exists: false } },
-      ],
     },
     {
       gameName: 1,

@@ -23,6 +23,7 @@ import {
 } from "@/lib/riot";
 import { normalizeRiotIdPart, syncCanonicalRiotId } from "@/lib/playerIdentity";
 import { mergePlayers } from "@/lib/playerMerge";
+import { approvedCommunityLeaderboardQuery } from "@/lib/communityLeaderboard";
 
 const SOLO = "RANKED_SOLO_5x5";
 const FLEX = "RANKED_FLEX_SR";
@@ -527,11 +528,8 @@ export async function refreshAllPlayers(opts?: {
 
   const q: any = {};
   if (opts?.leaderboardOnly) {
+    Object.assign(q, approvedCommunityLeaderboardQuery(opts?.leaderboardGroup ?? "burmese"));
     q["leaderboard.status"] = opts?.leaderboardStatus ?? "approved";
-    q.$or = [
-      { "leaderboard.group": opts?.leaderboardGroup ?? "burmese" },
-      { "leaderboard.group": null },
-    ];
   }
 
   const players = await Player.find(q, { _id: 1, gameName: 1, tagLine: 1, lastRefreshAt: 1 })

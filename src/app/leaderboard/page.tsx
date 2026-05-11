@@ -9,6 +9,7 @@ import {
   organizationSchemaId,
   websiteSchemaId,
 } from "@/lib/seo";
+import { approvedCommunityLeaderboardQuery } from "@/lib/communityLeaderboard";
 import { Player } from "@/models/player";
 import { RankEntry } from "@/models/rankEntry";
 import AutoUIRefresh from "@/components/AutoUIRefresh";
@@ -151,14 +152,7 @@ function fallbackPeak(current: {
 export default async function LeaderboardPage() {
   await dbConnect();
 
-  const q: Record<string, unknown> = {
-    "leaderboard.status": "approved",
-    $or: [
-      { "leaderboard.group": "burmese" },
-      { "leaderboard.group": null },
-      { leaderboard: { $exists: false } },
-    ],
-  };
+  const q = approvedCommunityLeaderboardQuery();
 
   const players = await Player.find(
     q,

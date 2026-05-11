@@ -10,6 +10,7 @@ import {
 } from "@/lib/discord";
 import { DiscordLink } from "@/models/discordLink";
 import { Player } from "@/models/player";
+import { approvedCommunityLeaderboardQuery } from "@/lib/communityLeaderboard";
 
 type GuildRolePlayerProjection = {
   _id: unknown;
@@ -309,7 +310,10 @@ export async function syncAllDiscordGuildRankRoles() {
   );
 
   const players = await Player.find(
-    { _id: { $in: playerIds } },
+    {
+      _id: { $in: playerIds },
+      ...approvedCommunityLeaderboardQuery(),
+    },
     { gameName: 1, tagLine: 1, solo: 1, tft: 1, flex: 1 }
   ).lean<GuildRolePlayerProjection[]>();
   const playersById = new Map(players.map((player) => [String(player._id), player]));
