@@ -13,6 +13,10 @@
 # testing
 /coverage
 
+#cron
+/local-refresh-agent
+
+
 # next.js
 /.next/
 /out/
