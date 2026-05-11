@@ -7,7 +7,7 @@ export type TftMatchDoc = {
   gameDatetime?: number;
   gameLength?: number;
   setNumber?: number;
-  raw?: any;
+  raw?: unknown;
   fetchedAt: Date;
 };
 

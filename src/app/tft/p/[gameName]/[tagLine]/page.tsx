@@ -51,6 +51,24 @@ type PlayerView = {
   tft?: RankSnapshot | null;
 };
 
+type TftMatchDocView = {
+  _id: unknown;
+  matchId?: string | null;
+  queueId?: number | null;
+  gameDatetime?: number | null;
+  gameLength?: number | null;
+  setNumber?: number | null;
+  placement?: number | null;
+  level?: number | null;
+  lastRound?: number | null;
+  playersEliminated?: number | null;
+  totalDamageToPlayers?: number | null;
+  goldLeft?: number | null;
+  augments?: unknown[];
+  traits?: unknown[];
+  units?: unknown[];
+};
+
 type TftRankHistoryRow = RankSnapshot & {
   queue: "RANKED_TFT";
 };
@@ -81,7 +99,7 @@ function winrate(wins?: number | null, losses?: number | null) {
   return Math.round((wins / total) * 100);
 }
 
-function cursorFromLast(last: { _id: unknown; matchId?: string; gameDatetime?: number | null } | undefined) {
+function cursorFromLast(last: { _id: unknown; matchId?: string | null; gameDatetime?: number | null } | undefined) {
   if (!last || typeof last.gameDatetime !== "number") return null;
   const payload = { gd: last.gameDatetime, id: String(last._id), matchId: String(last.matchId ?? "") };
   return Buffer.from(JSON.stringify(payload))
@@ -89,6 +107,36 @@ function cursorFromLast(last: { _id: unknown; matchId?: string; gameDatetime?: n
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/g, "");
+}
+
+function serializedTraits(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.map((trait) => {
+    const row = trait && typeof trait === "object" ? (trait as Record<string, unknown>) : {};
+    return {
+      name: typeof row.name === "string" ? row.name : null,
+      numUnits: typeof row.numUnits === "number" ? row.numUnits : null,
+      style: typeof row.style === "number" ? row.style : null,
+      tierCurrent: typeof row.tierCurrent === "number" ? row.tierCurrent : null,
+      tierTotal: typeof row.tierTotal === "number" ? row.tierTotal : null,
+    };
+  });
+}
+
+function serializedUnits(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.map((unit) => {
+    const row = unit && typeof unit === "object" ? (unit as Record<string, unknown>) : {};
+    return {
+      characterId: typeof row.characterId === "string" ? row.characterId : null,
+      name: typeof row.name === "string" ? row.name : null,
+      rarity: typeof row.rarity === "number" ? row.rarity : null,
+      tier: typeof row.tier === "number" ? row.tier : null,
+      itemNames: Array.isArray(row.itemNames)
+        ? row.itemNames.filter((item): item is string => typeof item === "string")
+        : [],
+    };
+  });
 }
 
 function playerMetaDescription(player: Pick<PlayerView, "gameName" | "tagLine" | "tft">) {
@@ -189,7 +237,7 @@ export default async function TftPlayerProfilePage({
       .lean(),
   ]);
 
-  const initialMatches: TftMatchRow[] = matchDocs.map((match: any) => ({
+  const initialMatches: TftMatchRow[] = (matchDocs as TftMatchDocView[]).map((match) => ({
     _id: String(match._id),
     matchId: String(match.matchId ?? ""),
     queueId: typeof match.queueId === "number" ? match.queueId : null,
@@ -205,8 +253,8 @@ export default async function TftPlayerProfilePage({
     augments: Array.isArray(match.augments)
       ? match.augments.filter((value: unknown): value is string => typeof value === "string")
       : [],
-    traits: Array.isArray(match.traits) ? match.traits : [],
-    units: Array.isArray(match.units) ? match.units : [],
+    traits: serializedTraits(match.traits),
+    units: serializedUnits(match.units),
   }));
 
   const tft = player.tft ?? {};
@@ -217,6 +265,7 @@ export default async function TftPlayerProfilePage({
   const lastUpdatedShort =
     formatDisplayMetaDateTime(player.tft?.fetchedAt ?? null) ??
     formatDisplayMetaDateTime(player.lastRefreshAt ?? null);
+  // eslint-disable-next-line react-hooks/purity
   const renderedAtMs = Date.now();
   const profileJsonLd = {
     "@context": "https://schema.org",
@@ -310,7 +359,7 @@ export default async function TftPlayerProfilePage({
             gameName={canonicalGameName}
             tagLine={canonicalTagLineLower}
             initialMatches={initialMatches}
-            initialCursor={cursorFromLast(matchDocs[matchDocs.length - 1] as any)}
+            initialCursor={cursorFromLast(matchDocs[matchDocs.length - 1] as TftMatchDocView | undefined)}
             renderedAtMs={renderedAtMs}
           />
         </section>

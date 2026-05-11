@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { dbConnect } from "@/lib/mongodb";
@@ -9,6 +10,8 @@ import { TftPlayerMatch } from "@/models/tftPlayerMatch";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+type Dict = Record<string, unknown>;
 
 type Params = { gameName: string; tagLine: string };
 
@@ -200,7 +203,7 @@ async function syncOlderTftMatches(opts: {
   return ops.length;
 }
 
-function serializeMatch(match: any) {
+function serializeMatch(match: Dict & { _id?: unknown }) {
   return {
     _id: String(match._id),
     matchId: String(match.matchId ?? ""),
