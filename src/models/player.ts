@@ -39,6 +39,7 @@ export type PlayerDoc = {
   matchRegion?: string;
 
   puuid?: string;
+  tftPuuid?: string;
   summonerId?: string;
   profileIconId?: number;
 
@@ -128,6 +129,7 @@ const PlayerSchema = new Schema<PlayerDoc>(
     matchRegion: { type: String, lowercase: true, trim: true },
 
     puuid: { type: String, unique: true, sparse: true },
+    tftPuuid: { type: String, index: true, sparse: true },
     summonerId: { type: String, unique: true, sparse: true },
     profileIconId: Number,
 

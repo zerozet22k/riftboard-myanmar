@@ -248,16 +248,21 @@ export function isRiot429(e: unknown) {
   return e instanceof RiotApiError && e.status === 429;
 }
 
+function isMissingPlatformHost(e: unknown) {
+  const cause = e instanceof Error ? (e as Error & { cause?: { code?: unknown } }).cause : null;
+  return cause?.code === "ENOTFOUND";
+}
+
 // -----------------------
 // Account / Summoner / League
 // -----------------------
 
-export async function getPuuidByRiotId(gameName: string, tagLine: string) {
+export async function getPuuidByRiotId(gameName: string, tagLine: string, game: "lol" | "tft" = "lol") {
   const region = ACCOUNT_REGION();
   const url =
     `https://${region}.api.riotgames.com/riot/account/v1/accounts/by-riot-id/` +
     `${encodeURIComponent(gameName)}/${encodeURIComponent(tagLine)}`;
-  return riotFetch<RiotAccount>(url);
+  return riotFetch<RiotAccount>(url, { apiKey: getRiotApiKey(game) });
 }
 
 async function riotFetchWithBody<T>(
@@ -357,7 +362,7 @@ export async function getLeagueEntriesByPuuid(platform: string, puuid: string) {
 
 export async function getTftLeagueEntriesByPuuid(platform: string, puuid: string) {
   const host = platform.toLowerCase();
-  const url = `https://${host}.api.riotgames.com/tft/league/v1/entries/by-puuid/${encodeURIComponent(
+  const url = `https://${host}.api.riotgames.com/tft/league/v1/by-puuid/${encodeURIComponent(
     puuid
   )}`;
   return riotFetch<LeagueEntry[]>(url, { apiKey: getRiotApiKey("tft") });
@@ -387,7 +392,7 @@ export async function findTftLeagueEntriesByPuuid(puuid: string, preferredPlatfo
         entries: await getTftLeagueEntriesByPuuid(platform, puuid),
       };
     } catch (e) {
-      if (isRiot404(e)) continue;
+      if (isRiot404(e) || isMissingPlatformHost(e)) continue;
       throw e;
     }
   }

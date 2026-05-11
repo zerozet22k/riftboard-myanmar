@@ -6,7 +6,6 @@ import { PlayerMastery } from "@/models/playerMastery";
 import { Match } from "@/models/match";
 import { PlayerMatch } from "@/models/playerMatch";
 import {
-  getActiveShardByPuuid,
   getAccountByPuuid,
   findSeaPlatformByPuuid,
   getLeagueEntriesByPuuid,
@@ -345,6 +344,8 @@ export async function refreshPlayerById(
     }
   }
 
+  const now = new Date();
+
   let puuid = player.puuid as string | undefined;
   if (!puuid) {
     const acct = await getPuuidByRiotId(player.gameName, player.tagLine);
@@ -352,8 +353,6 @@ export async function refreshPlayerById(
     player.puuid = puuid;
     await player.save();
   }
-
-  const now = new Date();
 
   try {
     const account = await getAccountByPuuid(puuid);
@@ -423,7 +422,14 @@ export async function refreshPlayerById(
 
   if (hasTftApiKey() && player?.track?.tft !== false) {
     try {
-      const { entries: tftEntries } = await findTftLeagueEntriesByPuuid(puuid, platform);
+      let tftPuuid = String(player.tftPuuid ?? "").trim();
+      if (!tftPuuid) {
+        const tftAccount = await getPuuidByRiotId(player.gameName, player.tagLine, "tft");
+        tftPuuid = tftAccount.puuid;
+        player.tftPuuid = tftPuuid;
+      }
+
+      const { entries: tftEntries } = await findTftLeagueEntriesByPuuid(tftPuuid, platform);
       const tft = tftEntries.find((entry) => entry.queueType === TFT);
 
       player.tft = tft
