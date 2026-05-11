@@ -43,7 +43,14 @@ function messageText(status?: string, message?: string, riotId?: string) {
   if (status === "choose") {
     return {
       tone: "sky",
-      text: "Discord returned multiple Riot-linked candidates. Choose the correct one below to finish binding.",
+      text: "Verify the Riot account below before Riftboard saves this link.",
+    } as const;
+  }
+
+  if (status === "unlinked") {
+    return {
+      tone: "emerald",
+      text: "The linked Riot account was removed from this Discord profile. You can reconnect anytime.",
     } as const;
   }
 
@@ -59,8 +66,12 @@ function messageText(status?: string, message?: string, riotId?: string) {
               ? "Enter your private community code first to unlock Discord access for this browser."
               : message === "wrong-community-code"
                 ? "That community code was not accepted. Check it and try again."
+            : message === "confirm-riot-ownership"
+              ? "Confirm that this Riot account is yours before finishing the link."
             : message === "no-riot-connection"
               ? "Discord did not return a Riot account connection. Add your Riot account to Discord first, then try again."
+              : message === "missing-discord-session"
+                ? "Your Discord session expired. Connect Discord again."
             : message === "guild-membership-required"
                 ? "You must join the configured Discord server before binding your Riot account."
                 : message === "invalid-riot-candidate"
@@ -109,9 +120,7 @@ export default async function DiscordLinkedRolesPage({
     : false;
   const communityUnlocked = browserUnlocked || storedUnlocked;
   const communityDiscordUrl = getCommunityDiscordUrl();
-  const pending = communityUnlocked
-    ? readPendingDiscordBindCookieValue(store.get("discord_pending_bind")?.value)
-    : null;
+  const pending = readPendingDiscordBindCookieValue(store.get("discord_pending_bind")?.value);
   const notice = messageText(status, message, riotId);
   const nextReturnTo = normalizeReturnTo(returnTo);
 
@@ -229,6 +238,14 @@ export default async function DiscordLinkedRolesPage({
                       Relink Discord
                     </button>
                   </form>
+                  <form action="/api/discord/bind/remove" method="POST">
+                    <button
+                      type="submit"
+                      className="rounded-2xl border border-red-300/20 px-5 py-3 text-sm text-red-200 transition hover:bg-red-500/10"
+                    >
+                      Remove linked account
+                    </button>
+                  </form>
                   {communityDiscordUrl ? (
                     <Link
                       href={communityDiscordUrl}
@@ -290,13 +307,13 @@ export default async function DiscordLinkedRolesPage({
           </section>
         )}
 
-        {communityUnlocked && pending ? (
+        {pending ? (
           <section className="rounded-[28px] bg-zinc-900/25 p-5 ring-1 ring-white/5 sm:p-6">
-            <div className="text-xl font-semibold text-zinc-50">Pick your Riot account</div>
+            <div className="text-xl font-semibold text-zinc-50">Verify your Riot account</div>
             <p className="mt-2 text-sm text-zinc-400">
-              Discord returned more than one Riot-style connection for{" "}
+              Discord returned Riot-style connection data for{" "}
               <span className="text-zinc-200">{pending.discordUsername ?? pending.discordUserId}</span>.
-              Pick the one Riftboard should trust.
+              Pick the one Riftboard should trust before linking.
             </p>
 
             <div className="mt-5 grid gap-3">
@@ -322,6 +339,16 @@ export default async function DiscordLinkedRolesPage({
                       Use this Riot account
                     </button>
                   </div>
+                  <label className="mt-4 flex items-start gap-2 text-sm text-zinc-300">
+                    <input
+                      type="checkbox"
+                      name="confirmOwnership"
+                      value="yes"
+                      required
+                      className="mt-0.5 h-4 w-4 rounded border-white/20 bg-zinc-900/70"
+                    />
+                    <span>I confirm this Riot account belongs to this Discord profile.</span>
+                  </label>
                 </form>
               ))}
             </div>

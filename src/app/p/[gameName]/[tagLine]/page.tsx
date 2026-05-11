@@ -190,7 +190,10 @@ export async function generateMetadata({
   await dbConnect();
 
   const player = (await Player.findOne(
-    buildPlayerLookupQuery(gameNameRaw, tagLineRaw),
+    {
+      ...buildPlayerLookupQuery(gameNameRaw, tagLineRaw),
+      "leaderboard.status": "approved",
+    },
     {
       gameName: 1,
       tagLine: 1,
@@ -249,7 +252,10 @@ export default async function PlayerProfilePage({
   await dbConnect();
 
   const player = (await Player.findOne(
-    buildPlayerLookupQuery(gameNameRaw, tagLineRaw),
+    {
+      ...buildPlayerLookupQuery(gameNameRaw, tagLineRaw),
+      "leaderboard.status": "approved",
+    },
     {
       gameName: 1,
       tagLine: 1,

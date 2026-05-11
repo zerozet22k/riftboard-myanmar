@@ -3,6 +3,8 @@ import { getAppBaseUrl } from "@/lib/runtimeConfig";
 
 const DISCORD_API_BASE = "https://discord.com/api/v10";
 const SPKI_ED25519_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
+const DISCORD_API_MAX_ATTEMPTS = 5;
+const DISCORD_API_MAX_RETRY_DELAY_MS = 10_000;
 
 export const DISCORD_LINKED_ROLE_METADATA = [
   {
@@ -158,22 +160,82 @@ export function decryptDiscordSecret(payload: string) {
   return Buffer.concat([decipher.update(body), decipher.final()]).toString("utf8");
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parseRetryAfterMs(headers: Headers, bodyText: string) {
+  const headerValue =
+    headers.get("retry-after") ??
+    headers.get("x-ratelimit-reset-after") ??
+    "";
+  const headerSeconds = Number(headerValue);
+  if (Number.isFinite(headerSeconds) && headerSeconds > 0) {
+    return headerSeconds * 1000;
+  }
+
+  try {
+    const parsed = JSON.parse(bodyText) as { retry_after?: unknown };
+    const bodySeconds = Number(parsed.retry_after);
+    if (Number.isFinite(bodySeconds) && bodySeconds > 0) {
+      return bodySeconds * 1000;
+    }
+  } catch {
+    // Discord sometimes returns plain text or empty bodies for non-JSON errors.
+  }
+
+  return 1000;
+}
+
+function retryDelayMs(response: Response, bodyText: string, attempt: number) {
+  if (response.status === 429) {
+    return parseRetryAfterMs(response.headers, bodyText);
+  }
+
+  if (response.status >= 500 && response.status < 600) {
+    return 250 * 2 ** attempt;
+  }
+
+  return null;
+}
+
 async function discordApi<T>(path: string, init: RequestInit, auth?: string): Promise<T> {
   const headers = new Headers(init.headers ?? {});
   if (auth) headers.set("Authorization", auth);
-  const res = await fetch(`${DISCORD_API_BASE}${path}`, {
-    ...init,
-    headers,
-    cache: "no-store",
-  });
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Discord API ${res.status}: ${text || res.statusText}`);
+  for (let attempt = 0; attempt < DISCORD_API_MAX_ATTEMPTS; attempt++) {
+    const res = await fetch(`${DISCORD_API_BASE}${path}`, {
+      ...init,
+      headers,
+      cache: "no-store",
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      const delayMs = retryDelayMs(res, text, attempt);
+      const canRetry = delayMs != null && attempt < DISCORD_API_MAX_ATTEMPTS - 1;
+
+      if (canRetry) {
+        const boundedDelayMs = Math.min(
+          Math.ceil(delayMs) + 75,
+          DISCORD_API_MAX_RETRY_DELAY_MS
+        );
+        await sleep(boundedDelayMs);
+        continue;
+      }
+
+      const retryNote =
+        delayMs != null && attempt >= DISCORD_API_MAX_ATTEMPTS - 1
+          ? ` after ${DISCORD_API_MAX_ATTEMPTS} attempts`
+          : "";
+      throw new Error(`Discord API ${res.status}${retryNote}: ${text || res.statusText}`);
+    }
+
+    if (res.status === 204) return undefined as T;
+    return (await res.json()) as T;
   }
 
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  throw new Error(`Discord API request failed after ${DISCORD_API_MAX_ATTEMPTS} attempts.`);
 }
 
 export type DiscordOAuthToken = {

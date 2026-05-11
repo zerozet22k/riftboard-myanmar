@@ -67,7 +67,10 @@ export async function generateMetadata({
   await dbConnect();
 
   const player = await Player.findOne(
-    buildPlayerLookupQuery(gameNameRaw, tagLineRaw),
+    {
+      ...buildPlayerLookupQuery(gameNameRaw, tagLineRaw),
+      "leaderboard.status": "approved",
+    },
     { gameName: 1, tagLine: 1 }
   ).lean<{ gameName?: string; tagLine?: string } | null>();
 
@@ -126,7 +129,10 @@ export default async function PlayerMasteryPage({
     tagLine: string;
     masterySyncedAt?: Date | null;
   } | null = await Player.findOne(
-    buildPlayerLookupQuery(gameNameRaw, tagLineRaw),
+    {
+      ...buildPlayerLookupQuery(gameNameRaw, tagLineRaw),
+      "leaderboard.status": "approved",
+    },
     { gameName: 1, tagLine: 1, masterySyncedAt: 1 }
   ).lean();
 

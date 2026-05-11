@@ -27,6 +27,7 @@ function redirectLinkedRoles(req: NextRequest, status: string, message?: string,
 export async function POST(req: NextRequest) {
   const formData = await req.formData().catch(() => null);
   const candidateId = String(formData?.get("candidateId") ?? "").trim();
+  const confirmOwnership = String(formData?.get("confirmOwnership") ?? "").trim();
   const pending = readPendingDiscordBindCookieValue(req.cookies.get("discord_pending_bind")?.value);
 
   if (!pending) {
@@ -40,6 +41,10 @@ export async function POST(req: NextRequest) {
     const response = redirectLinkedRoles(req, "error", "invalid-riot-candidate");
     clearPendingDiscordBindCookie(response);
     return response;
+  }
+
+  if (confirmOwnership !== "yes") {
+    return redirectLinkedRoles(req, "error", "confirm-riot-ownership");
   }
 
   try {
