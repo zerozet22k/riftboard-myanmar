@@ -134,10 +134,7 @@ export default async function TftPage() {
   await dbConnect();
 
   const players = await Player.find(
-    {
-      ...approvedCommunityLeaderboardQuery(),
-      "track.tft": { $ne: false },
-    },
+    approvedCommunityLeaderboardQuery(),
     {
       gameName: 1,
       tagLine: 1,

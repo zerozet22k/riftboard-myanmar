@@ -39,54 +39,53 @@ const LINKED_ROLE_METADATA = [
 const COMMANDS = [
   {
     name: "link",
-    description: "Get the Riftboard account-link page for Discord linked roles.",
+    description: "Get the Riot bind link.",
     type: 1,
   },
   {
     name: "bind",
-    description: "Alias for /link so members can finish the Riot account bind faster.",
+    description: "Alias for /link.",
     type: 1,
   },
   {
     name: "help",
-    description: "Show Riftboard Discord bot commands and binding instructions.",
+    description: "Show commands.",
     type: 1,
   },
   {
     name: "roles",
-    description: "Explain Riftboard rank roles and how to receive them.",
+    description: "Show rank role info.",
     type: 1,
   },
   {
     name: "status",
-    description: "Show which Riot ID is currently bound to your Discord account.",
+    description: "Show your linked Riot ID.",
     type: 1,
   },
   {
     name: "profile",
-    description: "Get the Riftboard profile URL for your linked Riot ID.",
+    description: "Get your profile link.",
     type: 1,
   },
   {
     name: "myrank",
-    description: "Show the current Riftboard rank for your linked Riot ID.",
+    description: "Show your solo rank.",
     type: 1,
   },
   {
     name: "refresh-profile",
-    description: "Refresh your linked Riftboard profile from Riot and sync Discord roles.",
+    description: "Refresh your rank roles.",
     type: 1,
   },
   {
     name: "refresh-linked-role",
-    description: "Push your latest stored Riftboard rank metadata to Discord linked roles.",
+    description: "Refresh linked role metadata.",
     type: 1,
   },
   {
     name: "sync-server-roles",
-    description: "Admin command to create and sync rank roles for linked members already in this server.",
+    description: "Sync server rank roles.",
     type: 1,
-    default_member_permissions: "8",
   },
   {
     name: "setup-bind-message",

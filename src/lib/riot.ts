@@ -378,7 +378,11 @@ export async function findTftLeagueEntriesByPuuid(puuid: string, preferredPlatfo
     const shardPlatform = String(shard.activeShard ?? "").trim().toLowerCase();
     if (shardPlatform) candidates.add(shardPlatform);
   } catch (e) {
-    if (!isRiot404(e)) throw e;
+    // Some TFT product keys can read TFT League but not Account active-shard.
+    // Platform fallback below is enough for SEA players, so active-shard is best-effort.
+    if (!isRiot404(e)) {
+      console.warn("TFT active-shard lookup failed, falling back to SEA platforms:", e);
+    }
   }
 
   for (const platform of ["sg2", "th2", "ph2", "vn2", "tw2"]) {

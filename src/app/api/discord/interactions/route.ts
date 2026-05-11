@@ -32,11 +32,15 @@ type DiscordInteraction = {
   member?: {
     user?: { id?: string };
     permissions?: string;
+    roles?: string[];
   };
   user?: {
     id?: string;
   };
 };
+
+const SYNC_SERVER_ROLES_ROLE_ID =
+  process.env.DISCORD_SYNC_SERVER_ROLES_ROLE_ID?.trim() || "1490362401038663910";
 
 function interactionUserId(interaction: DiscordInteraction) {
   return String(interaction.member?.user?.id ?? interaction.user?.id ?? "").trim();
@@ -70,35 +74,37 @@ function formatSyncTime(value: unknown) {
 }
 
 function linkInstructions(linkedRolesUrl: string) {
-  return `Bind your Riot account here: ${linkedRolesUrl}. Riftboard checks the Riot account already connected to your Discord profile, then syncs Solo Queue, TFT, and Ranked Flex roles.`;
+  return `Bind Riot: ${linkedRolesUrl}\nRoles sync from verified Riot data.`;
 }
 
-function helpText(linkedRolesUrl: string) {
-  return [
-    "Riftboard commands:",
-    `/bind - connect your Discord account to your Riot ID: ${linkedRolesUrl}`,
-    "/status - see your linked Riot account",
-    "/myrank - show your current Solo Queue rank",
-    "/profile - get your Riftboard profile link",
-    "/refresh-profile - refresh Riot data and sync Discord roles",
-    "/roles - explain rank roles",
-  ].join("\n");
+function helpText(linkedRolesUrl: string, canSyncServerRoles: boolean) {
+  const lines = [
+    "Commands:",
+    `/bind - link Riot: ${linkedRolesUrl}`,
+    "/status - linked account",
+    "/myrank - solo rank",
+    "/profile - profile link",
+    "/refresh-profile - refresh rank roles",
+    "/roles - role info",
+  ];
+  if (canSyncServerRoles) lines.push("/sync-server-roles - sync server roles");
+  return lines.join("\n");
 }
 
 function rolesText(linkedRolesUrl: string) {
   return [
-    "Riftboard rank roles sync from official Riot data.",
-    "Queues: Solo Queue first, then TFT, then Ranked Flex.",
-    "If your rank changes, run /refresh-profile or refresh your Riftboard profile.",
-    `Not bound yet? Use /bind or open ${linkedRolesUrl}`,
+    "Rank roles sync from Riot.",
+    "Queues: Solo, TFT, Flex.",
+    "Refresh: /refresh-profile",
+    `Bind: ${linkedRolesUrl}`,
   ].join("\n");
 }
 
 function publicBindMessage(linkedRolesUrl: string) {
   return [
     "Welcome to Riftboard Myanmar.",
-    `Bind your Discord account to your Riot ID here: ${linkedRolesUrl}`,
-    "After binding, Riftboard can sync your Solo Queue, TFT, and Ranked Flex roles from official Riot data.",
+    `Bind Riot: ${linkedRolesUrl}`,
+    "Rank roles sync from verified Riot data.",
   ].join("\n");
 }
 
@@ -184,6 +190,14 @@ function hasAdministratorPermission(interaction: DiscordInteraction) {
   }
 }
 
+function hasDiscordRole(interaction: DiscordInteraction, roleId: string) {
+  const wantedRoleId = String(roleId ?? "").trim();
+  if (!wantedRoleId) return false;
+  return (interaction.member?.roles ?? []).some(
+    (memberRoleId) => String(memberRoleId).trim() === wantedRoleId
+  );
+}
+
 export async function POST(req: NextRequest) {
   const signature = req.headers.get("x-signature-ed25519") ?? "";
   const timestamp = req.headers.get("x-signature-timestamp") ?? "";
@@ -212,8 +226,10 @@ export async function POST(req: NextRequest) {
     return messageResponse(linkInstructions(linkedRolesUrl));
   }
 
+  const canSyncServerRoles = hasDiscordRole(interaction, SYNC_SERVER_ROLES_ROLE_ID);
+
   if (commandName === "help") {
-    return messageResponse(helpText(linkedRolesUrl));
+    return messageResponse(helpText(linkedRolesUrl, canSyncServerRoles));
   }
 
   if (commandName === "roles") {
@@ -225,22 +241,22 @@ export async function POST(req: NextRequest) {
   }
 
   if (commandName === "sync-server-roles") {
-    if (!hasAdministratorPermission(interaction)) {
-      return messageResponse("This command is only available to server administrators.");
+    if (!canSyncServerRoles) {
+      return messageResponse("No access.");
     }
 
     return scheduleDeferredReply(interaction, async () => {
       const summary = await syncAllDiscordGuildRankRoles();
       const createdRoles =
         summary.createdRoleNames.length
-          ? ` Created roles: ${summary.createdRoleNames.join(", ")}.`
+          ? ` Created: ${summary.createdRoleNames.join(", ")}.`
           : "";
       const errors =
         summary.errors.length
           ? ` Errors: ${summary.errors.slice(0, 3).join(" | ")}${summary.errors.length > 3 ? " | ..." : ""}`
           : "";
 
-      return `Server role sync finished. Scanned ${summary.scanned}, synced ${summary.synced}, unranked ${summary.unranked}, missing members ${summary.missingMembers}, missing players ${summary.missingPlayers}, cleaned unbound members ${summary.cleanedMembers}, removed roles ${summary.cleanedRoles}, messaged ${summary.messagedUnboundMembers}, DM failures ${summary.unboundMessageFailures}.${createdRoles}${errors}`;
+      return `Done. Scanned ${summary.scanned}. Synced ${summary.synced}. Unranked ${summary.unranked}. Missing members ${summary.missingMembers}. Missing players ${summary.missingPlayers}. Cleaned ${summary.cleanedMembers}. Removed roles ${summary.cleanedRoles}. DMs ${summary.messagedUnboundMembers}/${summary.unboundMessageFailures}.${createdRoles}${errors}`;
     });
   }
 
@@ -272,10 +288,10 @@ export async function POST(req: NextRequest) {
 
   if (commandName === "status") {
     const syncedText = link.lastSyncedAt
-      ? `Last linked-role sync: ${formatSyncTime(link.lastSyncedAt)}.`
-      : "Linked-role metadata has not been synced yet.";
+      ? formatSyncTime(link.lastSyncedAt)
+      : "not synced";
     return messageResponse(
-      `Bound Riot ID: ${formatRiotId(link)}. ${syncedText} Profile: ${formatProfileUrl(link)}`
+      `Bound: ${formatRiotId(link)}\nSynced: ${syncedText}\nProfile: ${formatProfileUrl(link)}`
     );
   }
 
@@ -306,24 +322,24 @@ export async function POST(req: NextRequest) {
         syncLinkedRole: true,
       });
       const syncSuffix = refreshed.linkedRoleError
-        ? ` Linked-role sync still needs a retry: ${refreshed.linkedRoleError}`
+        ? ` Linked role error: ${refreshed.linkedRoleError}`
         : refreshed.linkedRoleSkipped
-          ? " Linked-role metadata unchanged."
-        : " Linked-role metadata synced.";
+          ? " Linked role unchanged."
+        : " Linked role synced.";
       const guildRoleSuffix = refreshed.guildRoleError
-        ? ` Server rank role sync still needs a retry: ${refreshed.guildRoleError}`
+        ? ` Server role error: ${refreshed.guildRoleError}`
         : refreshed.guildRoleSkipped
-          ? " Server rank roles unchanged."
-        : " Server rank roles synced.";
+          ? " Server roles unchanged."
+        : " Server roles synced.";
 
-      return `Updated ${formatSoloRank(refreshed.player)} Profile: ${getAppBaseUrl()}${refreshed.canonicalPath}${syncSuffix}${guildRoleSuffix}`;
+      return `Updated. ${formatSoloRank(refreshed.player)} Profile: ${getAppBaseUrl()}${refreshed.canonicalPath}${syncSuffix}${guildRoleSuffix}`;
     });
   }
 
   if (commandName === "refresh-linked-role") {
     return scheduleDeferredReply(interaction, async () => {
       const synced = await syncDiscordLinkedRoleForStoredLink(String(link._id));
-      return `Linked role metadata refreshed for ${synced.player.gameName}#${synced.player.tagLine}.`;
+      return `Linked role refreshed: ${synced.player.gameName}#${synced.player.tagLine}.`;
     });
   }
 

@@ -181,7 +181,7 @@ export async function mergePlayers(primaryId: string, duplicateId: string) {
 
   primary.track = {
     lol: primary.track?.lol ?? duplicate.track?.lol ?? true,
-    tft: primary.track?.tft ?? duplicate.track?.tft ?? false,
+    tft: primary.track?.tft ?? duplicate.track?.tft ?? true,
   };
 
   await Promise.all([

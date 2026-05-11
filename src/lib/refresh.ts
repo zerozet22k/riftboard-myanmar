@@ -420,7 +420,7 @@ export async function refreshPlayerById(
     ? { tier: flex.tier, division: flex.rank, lp: flex.leaguePoints, wins: flex.wins, losses: flex.losses, fetchedAt: now }
     : { fetchedAt: now };
 
-  if (hasTftApiKey() && player?.track?.tft !== false) {
+  if (hasTftApiKey()) {
     try {
       let tftPuuid = String(player.tftPuuid ?? "").trim();
       if (!tftPuuid) {
