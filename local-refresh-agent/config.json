@@ -6,6 +6,7 @@
   "cooldownMs": null,
   "force": false,
   "syncMatches": true,
+  "syncTftMatches": true,
   "matchesCount": 10,
   "startupTimeoutSec": 120
 }

@@ -481,7 +481,7 @@ export async function refreshPlayerById(
 
   const now = new Date();
 
-  let puuid = player.puuid as string | undefined;
+  let puuid = String(player.puuid ?? "").trim();
   if (!puuid) {
     const acct = await getPuuidByRiotId(player.gameName, player.tagLine);
     puuid = acct.puuid;
@@ -500,7 +500,11 @@ export async function refreshPlayerById(
       });
 
       if (duplicate && String(duplicate._id) !== String(player._id)) {
-        player = await mergePlayers(String(player._id), String(duplicate._id));
+        player = await mergePlayers(String(duplicate._id), String(player._id));
+        const fresh = await Player.findById(player._id);
+        if (!fresh) throw new Error("Player merge target disappeared during refresh");
+        player = fresh;
+        puuid = player.puuid || puuid;
       }
 
       syncCanonicalRiotId(player, account.gameName, account.tagLine, now);
@@ -671,6 +675,7 @@ export async function refreshAllPlayers(opts?: {
   force?: boolean;
   cooldownMs?: number;
   syncMatches?: boolean;
+  syncTftMatches?: boolean;
   matchesCount?: number;
 }) {
   await dbConnect();
@@ -700,6 +705,7 @@ export async function refreshAllPlayers(opts?: {
         force: opts?.force,
         cooldownMs: opts?.cooldownMs,
         syncMatches: opts?.syncMatches === true,
+        syncTftMatches: opts?.syncTftMatches === true,
         matchesCount: opts?.matchesCount,
         fullMastery: false,
       });

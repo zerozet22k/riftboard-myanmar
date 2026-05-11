@@ -226,6 +226,8 @@ export default async function LeaderboardPage() {
       solo: fallbackPeak(solo),
       flex: fallbackPeak(flex),
     };
+    const soloPeak = peaks.solo ?? fallbackPeak(solo);
+    const flexPeak = peaks.flex ?? fallbackPeak(flex);
 
     return {
       id: String(p._id),
@@ -254,12 +256,12 @@ export default async function LeaderboardPage() {
       flexLosses: flex.losses ?? null,
       flexWr: winrate(flex.wins ?? null, flex.losses ?? null),
       flexKey: rankKey(flexTier, flexDiv, flexLp),
-      peakTier: peaks.solo?.tier ?? null,
-      peakDiv: peaks.solo?.division ?? null,
-      peakLp: peaks.solo?.lp ?? null,
-      peakFlexTier: peaks.flex?.tier ?? null,
-      peakFlexDiv: peaks.flex?.division ?? null,
-      peakFlexLp: peaks.flex?.lp ?? null,
+      peakTier: soloPeak?.tier ?? null,
+      peakDiv: soloPeak?.division ?? null,
+      peakLp: soloPeak?.lp ?? null,
+      peakFlexTier: flexPeak?.tier ?? null,
+      peakFlexDiv: flexPeak?.division ?? null,
+      peakFlexLp: flexPeak?.lp ?? null,
 
       mains: topMains(p),
     };

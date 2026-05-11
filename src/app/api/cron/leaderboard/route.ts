@@ -68,6 +68,7 @@ export async function GET(req: NextRequest) {
         const cooldownMs = numParam(url, "cooldownMs", undefined);
         const force = boolParam(url, "force", false);
         const syncMatches = boolParam(url, "syncMatches", false);
+        const syncTftMatches = boolParam(url, "syncTftMatches", syncMatches);
         const matchesCount = Math.max(1, Math.min(100, numParam(url, "matchesCount", DEFAULT_MATCHES_COUNT)!));
 
         const result = await refreshAllPlayers({
@@ -79,6 +80,7 @@ export async function GET(req: NextRequest) {
             cooldownMs,
             force,
             syncMatches,
+            syncTftMatches,
             matchesCount,
         });
 

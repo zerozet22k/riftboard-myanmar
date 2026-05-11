@@ -892,6 +892,15 @@ internal sealed class RefreshLoop
                 query.Add($"matchesCount={config.MatchesCount}");
             }
 
+            if (config.SyncTftMatches)
+            {
+                query.Add("syncTftMatches=1");
+                if (!config.SyncMatches)
+                {
+                    query.Add($"matchesCount={config.MatchesCount}");
+                }
+            }
+
             route.Query = string.Join("&", query);
 
             using var response = await client.GetAsync(route.Uri, cancellationToken);
@@ -1197,6 +1206,7 @@ internal sealed class AgentConfig
     public int? CooldownMs { get; init; }
     public bool Force { get; init; }
     public bool SyncMatches { get; init; } = true;
+    public bool SyncTftMatches { get; init; } = true;
     public int MatchesCount { get; init; } = 10;
     public int StartupTimeoutSec { get; init; } = 120;
 
@@ -1211,6 +1221,7 @@ internal sealed class AgentConfig
             CooldownMs = CooldownMs is null ? null : Math.Max(0, Math.Min(60 * 60 * 1000, CooldownMs.Value)),
             Force = Force,
             SyncMatches = SyncMatches,
+            SyncTftMatches = SyncTftMatches,
             MatchesCount = Math.Max(1, Math.Min(100, MatchesCount)),
             StartupTimeoutSec = Math.Max(10, Math.Min(300, StartupTimeoutSec)),
         };

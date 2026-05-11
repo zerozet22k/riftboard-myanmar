@@ -123,11 +123,13 @@ export async function POST(
     });
     const discordRoleSync = out?._skipped
       ? { scanned: 0, linkedRoleSkipped: 0, guildRoleSkipped: 0, errors: [] }
-      : await syncDiscordRolesForPlayer(String(player._id));
+      : await syncDiscordRolesForPlayer(String(out?._id ?? player._id));
 
-    const canonicalPath = canonicalPlayerPath(player.gameName, player.tagLine);
+    const canonicalPath = canonicalPlayerPath(out?.gameName ?? player.gameName, out?.tagLine ?? player.tagLine);
+    const originalPath = canonicalPlayerPath(player.gameName, player.tagLine);
 
     revalidatePath(canonicalPath);
+    if (originalPath !== canonicalPath) revalidatePath(originalPath);
     revalidatePath("/leaderboard");
     revalidatePath("/tft");
     revalidatePath("/");

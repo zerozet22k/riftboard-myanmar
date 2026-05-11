@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { hasAdminSessionFromRequest, isValidAdminCode } from "@/lib/adminSession";
 import { dbConnect } from "@/lib/mongodb";
-import { normalizeRiotIdPart, canonicalPlayerPath } from "@/lib/playerIdentity";
+import { buildPlayerLookupQuery, normalizeRiotIdPart, canonicalPlayerPath } from "@/lib/playerIdentity";
 import { refreshPlayerById } from "@/lib/refresh";
 import { Player } from "@/models/player";
 
@@ -60,8 +60,9 @@ export async function POST(req: NextRequest) {
     await player.save();
 
     let refreshError: string | null = null;
+    let refreshedPlayer: { _id?: unknown; gameName?: string; tagLine?: string } | null = null;
     try {
-      await refreshPlayerById(String(player._id), {
+      refreshedPlayer = await refreshPlayerById(String(player._id), {
         force: true,
         fullMastery: false,
         syncMatches: true,
@@ -71,25 +72,27 @@ export async function POST(req: NextRequest) {
       refreshError = error instanceof Error ? error.message : "Refresh failed";
     }
 
-    // Reload after refresh to get updated fields
-    player = await Player.findById(player._id);
+    // Reload through the submitted ID because refresh may merge an alias into an existing canonical player.
+    player = await Player.findOne(buildPlayerLookupQuery(gameName, tagLine));
 
     const canonicalPath = canonicalPlayerPath(
-      player?.gameName ?? gameName,
-      player?.tagLine ?? tagLine
+      player?.gameName ?? refreshedPlayer?.gameName ?? gameName,
+      player?.tagLine ?? refreshedPlayer?.tagLine ?? tagLine
     );
+    const originalPath = canonicalPlayerPath(gameName, tagLine);
 
     revalidatePath("/");
     revalidatePath("/leaderboard");
     revalidatePath("/tft");
     revalidatePath(canonicalPath);
+    if (originalPath !== canonicalPath) revalidatePath(originalPath);
 
     return NextResponse.json({
       ok: true,
-      playerId: String(player?._id),
+      playerId: String(player?._id ?? refreshedPlayer?._id ?? ""),
       canonicalPath,
-      gameName: player?.gameName ?? gameName,
-      tagLine: player?.tagLine ?? tagLine,
+      gameName: player?.gameName ?? refreshedPlayer?.gameName ?? gameName,
+      tagLine: player?.tagLine ?? refreshedPlayer?.tagLine ?? tagLine,
       refreshError,
     });
   } catch (error) {
