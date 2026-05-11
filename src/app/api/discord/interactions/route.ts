@@ -70,7 +70,36 @@ function formatSyncTime(value: unknown) {
 }
 
 function linkInstructions(linkedRolesUrl: string) {
-  return `Join the configured Discord server first, then finish your bind here: ${linkedRolesUrl}. Joining alone does not complete the Riot account verification.`;
+  return `Bind your Riot account here: ${linkedRolesUrl}. Riftboard checks the Riot account already connected to your Discord profile, then syncs Solo Queue, TFT, and Ranked Flex roles.`;
+}
+
+function helpText(linkedRolesUrl: string) {
+  return [
+    "Riftboard commands:",
+    `/bind - connect your Discord account to your Riot ID: ${linkedRolesUrl}`,
+    "/status - see your linked Riot account",
+    "/myrank - show your current Solo Queue rank",
+    "/profile - get your Riftboard profile link",
+    "/refresh-profile - refresh Riot data and sync Discord roles",
+    "/roles - explain rank roles",
+  ].join("\n");
+}
+
+function rolesText(linkedRolesUrl: string) {
+  return [
+    "Riftboard rank roles sync from official Riot data.",
+    "Queues: Solo Queue first, then TFT, then Ranked Flex.",
+    "If your rank changes, run /refresh-profile or refresh your Riftboard profile.",
+    `Not bound yet? Use /bind or open ${linkedRolesUrl}`,
+  ].join("\n");
+}
+
+function publicBindMessage(linkedRolesUrl: string) {
+  return [
+    "Welcome to Riftboard Myanmar.",
+    `Bind your Discord account to your Riot ID here: ${linkedRolesUrl}`,
+    "After binding, Riftboard can sync your Solo Queue, TFT, and Ranked Flex roles from official Riot data.",
+  ].join("\n");
 }
 
 function messageResponse(content: string) {
@@ -78,6 +107,15 @@ function messageResponse(content: string) {
     type: 4,
     data: {
       flags: 64,
+      content,
+    },
+  });
+}
+
+function publicMessageResponse(content: string) {
+  return NextResponse.json({
+    type: 4,
+    data: {
       content,
     },
   });
@@ -174,6 +212,14 @@ export async function POST(req: NextRequest) {
     return messageResponse(linkInstructions(linkedRolesUrl));
   }
 
+  if (commandName === "help") {
+    return messageResponse(helpText(linkedRolesUrl));
+  }
+
+  if (commandName === "roles") {
+    return messageResponse(rolesText(linkedRolesUrl));
+  }
+
   if (allowedGuildId && interaction.guild_id !== allowedGuildId) {
     return messageResponse("Use these commands inside the configured Discord server after joining it.");
   }
@@ -194,8 +240,16 @@ export async function POST(req: NextRequest) {
           ? ` Errors: ${summary.errors.slice(0, 3).join(" | ")}${summary.errors.length > 3 ? " | ..." : ""}`
           : "";
 
-      return `Server role sync finished. Scanned ${summary.scanned}, synced ${summary.synced}, unranked ${summary.unranked}, missing members ${summary.missingMembers}, missing players ${summary.missingPlayers}.${createdRoles}${errors}`;
+      return `Server role sync finished. Scanned ${summary.scanned}, synced ${summary.synced}, unranked ${summary.unranked}, missing members ${summary.missingMembers}, missing players ${summary.missingPlayers}, cleaned unbound members ${summary.cleanedMembers}, removed roles ${summary.cleanedRoles}, messaged ${summary.messagedUnboundMembers}, DM failures ${summary.unboundMessageFailures}.${createdRoles}${errors}`;
     });
+  }
+
+  if (commandName === "setup-bind-message") {
+    if (!hasAdministratorPermission(interaction)) {
+      return messageResponse("This command is only available to server administrators.");
+    }
+
+    return publicMessageResponse(publicBindMessage(linkedRolesUrl));
   }
 
   if (!userId) {
@@ -206,10 +260,14 @@ export async function POST(req: NextRequest) {
   const link = await DiscordLink.findOne({ discordUserId: userId }).lean();
 
   if (!link?._id) {
-    return messageResponse(`No linked Riftboard profile found yet. Use ${linkedRolesUrl} first.`);
+    return messageResponse(
+      `You are not bound to a Riftboard Riot account yet.\n${linkInstructions(linkedRolesUrl)}`
+    );
   }
   if (!isVerifiedDiscordLink(link)) {
-    return messageResponse(`Reconnect your Discord account at ${linkedRolesUrl} to verify your Riot binding again.`);
+    return messageResponse(
+      `Your old Riftboard bind needs Discord verification again.\n${linkInstructions(linkedRolesUrl)}`
+    );
   }
 
   if (commandName === "status") {
@@ -270,6 +328,6 @@ export async function POST(req: NextRequest) {
   }
 
   return messageResponse(
-    "Unknown command. Try /bind, /status, /profile, /myrank, /refresh-profile, /refresh-linked-role, or /sync-server-roles."
+    "Unknown command. Try /help, /bind, /status, /profile, /myrank, /roles, /refresh-profile, /refresh-linked-role, or /sync-server-roles."
   );
 }

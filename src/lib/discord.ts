@@ -51,6 +51,16 @@ export const DISCORD_COMMAND_DEFINITIONS = [
     type: 1,
   },
   {
+    name: "help",
+    description: "Show Riftboard Discord bot commands and binding instructions.",
+    type: 1,
+  },
+  {
+    name: "roles",
+    description: "Explain Riftboard rank roles and how to receive them.",
+    type: 1,
+  },
+  {
     name: "status",
     description: "Show which Riot ID is currently bound to your Discord account.",
     type: 1,
@@ -78,6 +88,12 @@ export const DISCORD_COMMAND_DEFINITIONS = [
   {
     name: "sync-server-roles",
     description: "Admin command to create and sync rank roles for linked members already in this server.",
+    type: 1,
+    default_member_permissions: "8",
+  },
+  {
+    name: "setup-bind-message",
+    description: "Admin command to post a public Riftboard bind message in this channel.",
     type: 1,
     default_member_permissions: "8",
   },
@@ -283,6 +299,10 @@ export type DiscordGuildMember = {
   roles: string[];
 };
 
+export type DiscordDmChannel = {
+  id: string;
+};
+
 export async function exchangeDiscordCode(code: string) {
   const body = new URLSearchParams({
     client_id: getDiscordClientId(),
@@ -398,6 +418,23 @@ export async function getDiscordGuildMember(input: {
   );
 }
 
+export async function listDiscordGuildMembers(input?: {
+  guildId?: string;
+  after?: string;
+  limit?: number;
+}) {
+  const limit = Math.max(1, Math.min(1000, Number(input?.limit ?? 1000) || 1000));
+  const params = new URLSearchParams({ limit: String(limit) });
+  const after = String(input?.after ?? "").trim();
+  if (after) params.set("after", after);
+
+  return discordApi<DiscordGuildMember[]>(
+    `/guilds/${guildPath(input?.guildId)}/members?${params.toString()}`,
+    { method: "GET" },
+    botAuth()
+  );
+}
+
 export async function addDiscordGuildMemberRole(input: {
   userId: string;
   roleId: string;
@@ -431,6 +468,38 @@ export async function removeDiscordGuildMemberRole(input: {
     {
       method: "DELETE",
       headers,
+    },
+    botAuth()
+  );
+}
+
+export async function createDiscordDmChannel(userId: string) {
+  return discordApi<DiscordDmChannel>(
+    "/users/@me/channels",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        recipient_id: String(userId).trim(),
+      }),
+    },
+    botAuth()
+  );
+}
+
+export async function sendDiscordChannelMessage(input: {
+  channelId: string;
+  content: string;
+}) {
+  return discordApi<Record<string, unknown>>(
+    `/channels/${encodeURIComponent(String(input.channelId).trim())}/messages`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        content: input.content,
+        allowed_mentions: { parse: [] },
+      }),
     },
     botAuth()
   );

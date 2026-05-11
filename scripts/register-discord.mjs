@@ -48,6 +48,16 @@ const COMMANDS = [
     type: 1,
   },
   {
+    name: "help",
+    description: "Show Riftboard Discord bot commands and binding instructions.",
+    type: 1,
+  },
+  {
+    name: "roles",
+    description: "Explain Riftboard rank roles and how to receive them.",
+    type: 1,
+  },
+  {
     name: "status",
     description: "Show which Riot ID is currently bound to your Discord account.",
     type: 1,
@@ -75,6 +85,12 @@ const COMMANDS = [
   {
     name: "sync-server-roles",
     description: "Admin command to create and sync rank roles for linked members already in this server.",
+    type: 1,
+    default_member_permissions: "8",
+  },
+  {
+    name: "setup-bind-message",
+    description: "Admin command to post a public Riftboard bind message in this channel.",
     type: 1,
     default_member_permissions: "8",
   },
