@@ -7,9 +7,11 @@ import { formatFullDateTime } from "@/lib/displayTime";
 export default function ProfileRefreshButton({
   gameName,
   tagLine,
+  mode = "lol",
 }: {
   gameName: string;
   tagLine: string;
+  mode?: "lol" | "tft";
 }) {
   const router = useRouter();
 
@@ -33,13 +35,15 @@ export default function ProfileRefreshButton({
         return;
       }
 
-      const res = await fetch(`/api/p/${encodeURIComponent(gn)}/${encodeURIComponent(tl)}/refresh`, {
+      const prefix = mode === "tft" ? "/api/tft/p" : "/api/p";
+      const res = await fetch(`${prefix}/${encodeURIComponent(gn)}/${encodeURIComponent(tl)}/refresh`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          syncMatches: true,
+          syncMatches: mode === "lol",
+          syncTftMatches: mode === "tft",
           matchesCount: 10,
-          fullMastery: true,
+          fullMastery: mode === "lol",
         }),
       });
 

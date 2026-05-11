@@ -66,6 +66,11 @@ export type PlayerDoc = {
     lastSyncAt?: Date;
   };
 
+  tftMatchSync?: {
+    enabled?: boolean;
+    lastSyncAt?: Date;
+  };
+
   track?: {
     lol?: boolean;
     tft?: boolean;
@@ -149,6 +154,11 @@ const PlayerSchema = new Schema<PlayerDoc>(
     leaderboard: { type: LeaderboardSchema, default: () => ({ group: null, status: null }) },
 
     matchSync: {
+      enabled: { type: Boolean, default: true },
+      lastSyncAt: Date,
+    },
+
+    tftMatchSync: {
       enabled: { type: Boolean, default: true },
       lastSyncAt: Date,
     },

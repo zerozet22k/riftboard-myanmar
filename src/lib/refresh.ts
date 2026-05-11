@@ -5,6 +5,8 @@ import { RankEntry, RANK_QUEUES } from "@/models/rankEntry";
 import { PlayerMastery } from "@/models/playerMastery";
 import { Match } from "@/models/match";
 import { PlayerMatch } from "@/models/playerMatch";
+import { TftMatch } from "@/models/tftMatch";
+import { TftPlayerMatch } from "@/models/tftPlayerMatch";
 import {
   getAccountByPuuid,
   findSeaPlatformByPuuid,
@@ -14,6 +16,8 @@ import {
   getChampionMasteriesByPuuid,
   getMatchIdsByPuuid,
   getMatchById,
+  getTftMatchIdsByPuuid,
+  getTftMatchById,
   findTftLeagueEntriesByPuuid,
   hasTftApiKey,
   platformToMatchRegion,
@@ -165,6 +169,63 @@ function extractPlayerMatchSummary(match: any, puuid: string) {
   };
 }
 
+function safeNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function safeString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function simplifyTftUnit(unit: any) {
+  return {
+    characterId: safeString(unit?.character_id),
+    name: safeString(unit?.name),
+    rarity: safeNumber(unit?.rarity),
+    tier: safeNumber(unit?.tier),
+    itemNames: Array.isArray(unit?.itemNames)
+      ? unit.itemNames.filter((item: unknown): item is string => typeof item === "string")
+      : [],
+  };
+}
+
+function simplifyTftTrait(trait: any) {
+  return {
+    name: safeString(trait?.name),
+    numUnits: safeNumber(trait?.num_units),
+    style: safeNumber(trait?.style),
+    tierCurrent: safeNumber(trait?.tier_current),
+    tierTotal: safeNumber(trait?.tier_total),
+  };
+}
+
+function extractTftPlayerMatchSummary(match: any, puuid: string) {
+  const info = match?.info ?? {};
+  const participants: any[] = Array.isArray(info.participants) ? info.participants : [];
+  const me = participants.find((p) => String(p?.puuid ?? "").toLowerCase() === puuid.toLowerCase());
+  if (!me) return null;
+
+  return {
+    queueId: safeNumber(info.queue_id),
+    gameDatetime: safeNumber(info.game_datetime),
+    gameLength: safeNumber(info.game_length),
+    setNumber: safeNumber(info.tft_set_number),
+    placement: safeNumber(me.placement),
+    level: safeNumber(me.level),
+    lastRound: safeNumber(me.last_round),
+    playersEliminated: safeNumber(me.players_eliminated),
+    totalDamageToPlayers: safeNumber(me.total_damage_to_players),
+    goldLeft: safeNumber(me.gold_left),
+    timeEliminated: safeNumber(me.time_eliminated),
+    companionContentId: safeString(me.companion?.content_ID),
+    augments: Array.isArray(me.augments)
+      ? me.augments.filter((augment: unknown): augment is string => typeof augment === "string")
+      : [],
+    traits: Array.isArray(me.traits) ? me.traits.map(simplifyTftTrait) : [],
+    units: Array.isArray(me.units) ? me.units.map(simplifyTftUnit) : [],
+  };
+}
+
 async function syncFullMastery(player: any, platform: string, puuid: string, now: Date) {
   const all = await getChampionMasteriesByPuuid(platform, puuid);
   if (!Array.isArray(all) || all.length === 0) return;
@@ -308,6 +369,79 @@ async function syncRecentMatches(params: { player: any; puuid: string; matchRegi
   await player.save();
 }
 
+async function syncRecentTftMatches(params: { player: any; puuid: string; matchRegion: string; count: number }) {
+  const { player, puuid, matchRegion, count } = params;
+  const now = new Date();
+
+  const ids = await getTftMatchIdsByPuuid({ puuid, matchRegion, start: 0, count });
+  if (!Array.isArray(ids) || ids.length === 0) {
+    player.tftMatchSync = { ...(player.tftMatchSync ?? {}), lastSyncAt: now };
+    await player.save();
+    return;
+  }
+
+  const existing = await TftMatch.find({ matchId: { $in: ids } }, { matchId: 1 }).lean();
+  const have = new Set(existing.map((x: any) => x.matchId));
+
+  await mapLimit(ids, MATCH_SYNC_CONCURRENCY, async (matchId) => {
+    try {
+      let payload: any | null = null;
+
+      if (have.has(matchId)) {
+        const doc = await TftMatch.findOne(
+          { matchId },
+          { raw: 1, region: 1, queueId: 1, gameDatetime: 1, gameLength: 1 }
+        ).lean();
+        payload = (doc as any)?.raw ?? null;
+      }
+
+      if (!payload) {
+        payload = await getTftMatchById(matchId, matchRegion);
+        const info = payload?.info ?? {};
+
+        await TftMatch.updateOne(
+          { matchId },
+          {
+            $set: {
+              region: matchRegion,
+              queueId: safeNumber(info.queue_id),
+              gameDatetime: safeNumber(info.game_datetime),
+              gameLength: safeNumber(info.game_length),
+              setNumber: safeNumber(info.tft_set_number),
+              raw: payload,
+              fetchedAt: now,
+            },
+            $setOnInsert: { matchId },
+          },
+          { upsert: true }
+        );
+      }
+
+      const summary = extractTftPlayerMatchSummary(payload, puuid);
+      if (!summary) return;
+
+      await TftPlayerMatch.updateOne(
+        { playerId: player._id, matchId },
+        {
+          $set: {
+            playerId: player._id,
+            matchId,
+            region: matchRegion,
+            ...summary,
+            fetchedAt: now,
+          },
+        },
+        { upsert: true }
+      );
+    } catch (e) {
+      if (isRateLimit(e)) await sleep(rateLimitWaitMs(e, 2500));
+    }
+  });
+
+  player.tftMatchSync = { ...(player.tftMatchSync ?? {}), lastSyncAt: now };
+  await player.save();
+}
+
 export async function refreshPlayerById(
   playerId: string,
   opts?: {
@@ -318,6 +452,7 @@ export async function refreshPlayerById(
     matchesCount?: number;
 
     fullMastery?: boolean;
+    syncTftMatches?: boolean;
   }
 ) {
   await dbConnect();
@@ -507,6 +642,19 @@ export async function refreshPlayerById(
       matchRegion,
       count: Math.max(1, Math.min(MAX_MATCH_SYNC_COUNT, Number(opts?.matchesCount ?? 10) || 10)),
     });
+  }
+
+  const syncTftMatches = opts?.syncTftMatches === true && hasTftApiKey();
+  if (syncTftMatches) {
+    const tftPuuid = String(player.tftPuuid ?? puuid ?? "").trim();
+    if (tftPuuid) {
+      await syncRecentTftMatches({
+        player,
+        puuid: tftPuuid,
+        matchRegion,
+        count: Math.max(1, Math.min(MAX_MATCH_SYNC_COUNT, Number(opts?.matchesCount ?? 10) || 10)),
+      });
+    }
   }
 
   return player.toObject();

@@ -114,7 +114,7 @@ function prettyRank(tier?: string | null, div?: string | null) {
 }
 
 function playerHref(gameName: string, tagLine: string) {
-  return `/p/${encodeURIComponent(gameName)}/${encodeURIComponent(tagLine.toLowerCase())}`;
+  return `/tft/p/${encodeURIComponent(gameName)}/${encodeURIComponent(tagLine.toLowerCase())}`;
 }
 
 function updatedIso(player: TftPlayer) {
@@ -175,6 +175,7 @@ export default async function TftPage() {
 
   const rankedRows = rows.filter((row) => row.tier);
   const syncedRows = rows.filter((row) => row.updatedAt);
+  const visibleRows = rows;
   const collectionJsonLd = {
     "@context": "https://schema.org",
     "@type": "CollectionPage",
@@ -232,10 +233,10 @@ export default async function TftPage() {
           </section>
         ) : null}
 
-        {rankedRows.length ? (
+        {visibleRows.length ? (
           <>
             <div className="space-y-3 xl:hidden">
-              {rankedRows.map((row, index) => (
+              {visibleRows.map((row, index) => (
                 <article key={row.id} className="rounded-[24px] bg-zinc-900/22 p-4 ring-1 ring-white/5">
                   <div className="flex items-start gap-3">
                     <ProfileAvatar
@@ -294,7 +295,7 @@ export default async function TftPage() {
                 </thead>
 
                 <tbody>
-                  {rankedRows.map((row, index) => (
+                  {visibleRows.map((row, index) => (
                     <tr key={row.id} className="border-b border-white/6 align-top hover:bg-white/5">
                       <td className="p-4 tabular-nums text-zinc-500">{index + 1}</td>
 
@@ -350,11 +351,10 @@ export default async function TftPage() {
           </>
         ) : (
           <section className="rounded-[26px] bg-zinc-900/22 p-6 ring-1 ring-white/5">
-            <h2 className="text-lg font-semibold text-zinc-50">No ranked TFT players yet</h2>
+            <h2 className="text-lg font-semibold text-zinc-50">No TFT players yet</h2>
             <p className="mt-2 max-w-2xl text-sm text-zinc-400">
-              The page is live, but RiftBoard has not saved any official TFT rank snapshots yet for
-              approved Myanmar players. Once the TFT key is configured and tracked players refresh,
-              ranked entries will appear here.
+              The page is live, but RiftBoard has not saved any approved Myanmar players yet.
+              Once tracked players refresh, TFT entries will appear here.
             </p>
           </section>
         )}

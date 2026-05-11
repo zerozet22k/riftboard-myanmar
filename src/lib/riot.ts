@@ -481,6 +481,29 @@ export async function getMatchById(matchId: string, matchRegion?: string) {
   return riotFetch<MatchV5>(url);
 }
 
+export async function getTftMatchIdsByPuuid(params: {
+  puuid: string;
+  matchRegion?: string;
+  start?: number;
+  count?: number;
+}) {
+  const host = matchHost(params.matchRegion);
+  const start = params.start ?? 0;
+  const count = params.count ?? 10;
+  const qs = new URLSearchParams({ start: String(start), count: String(count) });
+  const url =
+    `https://${host}.api.riotgames.com/tft/match/v1/matches/by-puuid/` +
+    `${encodeURIComponent(params.puuid)}/ids?${qs.toString()}`;
+
+  return riotFetch<MatchId[]>(url, { apiKey: getRiotApiKey("tft") });
+}
+
+export async function getTftMatchById(matchId: string, matchRegion?: string) {
+  const host = matchHost(matchRegion);
+  const url = `https://${host}.api.riotgames.com/tft/match/v1/matches/${encodeURIComponent(matchId)}`;
+  return riotFetch<MatchV5>(url, { apiKey: getRiotApiKey("tft") });
+}
+
 // -----------------------
 // Tournament-V5
 // -----------------------

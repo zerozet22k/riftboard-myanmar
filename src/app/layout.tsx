@@ -117,7 +117,7 @@ export default function RootLayout({
           />
           {children}
           <footer className="px-4 py-10 text-center text-xs text-zinc-500 sm:px-6">
-            <div className="mb-4 flex items-center justify-center gap-3">
+            {/* <div className="mb-4 flex items-center justify-center gap-3">
               <Image
                 src={SITE_LOGO_PATH}
                 alt="RiftBoard Myanmar logo"
@@ -129,7 +129,7 @@ export default function RootLayout({
                 <div className="text-[11px] uppercase tracking-[0.24em] text-zinc-600">Myanmar Community</div>
                 <div className="text-sm font-semibold text-zinc-300">RiftBoard Myanmar</div>
               </div>
-            </div>
+            </div> */}
             <div className="mb-3 flex items-center justify-center gap-4 text-sm text-zinc-400">
               {communityDiscordUrl ? (
                 <Link
