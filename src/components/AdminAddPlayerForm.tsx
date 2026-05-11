@@ -148,7 +148,7 @@ export default function AdminAddPlayerForm() {
     <div className="min-h-screen bg-background px-4 pt-20">
       <div className="mx-auto w-full max-w-md">
         <div className="mb-4 flex items-center justify-between gap-3">
-          <h1 className="text-lg font-semibold text-foreground">Admin Players</h1>
+          <h1 className="text-lg font-semibold text-foreground">Add or remove players</h1>
           <button
             type="button"
             onClick={handleLogout}
