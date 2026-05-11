@@ -32,6 +32,10 @@ type ManagedRoleContext = {
   createdRoleNames: string[];
 };
 
+type SyncDiscordGuildRankRoleOptions = {
+  force?: boolean;
+};
+
 const MANAGED_RANK_ROLE_SPECS: ManagedRoleSpec[] = [
   { tier: "CHALLENGER", color: 0xf0c74b },
   { tier: "GRANDMASTER", color: 0xd14b5a },
@@ -167,10 +171,13 @@ export async function syncDiscordGuildRankRoleForIdentity(input: {
   };
 }
 
-export async function syncDiscordGuildRankRoleForStoredLink(linkId: string) {
+export async function syncDiscordGuildRankRoleForStoredLink(
+  linkId: string,
+  opts?: SyncDiscordGuildRankRoleOptions
+) {
   await dbConnect();
 
-  const link = await DiscordLink.findById(linkId).lean();
+  const link = await DiscordLink.findById(linkId);
   if (!link?._id) throw new Error("Discord link not found.");
   if (!link.verifiedBinding || link.verificationSource !== "discord_connections") {
     throw new Error("Reconnect Discord before syncing server rank roles.");
@@ -183,10 +190,35 @@ export async function syncDiscordGuildRankRoleForStoredLink(linkId: string) {
   }).lean<GuildRolePlayerProjection | null>();
   if (!player?._id) throw new Error("Linked Riftboard profile not found.");
 
-  return syncDiscordGuildRankRoleForIdentity({
+  const wantedTier = normalizeManagedTier(player.solo?.tier ?? null);
+  if (
+    !opts?.force &&
+    link.gameName === player.gameName &&
+    link.tagLine === player.tagLine &&
+    String(link.guildRankRoleTier ?? "") === String(wantedTier ?? "")
+  ) {
+    return {
+      createdRoleNames: [],
+      assignedRoleName: link.guildRankRoleName ?? null,
+      addedRoleName: null,
+      removedRoles: 0,
+      skipped: true,
+    };
+  }
+
+  const result = await syncDiscordGuildRankRoleForIdentity({
     discordUserId: String(link.discordUserId),
     player,
   });
+
+  link.gameName = player.gameName;
+  link.tagLine = player.tagLine;
+  link.guildRankRoleTier = wantedTier;
+  link.guildRankRoleName = result.assignedRoleName;
+  link.guildRankRolesSyncedAt = new Date();
+  await link.save();
+
+  return { ...result, skipped: false };
 }
 
 export async function syncAllDiscordGuildRankRoles() {

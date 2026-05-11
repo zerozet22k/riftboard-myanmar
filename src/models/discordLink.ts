@@ -20,6 +20,9 @@ export type DiscordLinkDoc = {
   communityAccessCodeHash?: string | null;
   communityAccessGrantedAt?: Date | null;
   metadataSnapshot?: Record<string, unknown> | null;
+  guildRankRoleTier?: string | null;
+  guildRankRoleName?: string | null;
+  guildRankRolesSyncedAt?: Date | null;
   lastSyncedAt?: Date | null;
 };
 
@@ -48,6 +51,9 @@ const DiscordLinkSchema = new Schema<DiscordLinkDoc>(
     communityAccessCodeHash: { type: String, trim: true, default: null },
     communityAccessGrantedAt: { type: Date, default: null },
     metadataSnapshot: { type: Schema.Types.Mixed, default: null },
+    guildRankRoleTier: { type: String, trim: true, default: null },
+    guildRankRoleName: { type: String, trim: true, default: null },
+    guildRankRolesSyncedAt: { type: Date, default: null },
     lastSyncedAt: { type: Date, default: null },
   },
   { timestamps: true }

@@ -72,13 +72,13 @@ export async function POST(req: NextRequest) {
 
     let syncMessage: string | undefined;
     try {
-      await syncDiscordLinkedRoleForStoredLink(String(bound.link._id));
+      await syncDiscordLinkedRoleForStoredLink(String(bound.link._id), { force: true });
     } catch {
       syncMessage = "discord-role-sync-failed";
     }
 
     try {
-      await syncDiscordGuildRankRoleForStoredLink(String(bound.link._id));
+      await syncDiscordGuildRankRoleForStoredLink(String(bound.link._id), { force: true });
     } catch {
       syncMessage = "discord-role-sync-failed";
     }

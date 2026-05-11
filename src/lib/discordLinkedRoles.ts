@@ -47,6 +47,10 @@ type RefreshedDiscordPlayer = {
   _nextRefreshAt?: string;
 };
 
+type SyncDiscordLinkedRoleOptions = {
+  force?: boolean;
+};
+
 export type DiscordRiotCandidate = {
   id: string;
   riotId: string;
@@ -65,6 +69,18 @@ function normalizeTierValue(tier?: string | null) {
 
 function toDiscordLinkDocument(link: unknown) {
   return link as DiscordLinkDocument;
+}
+
+function sameMetadataSnapshot(
+  left: Record<string, unknown> | null | undefined,
+  right: Record<string, number>
+) {
+  if (!left) return false;
+
+  const rightEntries = Object.entries(right);
+  if (Object.keys(left).length !== rightEntries.length) return false;
+
+  return rightEntries.every(([key, value]) => Number(left[key]) === value);
 }
 
 export function buildDiscordLinkedRoleMetadata(player: PlayerProjection) {
@@ -252,7 +268,10 @@ export async function saveVerifiedDiscordLinkFromCandidate(input: {
   return { link: saved, player };
 }
 
-export async function syncDiscordLinkedRoleForStoredLink(linkId: string) {
+export async function syncDiscordLinkedRoleForStoredLink(
+  linkId: string,
+  opts?: SyncDiscordLinkedRoleOptions
+) {
   await dbConnect();
   const link = await DiscordLink.findById(linkId);
   if (!link?._id) throw new Error("Discord link not found.");
@@ -266,12 +285,22 @@ export async function syncDiscordLinkedRoleForStoredLink(linkId: string) {
   ).lean<PlayerProjection | null>();
   if (!player?._id) throw new Error("Linked Riftboard profile not found.");
 
-  const accessToken = await verifyDiscordGuildMembershipForLink(link);
   const metadata = buildDiscordLinkedRoleMetadata(player);
+  const platformUsername = `${player.gameName}#${player.tagLine}`;
+  if (
+    !opts?.force &&
+    link.gameName === player.gameName &&
+    link.tagLine === player.tagLine &&
+    sameMetadataSnapshot(link.metadataSnapshot, metadata)
+  ) {
+    return { link, player, metadata, skipped: true };
+  }
+
+  const accessToken = await verifyDiscordGuildMembershipForLink(link);
   await updateDiscordRoleConnection({
     accessToken,
     platformName: "Riftboard Myanmar",
-    platformUsername: `${player.gameName}#${player.tagLine}`,
+    platformUsername,
     metadata,
   });
 
@@ -281,7 +310,7 @@ export async function syncDiscordLinkedRoleForStoredLink(linkId: string) {
   link.lastSyncedAt = new Date();
   await link.save();
 
-  return { link, player, metadata };
+  return { link, player, metadata, skipped: false };
 }
 
 export async function refreshStoredDiscordProfile(
@@ -304,9 +333,12 @@ export async function refreshStoredDiscordProfile(
 
   let linkedRoleError: string | null = null;
   let guildRoleError: string | null = null;
+  let linkedRoleSkipped = false;
+  let guildRoleSkipped = false;
   if (opts?.syncLinkedRole !== false) {
     try {
-      await syncDiscordLinkedRoleForStoredLink(String(link._id));
+      const synced = await syncDiscordLinkedRoleForStoredLink(String(link._id));
+      linkedRoleSkipped = synced.skipped;
     } catch (error) {
       linkedRoleError =
         error instanceof Error ? error.message : "Could not refresh linked-role metadata.";
@@ -314,7 +346,8 @@ export async function refreshStoredDiscordProfile(
   }
 
   try {
-    await syncDiscordGuildRankRoleForStoredLink(String(link._id));
+    const synced = await syncDiscordGuildRankRoleForStoredLink(String(link._id));
+    guildRoleSkipped = synced.skipped;
   } catch (error) {
     guildRoleError =
       error instanceof Error ? error.message : "Could not refresh Discord server rank roles.";
@@ -325,6 +358,8 @@ export async function refreshStoredDiscordProfile(
     canonicalPath: canonicalPlayerPath(player.gameName, player.tagLine),
     linkedRoleError,
     guildRoleError,
+    linkedRoleSkipped,
+    guildRoleSkipped,
   };
 }
 

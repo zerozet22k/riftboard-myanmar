@@ -249,9 +249,13 @@ export async function POST(req: NextRequest) {
       });
       const syncSuffix = refreshed.linkedRoleError
         ? ` Linked-role sync still needs a retry: ${refreshed.linkedRoleError}`
+        : refreshed.linkedRoleSkipped
+          ? " Linked-role metadata unchanged."
         : " Linked-role metadata synced.";
       const guildRoleSuffix = refreshed.guildRoleError
         ? ` Server rank role sync still needs a retry: ${refreshed.guildRoleError}`
+        : refreshed.guildRoleSkipped
+          ? " Server rank roles unchanged."
         : " Server rank roles synced.";
 
       return `Updated ${formatSoloRank(refreshed.player)} Profile: ${getAppBaseUrl()}${refreshed.canonicalPath}${syncSuffix}${guildRoleSuffix}`;

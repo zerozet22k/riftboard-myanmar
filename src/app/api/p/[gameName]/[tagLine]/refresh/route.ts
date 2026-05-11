@@ -4,6 +4,9 @@ import { dbConnect } from "@/lib/mongodb";
 import { Player } from "@/models/player";
 import { refreshPlayerById } from "@/lib/refresh";
 import { buildPlayerLookupQuery, canonicalPlayerPath } from "@/lib/playerIdentity";
+import { DiscordLink } from "@/models/discordLink";
+import { syncDiscordGuildRankRoleForStoredLink } from "@/lib/discordGuildRoles";
+import { syncDiscordLinkedRoleForStoredLink } from "@/lib/discordLinkedRoles";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,13 +19,57 @@ function safeDecode(seg: unknown) {
   }
 }
 
-function toBool(v: any) {
+function toBool(v: unknown) {
   return v === true || v === "true" || v === 1 || v === "1";
 }
 
-function toInt(v: any, def: number) {
+function toInt(v: unknown, def: number) {
   const n = Number(v);
   return Number.isFinite(n) ? Math.trunc(n) : def;
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Error";
+}
+
+async function syncDiscordRolesForPlayer(playerId: string) {
+  const links = await DiscordLink.find(
+    {
+      playerId,
+      verifiedBinding: true,
+      verificationSource: "discord_connections",
+    },
+    { _id: 1 }
+  ).lean();
+
+  let linkedRoleSkipped = 0;
+  let guildRoleSkipped = 0;
+  const errors: string[] = [];
+
+  for (const link of links) {
+    const linkId = String(link._id);
+
+    try {
+      const synced = await syncDiscordLinkedRoleForStoredLink(linkId);
+      if (synced.skipped) linkedRoleSkipped++;
+    } catch (error) {
+      errors.push(errorMessage(error));
+    }
+
+    try {
+      const synced = await syncDiscordGuildRankRoleForStoredLink(linkId);
+      if (synced.skipped) guildRoleSkipped++;
+    } catch (error) {
+      errors.push(errorMessage(error));
+    }
+  }
+
+  return {
+    scanned: links.length,
+    linkedRoleSkipped,
+    guildRoleSkipped,
+    errors,
+  };
 }
 
 export async function POST(
@@ -74,6 +121,9 @@ export async function POST(
       matchesCount,
       fullMastery, 
     });
+    const discordRoleSync = out?._skipped
+      ? { scanned: 0, linkedRoleSkipped: 0, guildRoleSkipped: 0, errors: [] }
+      : await syncDiscordRolesForPlayer(String(player._id));
 
     const canonicalPath = canonicalPlayerPath(player.gameName, player.tagLine);
 
@@ -82,8 +132,8 @@ export async function POST(
     revalidatePath("/tft");
     revalidatePath("/");
 
-    return NextResponse.json({ ok: true, player: out });
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message ?? "Error" }, { status: 500 });
+    return NextResponse.json({ ok: true, player: out, discordRoleSync });
+  } catch (e: unknown) {
+    return NextResponse.json({ ok: false, error: errorMessage(e) }, { status: 500 });
   }
 }
