@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { formatCompactDateTime, formatNumber, formatRelativeTime } from "@/lib/displayTime";
+import { analyzeTftPlaystyle, type TftPlaystyleSummary } from "@/lib/tftPlaystyle";
 
 type IconAsset = {
   id: string;
@@ -65,9 +66,6 @@ const QUEUE_NAMES: Record<number, string> = {
   1130: "Hyper Roll",
   1160: "Double Up",
 };
-
-const AD_WORDS = ["sword", "rageblade", "edge", "slayer", "deathblade", "infinity", "whisper", "bloodthirster", "titan", "sterak", "runaan", "hurricane", "breaker"];
-const AP_WORDS = ["rod", "archangel", "deathcap", "jeweled", "nashor", "blue", "shojin", "morello", "ionic", "adaptive", "spark", "gauntlet"];
 
 function queueName(queueId: number | null) {
   if (queueId == null) return "Unknown";
@@ -154,6 +152,39 @@ function MiniStat({ label, value }: { label: string; value: string | number }) {
   );
 }
 
+function badgeTone(tone: TftPlaystyleSummary["badges"][number]["tone"]) {
+  if (tone === "sky") return "border-sky-300/25 bg-sky-300/10 text-sky-100";
+  if (tone === "amber") return "border-amber-300/25 bg-amber-300/10 text-amber-100";
+  if (tone === "rose") return "border-rose-300/25 bg-rose-300/10 text-rose-100";
+  return "border-emerald-300/25 bg-emerald-300/10 text-emerald-100";
+}
+
+function PlaystyleBadges({ playstyle }: { playstyle: TftPlaystyleSummary }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {playstyle.badges.map((badge) => (
+        <span
+          key={`${badge.icon}-${badge.label}`}
+          className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium ${badgeTone(badge.tone)}`}
+          title={badge.label}
+        >
+          <span className="rounded bg-black/20 px-1 py-0.5 font-mono text-[10px] leading-none">{badge.icon}</span>
+          {badge.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function playstyleSidePercent(axis: TftPlaystyleSummary["axes"][number]) {
+  if (axis.label === "Balanced") return 50;
+  return Math.round(axis.value >= 50 ? axis.value : 100 - axis.value);
+}
+
+function playstyleDisplayLabel(axis: TftPlaystyleSummary["axes"][number]) {
+  return axis.label === "Balanced" ? `${axis.left}/${axis.right}` : axis.label;
+}
+
 function IconImage({ src, alt, className }: { src: string | null | undefined; alt: string; className: string }) {
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
 
@@ -185,53 +216,7 @@ function computeSummary(matches: TftMatchRow[]) {
   const top4Rate = placements.length ? (placements.filter((place) => place <= 4).length / placements.length) * 100 : null;
   const winRate = placements.length ? (placements.filter((place) => place === 1).length / placements.length) * 100 : null;
 
-  const carries = window
-    .map((match) =>
-      [...match.units]
-        .sort(
-          (left, right) =>
-            (right.itemNames?.length ?? 0) - (left.itemNames?.length ?? 0) ||
-            (right.tier ?? 0) - (left.tier ?? 0) ||
-            (right.rarity ?? 0) - (left.rarity ?? 0)
-        )[0]
-    )
-    .filter(Boolean)
-    .map((unit) => String(unit.characterId ?? unit.name ?? unit.displayName ?? "").toLowerCase())
-    .filter(Boolean);
-  const uniqueCarries = new Set(carries).size;
-  const flexible = carries.length ? clamp((uniqueCarries / carries.length) * 135) : 50;
-
-  const avgLevel = window.length
-    ? window.reduce((sum, match) => sum + (match.level ?? 0), 0) / Math.max(1, window.filter((match) => match.level != null).length)
-    : 0;
-  const avgGold = window.length
-    ? window.reduce((sum, match) => sum + (match.goldLeft ?? 0), 0) / Math.max(1, window.filter((match) => match.goldLeft != null).length)
-    : 0;
-  const tempo = clamp(42 + (avgLevel - 7) * 24 + (12 - avgGold) * 2);
-
-  const avgDamage = window.length
-    ? window.reduce((sum, match) => sum + (match.totalDamageToPlayers ?? 0), 0) /
-      Math.max(1, window.filter((match) => match.totalDamageToPlayers != null).length)
-    : 0;
-  const damage = clamp((avgDamage / 165) * 100);
-
-  let adSignals = 0;
-  let apSignals = 0;
-  for (const match of window) {
-    for (const unit of match.units) {
-      for (const item of unit.itemIcons ?? []) {
-        const label = `${item.id} ${item.displayName}`.toLowerCase();
-        if (AD_WORDS.some((word) => label.includes(word))) adSignals += 1;
-        if (AP_WORDS.some((word) => label.includes(word))) apSignals += 1;
-      }
-      for (const item of unit.itemNames ?? []) {
-        const label = item.toLowerCase();
-        if (AD_WORDS.some((word) => label.includes(word))) adSignals += 1;
-        if (AP_WORDS.some((word) => label.includes(word))) apSignals += 1;
-      }
-    }
-  }
-  const ap = adSignals + apSignals ? (apSignals / (adSignals + apSignals)) * 100 : 50;
+  const playstyle = analyzeTftPlaystyle(window);
 
   return {
     window,
@@ -240,12 +225,7 @@ function computeSummary(matches: TftMatchRow[]) {
     avgPlace,
     top4Rate,
     winRate,
-    playstyle: [
-      { left: "Flexible", right: "Forcer", value: flexible },
-      { left: "Economy", right: "Tempo", value: tempo },
-      { left: "Tank", right: "Damage", value: damage },
-      { left: "AD", right: "AP", value: ap },
-    ],
+    playstyle,
   };
 }
 
@@ -313,18 +293,27 @@ function SummaryPanel({ matches }: { matches: TftMatchRow[] }) {
 
         <div className="space-y-4">
           <div className="rounded-lg bg-zinc-950/24 px-4 py-3">
-            <div className="text-sm font-semibold text-zinc-100">Playstyle</div>
-            <div className="mt-4 space-y-4">
-              {summary.playstyle.map((row) => (
-                <div key={`${row.left}-${row.right}`} className="grid grid-cols-[78px_minmax(0,1fr)_78px] items-center gap-3 text-sm">
-                  <div className="text-right text-zinc-300">{row.left}</div>
-                  <div className="relative h-1.5 rounded-full bg-zinc-700">
-                    <span
-                      className="absolute top-1/2 h-3 w-3 -translate-y-1/2 rounded-full bg-amber-200 shadow"
-                      style={{ left: `calc(${clamp(row.value)}% - 6px)` }}
-                    />
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-sm font-semibold text-zinc-100">Playstyle</div>
+              <PlaystyleBadges playstyle={summary.playstyle} />
+            </div>
+            <div className="mt-4 grid gap-2 sm:grid-cols-2">
+              {summary.playstyle.axes.map((row) => (
+                <div key={`${row.left}-${row.right}`} className="rounded-md bg-zinc-900/55 px-3 py-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="rounded bg-black/20 px-1.5 py-1 font-mono text-[10px] font-semibold leading-none text-amber-100">
+                        {row.icon}
+                      </span>
+                      <span className="truncate text-sm font-semibold text-zinc-100">{playstyleDisplayLabel(row)}</span>
+                    </div>
+                    <div className="text-sm font-semibold tabular-nums text-lime-300">
+                      {playstyleSidePercent(row)}%
+                    </div>
                   </div>
-                  <div className="text-zinc-300">{row.right}</div>
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-zinc-800">
+                    <div className="h-full rounded-full bg-amber-200" style={{ width: `${clamp(playstyleSidePercent(row))}%` }} />
+                  </div>
                 </div>
               ))}
             </div>
@@ -601,6 +590,7 @@ export default function TftMatchHistory({
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [expandedMatchId, setExpandedMatchId] = useState<string | null>(null);
+  const [autoSyncTried, setAutoSyncTried] = useState(false);
 
   useEffect(() => {
     setItems(initialMatches);
@@ -608,7 +598,41 @@ export default function TftMatchHistory({
     setErr(null);
     setLoading(false);
     setExpandedMatchId(null);
+    setAutoSyncTried(false);
   }, [initialMatches, initialCursor, gameName, tagLine]);
+
+  useEffect(() => {
+    if (items.length || loading || autoSyncTried) return;
+
+    let cancelled = false;
+    setAutoSyncTried(true);
+    setLoading(true);
+    setErr(null);
+
+    fetch(matchesUrl(gameName, tagLine, 20), { cache: "no-store" })
+      .then(async (response) => {
+        const json = (await response.json().catch(() => ({}))) as {
+          ok?: boolean;
+          error?: string;
+          matches?: TftMatchRow[];
+          nextCursor?: string | null;
+        };
+        if (!response.ok || !json?.ok) throw new Error(json?.error ?? `Failed (${response.status})`);
+        if (cancelled) return;
+        setItems(Array.isArray(json.matches) ? json.matches : []);
+        setCursor(json.nextCursor ?? null);
+      })
+      .catch((error) => {
+        if (!cancelled) setErr(error instanceof Error ? error.message : "TFT match sync failed");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [autoSyncTried, gameName, items.length, loading, tagLine]);
 
   async function loadMore() {
     if (!cursor || loading) return;
@@ -782,11 +806,12 @@ export default function TftMatchHistory({
         })
       ) : (
         <div className="rounded-lg bg-zinc-900/18 p-5 text-sm text-zinc-400 ring-1 ring-white/5">
-          No TFT matches yet. Hit Refresh to sync recent TFT games.
+          {loading ? "Syncing recent TFT games..." : "No TFT matches yet. Hit Refresh to sync recent TFT games."}
+          {err ? <div className="mt-2 text-xs text-red-300">{err}</div> : null}
         </div>
       )}
 
-      {err ? <div className="text-sm text-red-300">{err}</div> : null}
+      {err && items.length ? <div className="text-sm text-red-300">{err}</div> : null}
       <div className="flex items-center justify-between gap-3 px-1">
         <div className="text-xs text-zinc-500">
           Showing <span className="text-zinc-300">{shownCount}</span> TFT matches

@@ -74,13 +74,13 @@ function getLolApiKey() {
 }
 
 function getTftApiKey() {
-  const key = optEnv("RIOT_TFT_API_KEY") || optEnv("TFT_API_KEY");
-  if (!key) throw new Error("Missing env: RIOT_TFT_API_KEY");
+  const key = optEnv("RIOT_TFT_API_KEY") || optEnv("TFT_API_KEY") || optEnv("RIOT_API_KEY");
+  if (!key) throw new Error("Missing env: RIOT_TFT_API_KEY or RIOT_API_KEY");
   return key;
 }
 
 export function hasTftApiKey() {
-  return !!(optEnv("RIOT_TFT_API_KEY") || optEnv("TFT_API_KEY"));
+  return !!(optEnv("RIOT_TFT_API_KEY") || optEnv("TFT_API_KEY") || optEnv("RIOT_API_KEY"));
 }
 
 export function getRiotApiKey(game: "lol" | "tft" = "lol") {

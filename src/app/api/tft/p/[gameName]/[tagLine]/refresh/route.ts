@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { dbConnect } from "@/lib/mongodb";
 import { buildPlayerLookupQuery } from "@/lib/playerIdentity";
 import { refreshPlayerById } from "@/lib/refresh";
+import { hasTftApiKey } from "@/lib/riot";
 import { Player } from "@/models/player";
 
 export const runtime = "nodejs";
@@ -32,6 +33,13 @@ export async function POST(req: Request, { params }: { params: Promise<Params> }
       return NextResponse.json({ ok: false, error: "Missing Riot ID" }, { status: 400 });
     }
 
+    if (body.syncTftMatches !== false && !hasTftApiKey()) {
+      return NextResponse.json(
+        { ok: false, error: "Missing RIOT_TFT_API_KEY or RIOT_API_KEY; TFT match history cannot sync." },
+        { status: 500 }
+      );
+    }
+
     await dbConnect();
 
     const player = await Player.findOne(buildPlayerLookupQuery(gameNameRaw, tagLineRaw), { _id: 1 }).lean();
@@ -42,7 +50,7 @@ export async function POST(req: Request, { params }: { params: Promise<Params> }
     const refreshed = await refreshPlayerById(String(player._id), {
       force: body.force === true,
       syncTftMatches: body.syncTftMatches !== false,
-      matchesCount: Math.max(1, Math.min(50, Number(body.matchesCount ?? 10) || 10)),
+      matchesCount: Math.max(1, Math.min(50, Number(body.matchesCount ?? 20) || 20)),
     });
 
     return NextResponse.json({ ok: true, player: refreshed });

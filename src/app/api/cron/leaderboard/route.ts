@@ -17,8 +17,10 @@ const DEFAULT_DELAY_MS = Math.max(
 );
 const DEFAULT_MATCHES_COUNT = Math.max(
     1,
-    Math.min(100, Number(process.env.LEADERBOARD_CRON_MATCHES_COUNT ?? 10) || 10)
+    Math.min(100, Number(process.env.LEADERBOARD_CRON_MATCHES_COUNT ?? 20) || 20)
 );
+const DEFAULT_SYNC_TFT_MATCHES =
+    String(process.env.LEADERBOARD_CRON_SYNC_TFT_MATCHES ?? "true").toLowerCase() !== "false";
 
 function getToken(req: NextRequest): string {
     const auth = req.headers.get("authorization") || "";
@@ -68,7 +70,7 @@ export async function GET(req: NextRequest) {
         const cooldownMs = numParam(url, "cooldownMs", undefined);
         const force = boolParam(url, "force", false);
         const syncMatches = boolParam(url, "syncMatches", false);
-        const syncTftMatches = boolParam(url, "syncTftMatches", syncMatches);
+        const syncTftMatches = boolParam(url, "syncTftMatches", syncMatches || DEFAULT_SYNC_TFT_MATCHES);
         const matchesCount = Math.max(1, Math.min(100, numParam(url, "matchesCount", DEFAULT_MATCHES_COUNT)!));
 
         const result = await refreshAllPlayers({

@@ -40,16 +40,24 @@ export default function ProfileRefreshButton({
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
+          force: mode === "tft",
           syncMatches: mode === "lol",
           syncTftMatches: mode === "tft",
-          matchesCount: 10,
+          matchesCount: mode === "tft" ? 20 : 10,
           fullMastery: mode === "lol",
         }),
       });
 
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) {
-        setErr(j?.error ?? `Refresh failed (${res.status})`);
+        const message = String(j?.error ?? `Refresh failed (${res.status})`);
+        if (/403|Forbidden/i.test(message) && mode === "tft") {
+          setErr("TFT match sync failed: Riot rejected the API key. Update RIOT_TFT_API_KEY or RIOT_API_KEY.");
+        } else if (/Missing RIOT_TFT_API_KEY|Missing env/i.test(message) && mode === "tft") {
+          setErr("TFT match sync failed: add RIOT_TFT_API_KEY or RIOT_API_KEY.");
+        } else {
+          setErr(message);
+        }
         return;
       }
 

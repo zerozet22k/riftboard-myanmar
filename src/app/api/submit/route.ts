@@ -75,7 +75,8 @@ export async function POST(req: NextRequest) {
         force: true,
         fullMastery: false,
         syncMatches: true,
-        matchesCount: 10,
+        syncTftMatches: true,
+        matchesCount: 20,
       })) as RefreshResult;
     } catch (error) {
       refreshOut = { _refreshError: error instanceof Error ? error.message : "Refresh failed" };

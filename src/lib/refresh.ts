@@ -382,6 +382,8 @@ async function syncRecentTftMatches(params: { player: any; puuid: string; matchR
 
   const existing = await TftMatch.find({ matchId: { $in: ids } }, { matchId: 1 }).lean();
   const have = new Set(existing.map((x: any) => x.matchId));
+  let failedFetches = 0;
+  let writtenSummaries = 0;
 
   await mapLimit(ids, MATCH_SYNC_CONCURRENCY, async (matchId) => {
     try {
@@ -433,10 +435,20 @@ async function syncRecentTftMatches(params: { player: any; puuid: string; matchR
         },
         { upsert: true }
       );
+      writtenSummaries++;
     } catch (e) {
+      failedFetches++;
       if (isRateLimit(e)) await sleep(rateLimitWaitMs(e, 2500));
+      else console.error(`TFT match sync failed for ${matchId}:`, e);
     }
   });
+
+  if (failedFetches >= ids.length) {
+    throw new Error("TFT match sync failed for all recent matches");
+  }
+  if (writtenSummaries === 0) {
+    throw new Error("TFT match sync found matches, but none matched this player's TFT puuid");
+  }
 
   player.tftMatchSync = { ...(player.tftMatchSync ?? {}), lastSyncAt: now };
   await player.save();
@@ -467,7 +479,27 @@ export async function refreshPlayerById(
     if (last) {
       const now = Date.now();
       const age = now - last.getTime();
+      const wantsTftMatchSync =
+        opts?.syncTftMatches === true &&
+        hasTftApiKey() &&
+        player?.tftMatchSync?.enabled !== false;
+      let shouldBypassCooldownForTftMatches = false;
+
+      if (wantsTftMatchSync) {
+        const lastTftMatchSync = player.tftMatchSync?.lastSyncAt
+          ? new Date(player.tftMatchSync.lastSyncAt).getTime()
+          : 0;
+        const hasStoredTftMatches = await TftPlayerMatch.exists({ playerId: player._id });
+        shouldBypassCooldownForTftMatches =
+          !hasStoredTftMatches ||
+          !Number.isFinite(lastTftMatchSync) ||
+          now - lastTftMatchSync >= cooldownMs;
+      }
+
       if (age < cooldownMs) {
+        if (shouldBypassCooldownForTftMatches) {
+          // Continue the refresh so a rank-only update does not block initial TFT match history.
+        } else {
         const next = new Date(last.getTime() + cooldownMs);
         return {
           ...player.toObject(),
@@ -475,6 +507,7 @@ export async function refreshPlayerById(
           _cooldownSecondsLeft: Math.ceil((cooldownMs - age) / 1000),
           _nextRefreshAt: next.toISOString(),
         };
+        }
       }
     }
   }
@@ -648,7 +681,10 @@ export async function refreshPlayerById(
     });
   }
 
-  const syncTftMatches = opts?.syncTftMatches === true && hasTftApiKey();
+  const syncTftMatches =
+    opts?.syncTftMatches === true &&
+    hasTftApiKey() &&
+    player?.tftMatchSync?.enabled !== false;
   if (syncTftMatches) {
     const tftPuuid = String(player.tftPuuid ?? puuid ?? "").trim();
     if (tftPuuid) {
