@@ -39,7 +39,7 @@ const LINKED_ROLE_METADATA = [
 const COMMANDS = [
   {
     name: "link",
-    description: "Get the Riot bind link.",
+    description: "Link your Riot ID for server roles.",
     type: 1,
   },
   {
@@ -54,7 +54,7 @@ const COMMANDS = [
   },
   {
     name: "roles",
-    description: "Show rank role info.",
+    description: "See how Riftboard rank roles work.",
     type: 1,
   },
   {
@@ -74,7 +74,7 @@ const COMMANDS = [
   },
   {
     name: "refresh-profile",
-    description: "Refresh your rank roles.",
+    description: "Refresh your Riftboard rank roles.",
     type: 1,
   },
   {
@@ -89,7 +89,7 @@ const COMMANDS = [
   },
   {
     name: "setup-bind-message",
-    description: "Admin command to post a public Riftboard bind message in this channel.",
+    description: "Post the public Riot bind message.",
     type: 1,
     default_member_permissions: "8",
   },

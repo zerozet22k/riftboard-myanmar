@@ -21,8 +21,10 @@ import {
   organizationSchemaId,
   websiteSchemaId,
 } from "@/lib/seo";
+import { hydrateTftMatches } from "@/lib/tftAssets";
 import { Player } from "@/models/player";
 import { RankEntry } from "@/models/rankEntry";
+import { TftMatch } from "@/models/tftMatch";
 import { TftPlayerMatch } from "@/models/tftPlayerMatch";
 
 export const runtime = "nodejs";
@@ -69,9 +71,22 @@ type TftMatchDocView = {
   units?: unknown[];
 };
 
+type TftRawMatchView = {
+  matchId?: string | null;
+  raw?: unknown;
+};
+
 type TftRankHistoryRow = RankSnapshot & {
   queue: "RANKED_TFT";
 };
+
+function safeNum(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function safeStr(value: unknown) {
+  return typeof value === "string" ? value : null;
+}
 
 function safeDecode(seg: unknown) {
   try {
@@ -137,6 +152,56 @@ function serializedUnits(value: unknown) {
         : [],
     };
   });
+}
+
+function serializeParticipant(participant: unknown) {
+  const row = participant && typeof participant === "object" ? (participant as Record<string, unknown>) : {};
+  return {
+    puuid: safeStr(row.puuid),
+    riotIdGameName: safeStr(row.riotIdGameName),
+    riotIdTagline: safeStr(row.riotIdTagline),
+    placement: safeNum(row.placement),
+    level: safeNum(row.level),
+    lastRound: safeNum(row.last_round),
+    playersEliminated: safeNum(row.players_eliminated),
+    totalDamageToPlayers: safeNum(row.total_damage_to_players),
+    goldLeft: safeNum(row.gold_left),
+    augments: Array.isArray(row.augments)
+      ? row.augments.filter((value): value is string => typeof value === "string")
+      : [],
+    traits: Array.isArray(row.traits)
+      ? row.traits.map((trait) => {
+          const traitRow = trait && typeof trait === "object" ? (trait as Record<string, unknown>) : {};
+          return {
+            name: safeStr(traitRow.name),
+            numUnits: safeNum(traitRow.num_units),
+            style: safeNum(traitRow.style),
+            tierCurrent: safeNum(traitRow.tier_current),
+            tierTotal: safeNum(traitRow.tier_total),
+          };
+        })
+      : [],
+    units: Array.isArray(row.units)
+      ? row.units.map((unit) => {
+          const unitRow = unit && typeof unit === "object" ? (unit as Record<string, unknown>) : {};
+          return {
+            characterId: safeStr(unitRow.character_id),
+            name: safeStr(unitRow.name),
+            rarity: safeNum(unitRow.rarity),
+            tier: safeNum(unitRow.tier),
+            itemNames: Array.isArray(unitRow.itemNames)
+              ? unitRow.itemNames.filter((item): item is string => typeof item === "string")
+              : [],
+          };
+        })
+      : [],
+  };
+}
+
+function serializeParticipants(raw: unknown) {
+  const payload = raw && typeof raw === "object" ? (raw as { info?: { participants?: unknown[] } }) : {};
+  const participants = Array.isArray(payload.info?.participants) ? payload.info.participants : [];
+  return participants.map(serializeParticipant).sort((left, right) => (left.placement ?? 99) - (right.placement ?? 99));
 }
 
 function playerMetaDescription(player: Pick<PlayerView, "gameName" | "tagLine" | "tft">) {
@@ -233,11 +298,17 @@ export default async function TftPlayerProfilePage({
       .lean() as Promise<TftRankHistoryRow[]>,
     TftPlayerMatch.find({ playerId: player._id })
       .sort({ gameDatetime: -1, _id: -1 })
-      .limit(10)
+      .limit(20)
       .lean(),
   ]);
 
-  const initialMatches: TftMatchRow[] = (matchDocs as TftMatchDocView[]).map((match) => ({
+  const rawMatches = await TftMatch.find(
+    { matchId: { $in: (matchDocs as TftMatchDocView[]).map((match) => String(match.matchId ?? "")).filter(Boolean) } },
+    { matchId: 1, raw: 1 }
+  ).lean<TftRawMatchView[]>();
+  const rawByMatchId = new Map(rawMatches.map((match) => [String(match.matchId ?? ""), match.raw]));
+
+  const serializedMatches: TftMatchRow[] = (matchDocs as TftMatchDocView[]).map((match) => ({
     _id: String(match._id),
     matchId: String(match.matchId ?? ""),
     queueId: typeof match.queueId === "number" ? match.queueId : null,
@@ -255,7 +326,9 @@ export default async function TftPlayerProfilePage({
       : [],
     traits: serializedTraits(match.traits),
     units: serializedUnits(match.units),
+    participants: serializeParticipants(rawByMatchId.get(String(match.matchId ?? ""))),
   }));
+  const initialMatches = await hydrateTftMatches(serializedMatches);
 
   const tft = player.tft ?? {};
   const tftPeak = rankHistory.length ? bestRankSnapshot(rankHistory) : tft.tier ? tft : null;

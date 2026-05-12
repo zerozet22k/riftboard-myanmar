@@ -4,6 +4,7 @@ import mongoose from "mongoose";
 import { dbConnect } from "@/lib/mongodb";
 import { buildPlayerLookupQuery } from "@/lib/playerIdentity";
 import { getTftMatchById, getTftMatchIdsByPuuid, platformToMatchRegion } from "@/lib/riot";
+import { hydrateTftMatches } from "@/lib/tftAssets";
 import { Player } from "@/models/player";
 import { TftMatch } from "@/models/tftMatch";
 import { TftPlayerMatch } from "@/models/tftPlayerMatch";
@@ -227,6 +228,32 @@ function serializeMatch(match: Dict & { _id?: unknown }) {
   };
 }
 
+function serializeParticipant(participant: unknown) {
+  const row = participant && typeof participant === "object" ? (participant as Record<string, unknown>) : {};
+  return {
+    puuid: safeStr(row.puuid),
+    riotIdGameName: safeStr(row.riotIdGameName),
+    riotIdTagline: safeStr(row.riotIdTagline),
+    placement: safeNum(row.placement),
+    level: safeNum(row.level),
+    lastRound: safeNum(row.last_round),
+    playersEliminated: safeNum(row.players_eliminated),
+    totalDamageToPlayers: safeNum(row.total_damage_to_players),
+    goldLeft: safeNum(row.gold_left),
+    augments: Array.isArray(row.augments)
+      ? row.augments.filter((value): value is string => typeof value === "string")
+      : [],
+    traits: Array.isArray(row.traits) ? row.traits.map(simplifyTrait) : [],
+    units: Array.isArray(row.units) ? row.units.map(simplifyUnit) : [],
+  };
+}
+
+function serializeParticipants(raw: unknown) {
+  const payload = raw && typeof raw === "object" ? (raw as { info?: { participants?: unknown[] } }) : {};
+  const participants = Array.isArray(payload.info?.participants) ? payload.info.participants : [];
+  return participants.map(serializeParticipant).sort((left, right) => (left.placement ?? 99) - (right.placement ?? 99));
+}
+
 export async function GET(req: NextRequest, { params }: { params: Promise<Params> }) {
   try {
     const { gameName, tagLine } = await params;
@@ -313,12 +340,26 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
 
     const total = await TftPlayerMatch.countDocuments({ playerId });
 
+    const rawMatches = await TftMatch.find(
+      { matchId: { $in: page.map((match: any) => String(match.matchId ?? "")).filter(Boolean) } },
+      { matchId: 1, raw: 1 }
+    ).lean();
+    const rawByMatchId = new Map(rawMatches.map((match: any) => [String(match.matchId ?? ""), match.raw]));
+    const serialized = page.map((match) => {
+      const row = serializeMatch(match);
+      return {
+        ...row,
+        participants: serializeParticipants(rawByMatchId.get(row.matchId)),
+      };
+    });
+    const matches = await hydrateTftMatches(serialized);
+
     return NextResponse.json({
       ok: true,
       total,
       count: page.length,
       inserted,
-      matches: page.map(serializeMatch),
+      matches,
       nextCursor,
     });
   } catch (error) {

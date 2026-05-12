@@ -42,7 +42,7 @@ export const DISCORD_LINKED_ROLE_METADATA = [
 export const DISCORD_COMMAND_DEFINITIONS = [
   {
     name: "link",
-    description: "Get the Riot bind link.",
+    description: "Link your Riot ID for server roles.",
     type: 1,
   },
   {
@@ -57,7 +57,7 @@ export const DISCORD_COMMAND_DEFINITIONS = [
   },
   {
     name: "roles",
-    description: "Show rank role info.",
+    description: "See how Riftboard rank roles work.",
     type: 1,
   },
   {
@@ -77,7 +77,7 @@ export const DISCORD_COMMAND_DEFINITIONS = [
   },
   {
     name: "refresh-profile",
-    description: "Refresh your rank roles.",
+    description: "Refresh your Riftboard rank roles.",
     type: 1,
   },
   {
@@ -92,7 +92,7 @@ export const DISCORD_COMMAND_DEFINITIONS = [
   },
   {
     name: "setup-bind-message",
-    description: "Admin command to post a public Riftboard bind message in this channel.",
+    description: "Post the public Riot bind message.",
     type: 1,
     default_member_permissions: "8",
   },
@@ -294,6 +294,7 @@ export type DiscordGuildRole = {
 export type DiscordGuildMember = {
   user?: {
     id?: string;
+    bot?: boolean;
   };
   roles: string[];
 };

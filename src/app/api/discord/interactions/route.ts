@@ -74,7 +74,11 @@ function formatSyncTime(value: unknown) {
 }
 
 function linkInstructions(linkedRolesUrl: string) {
-  return `Bind Riot: ${linkedRolesUrl}\nRoles sync from verified Riot data.`;
+  return [
+    "**Link your Riot ID**",
+    `Use this page to connect Discord with your Riot account: ${linkedRolesUrl}`,
+    "After that, I can sync your rank roles here.",
+  ].join("\n");
 }
 
 function helpText(linkedRolesUrl: string, canSyncServerRoles: boolean) {
@@ -93,18 +97,18 @@ function helpText(linkedRolesUrl: string, canSyncServerRoles: boolean) {
 
 function rolesText(linkedRolesUrl: string) {
   return [
-    "Rank roles sync from Riot.",
-    "Queues: Solo, TFT, Flex.",
-    "Refresh: /refresh-profile",
-    `Bind: ${linkedRolesUrl}`,
+    "**Rank roles**",
+    "Solo, TFT, and Flex roles sync from verified Riot data.",
+    "Use /refresh-profile after your rank changes.",
+    `Not linked yet? ${linkedRolesUrl}`,
   ].join("\n");
 }
 
 function publicBindMessage(linkedRolesUrl: string) {
   return [
-    "Welcome to Riftboard Myanmar.",
-    `Bind Riot: ${linkedRolesUrl}`,
-    "Rank roles sync from verified Riot data.",
+    "**Welcome to Riftboard Myanmar.**",
+    `Link your Riot ID here: ${linkedRolesUrl}`,
+    "After linking, your bind role is removed and your rank roles can sync.",
   ].join("\n");
 }
 
@@ -242,21 +246,33 @@ export async function POST(req: NextRequest) {
 
   if (commandName === "sync-server-roles") {
     if (!canSyncServerRoles) {
-      return messageResponse("No access.");
+      return messageResponse("You need the server role-sync staff role to use this.");
     }
 
     return scheduleDeferredReply(interaction, async () => {
       const summary = await syncAllDiscordGuildRankRoles();
       const createdRoles =
         summary.createdRoleNames.length
-          ? ` Created: ${summary.createdRoleNames.join(", ")}.`
+          ? `Created: ${summary.createdRoleNames.join(", ")}`
           : "";
       const errors =
         summary.errors.length
-          ? ` Errors: ${summary.errors.slice(0, 3).join(" | ")}${summary.errors.length > 3 ? " | ..." : ""}`
+          ? `Errors: ${summary.errors.slice(0, 3).join(" | ")}${summary.errors.length > 3 ? " | ..." : ""}`
           : "";
 
-      return `Done. Scanned ${summary.scanned}. Synced ${summary.synced}. Unranked ${summary.unranked}. Missing members ${summary.missingMembers}. Missing players ${summary.missingPlayers}. Cleaned ${summary.cleanedMembers}. Removed roles ${summary.cleanedRoles}. DMs ${summary.messagedUnboundMembers}/${summary.unboundMessageFailures}.${createdRoles}${errors}`;
+      return [
+        "**Server role sync complete**",
+        `Scanned: ${summary.scanned}`,
+        `Synced: ${summary.synced}`,
+        `Bind role added: ${summary.bindRoleAdded}`,
+        `Bind role removed: ${summary.bindRoleRemoved}`,
+        `Rank roles removed: ${summary.cleanedRoles}`,
+        `Missing: ${summary.missingMembers} members, ${summary.missingPlayers} players`,
+        `DMs: ${summary.messagedUnboundMembers} sent, ${summary.unboundMessageFailures} failed`,
+        `Unranked: ${summary.unranked}`,
+        createdRoles,
+        errors,
+      ].filter(Boolean).join("\n");
     });
   }
 
@@ -277,12 +293,12 @@ export async function POST(req: NextRequest) {
 
   if (!link?._id) {
     return messageResponse(
-      `You are not bound to a Riftboard Riot account yet.\n${linkInstructions(linkedRolesUrl)}`
+      `**You're not linked yet.**\nBind your Riot ID here: ${linkedRolesUrl}\nOnce linked, run /refresh-profile.`
     );
   }
   if (!isVerifiedDiscordLink(link)) {
     return messageResponse(
-      `Your old Riftboard bind needs Discord verification again.\n${linkInstructions(linkedRolesUrl)}`
+      `**Please relink your Riot ID.**\nBind here: ${linkedRolesUrl}\nOnce linked, run /refresh-profile.`
     );
   }
 

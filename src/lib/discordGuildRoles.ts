@@ -49,6 +49,7 @@ type ManagedRoleContext = {
   guildId: string;
   rolesByName: Map<string, DiscordGuildRole>;
   managedRolesByQueue: Map<ManagedRankQueueKey, DiscordGuildRole[]>;
+  bindRole: DiscordGuildRole;
   createdRoleNames: string[];
 };
 
@@ -86,6 +87,16 @@ function toTitleCase(value: string) {
 
 function rankRolePrefix() {
   return String(process.env.DISCORD_RANK_ROLE_PREFIX ?? "Rank").trim();
+}
+
+function bindRoleName() {
+  return String(process.env.DISCORD_BIND_ROLE_NAME ?? "").trim() || "Riftboard: Bind Riot";
+}
+
+function bindRoleColor() {
+  const raw = String(process.env.DISCORD_BIND_ROLE_COLOR ?? "5865F2").trim().replace(/^#/, "");
+  const parsed = Number.parseInt(raw, 16);
+  return Number.isFinite(parsed) ? parsed : 0x5865f2;
 }
 
 function managedRoleName(queue: ManagedRankQueue, tier: string) {
@@ -142,6 +153,10 @@ function memberUserId(member: DiscordGuildMember) {
   return String(member.user?.id ?? "").trim();
 }
 
+function isBotMember(member: DiscordGuildMember) {
+  return !!member.user?.bot;
+}
+
 async function listAllDiscordGuildMembers(guildId: string) {
   const members: DiscordGuildMember[] = [];
   let after = "";
@@ -162,13 +177,14 @@ async function listAllDiscordGuildMembers(guildId: string) {
 function unboundBindMessage() {
   const linkedRolesUrl = `${getAppBaseUrl()}/discord/linked-roles`;
   const codeText = isCommunityCodeRequired()
-    ? "If Riftboard asks for the private community code, get it from the server staff and enter it on that page."
-    : "No private community code is required right now.";
+    ? "If it asks for the community code, ask server staff and enter it there."
+    : "No community code is needed right now.";
 
   return [
-    "Riftboard removed manually assigned rank roles from your Discord account because it is not bound to an approved Riftboard Riot account yet.",
-    `Bind your Discord account here: ${linkedRolesUrl}`,
-    "After binding, Riftboard can sync your Solo Queue, TFT, and Ranked Flex roles from official Riot data.",
+    "**Welcome to Riftboard Myanmar.**",
+    `You have the **${bindRoleName()}** role because your Riot account is not linked yet.`,
+    `Bind here: ${linkedRolesUrl}`,
+    "After linking, the bind role is removed and your rank roles can sync.",
     codeText,
   ].join("\n");
 }
@@ -188,6 +204,19 @@ async function ensureManagedRoleContext(existingRoles?: DiscordGuildRole[]) {
   const createdRoleNames: string[] = [];
   const roles = [...(existingRoles ?? (await listDiscordGuildRoles(guildId)))];
   const byName = new Map(roles.map((role) => [String(role.name ?? "").trim(), role]));
+
+  let bindRole = byName.get(bindRoleName());
+  if (!bindRole) {
+    bindRole = await createDiscordGuildRole({
+      guildId,
+      name: bindRoleName(),
+      color: bindRoleColor(),
+      reason: "Create Riftboard bind role",
+    });
+    roles.push(bindRole);
+    byName.set(bindRole.name, bindRole);
+    createdRoleNames.push(bindRole.name);
+  }
 
   for (const queue of MANAGED_RANK_QUEUES) {
     for (const spec of MANAGED_RANK_ROLE_SPECS) {
@@ -209,6 +238,7 @@ async function ensureManagedRoleContext(existingRoles?: DiscordGuildRole[]) {
   return {
     guildId,
     rolesByName: byName,
+    bindRole,
     managedRolesByQueue: new Map(
       MANAGED_RANK_QUEUES.map((queue) => [
         queue.key,
@@ -236,6 +266,7 @@ export async function syncDiscordGuildRankRoleForIdentity(input: {
 
   let addedRoleName: string | null = null;
   let removedRoles = 0;
+  let removedBindRole = false;
   const assignedRoleNames = Object.fromEntries(
     MANAGED_RANK_QUEUES.map((queue) => [queue.key, null])
   ) as Record<ManagedRankQueueKey, string | null>;
@@ -276,12 +307,24 @@ export async function syncDiscordGuildRankRoleForIdentity(input: {
     }
   }
 
+  if (existingRoleIds.has(context.bindRole.id)) {
+    await removeDiscordGuildMemberRole({
+      guildId: context.guildId,
+      userId: input.discordUserId,
+      roleId: context.bindRole.id,
+      reason: `Remove Riftboard bind role for verified member ${input.player.gameName}#${input.player.tagLine}`,
+    });
+    existingRoleIds.delete(context.bindRole.id);
+    removedBindRole = true;
+  }
+
   return {
     createdRoleNames: context.createdRoleNames,
     assignedRoleName: assignedRoleNames.solo,
     assignedRoleNames,
     addedRoleName,
     removedRoles,
+    removedBindRole,
   };
 }
 
@@ -319,6 +362,7 @@ export async function syncDiscordGuildRankRoleForStoredLink(
       assignedRoleNames: assignedRoleNamesFromSnapshot(wantedSnapshot),
       addedRoleName: null,
       removedRoles: 0,
+      removedBindRole: false,
       skipped: true,
     };
   }
@@ -378,6 +422,8 @@ export async function syncAllDiscordGuildRankRoles() {
   let unranked = 0;
   let cleanedMembers = 0;
   let cleanedRoles = 0;
+  let bindRoleAdded = 0;
+  let bindRoleRemoved = 0;
   let messagedUnboundMembers = 0;
   let unboundMessageFailures = 0;
   const errors: string[] = [];
@@ -398,6 +444,7 @@ export async function syncAllDiscordGuildRankRoles() {
       });
       synced++;
       if (!result.assignedRoleName) unranked++;
+      if (result.removedBindRole) bindRoleRemoved++;
       const snapshot = guildRankRoleSnapshot(player);
       await DiscordLink.updateOne(
         { _id: link._id },
@@ -430,13 +477,15 @@ export async function syncAllDiscordGuildRankRoles() {
 
       for (const member of members) {
         const userId = memberUserId(member);
+        if (isBotMember(member)) continue;
         if (!userId || allowedDiscordUserIds.has(userId)) continue;
 
+        const existingRoleIds = new Set(
+          Array.isArray(member.roles) ? member.roles.map((roleId) => String(roleId)) : []
+        );
         const rolesToRemove = (Array.isArray(member.roles) ? member.roles : [])
           .map((roleId) => removableRolesById.get(String(roleId)))
           .filter((role): role is DiscordGuildRole => !!role?.id);
-
-        if (!rolesToRemove.length) continue;
 
         for (const role of rolesToRemove) {
           await removeDiscordGuildMemberRole({
@@ -447,7 +496,21 @@ export async function syncAllDiscordGuildRankRoles() {
           });
           cleanedRoles++;
         }
-        cleanedMembers++;
+
+        let addedBindRole = false;
+        if (!existingRoleIds.has(context.bindRole.id)) {
+          await addDiscordGuildMemberRole({
+            guildId: context.guildId,
+            userId,
+            roleId: context.bindRole.id,
+            reason: "Assign Riftboard bind role to unlinked member",
+          });
+          bindRoleAdded++;
+          addedBindRole = true;
+        }
+
+        if (!rolesToRemove.length && !addedBindRole) continue;
+        if (rolesToRemove.length || addedBindRole) cleanedMembers++;
 
         try {
           await messageUnboundMember(userId);
@@ -472,6 +535,8 @@ export async function syncAllDiscordGuildRankRoles() {
     unranked,
     cleanedMembers,
     cleanedRoles,
+    bindRoleAdded,
+    bindRoleRemoved,
     messagedUnboundMembers,
     unboundMessageFailures,
     createdRoleNames: context.createdRoleNames,

@@ -87,7 +87,12 @@ npm run dev
 npm run build
 npm run lint
 npm run discord:register
+npm run discord:worker
 ```
+
+`discord:worker` keeps a Discord Gateway connection open so new server members can receive the
+`Riftboard: Bind Riot` onboarding role immediately. Enable the bot's Server Members Intent in the
+Discord Developer Portal before running it.
 
 ## Screenshots / Demo
 
