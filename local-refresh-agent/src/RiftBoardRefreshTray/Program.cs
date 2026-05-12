@@ -350,6 +350,7 @@ internal sealed class SettingsForm : Form
     private readonly NumericUpDown _playersPerRunBox;
     private readonly NumericUpDown _delayMsBox;
     private readonly CheckBox _syncMatchesBox;
+    private readonly CheckBox _syncTftMatchesBox;
     private readonly NumericUpDown _matchesCountBox;
     private readonly Label _riotHintLabel;
     private readonly Button _saveButton;
@@ -444,7 +445,7 @@ internal sealed class SettingsForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 7,
+            RowCount = 8,
         };
         settingsTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220));
         settingsTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -456,7 +457,13 @@ internal sealed class SettingsForm : Form
         _syncMatchesBox = new CheckBox
         {
             AutoSize = true,
-            Text = "Also sync latest matches",
+            Text = "Sync LoL latest matches",
+            Margin = new Padding(0, 3, 0, 3),
+        };
+        _syncTftMatchesBox = new CheckBox
+        {
+            AutoSize = true,
+            Text = "Sync TFT latest matches",
             Margin = new Padding(0, 3, 0, 3),
         };
         _riotHintLabel = new Label
@@ -472,7 +479,12 @@ internal sealed class SettingsForm : Form
         _matchesCountBox.ValueChanged += (_, _) => UpdateGuidance();
         _syncMatchesBox.CheckedChanged += (_, _) =>
         {
-            _matchesCountBox.Enabled = _syncMatchesBox.Checked;
+            _matchesCountBox.Enabled = _syncMatchesBox.Checked || _syncTftMatchesBox.Checked;
+            UpdateGuidance();
+        };
+        _syncTftMatchesBox.CheckedChanged += (_, _) =>
+        {
+            _matchesCountBox.Enabled = _syncMatchesBox.Checked || _syncTftMatchesBox.Checked;
             UpdateGuidance();
         };
 
@@ -480,19 +492,20 @@ internal sealed class SettingsForm : Form
         AddSettingRow(settingsTable, "Players refreshed each run", _playersPerRunBox);
         AddSettingRow(settingsTable, "Delay between players (ms)", _delayMsBox);
         AddSettingRow(settingsTable, "Latest matches per player", _matchesCountBox);
-        AddSettingRow(settingsTable, "Match syncing", _syncMatchesBox);
+        AddSettingRow(settingsTable, "LoL match syncing", _syncMatchesBox);
+        AddSettingRow(settingsTable, "TFT match syncing", _syncTftMatchesBox);
 
         var noteLabel = new Label
         {
             AutoSize = true,
             MaximumSize = new Size(480, 0),
             Text =
-                "Riot-safe default is 5 players every 5 minutes with 900ms between players and 10 latest matches. Lower intervals or bigger batches create more Riot load.",
+                "Riot-safe default is 5 players every 5 minutes with 900ms between players and 20 latest matches. Lower intervals or bigger batches create more Riot load.",
             Margin = new Padding(0, 10, 0, 0),
         };
-        settingsTable.Controls.Add(noteLabel, 0, 5);
+        settingsTable.Controls.Add(noteLabel, 0, 6);
         settingsTable.SetColumnSpan(noteLabel, 2);
-        settingsTable.Controls.Add(_riotHintLabel, 0, 6);
+        settingsTable.Controls.Add(_riotHintLabel, 0, 7);
         settingsTable.SetColumnSpan(_riotHintLabel, 2);
         settingsBox.Controls.Add(settingsTable);
         root.Controls.Add(settingsBox);
@@ -554,8 +567,9 @@ internal sealed class SettingsForm : Form
         _playersPerRunBox.Value = Math.Max(_playersPerRunBox.Minimum, Math.Min(_playersPerRunBox.Maximum, _config.Limit));
         _delayMsBox.Value = Math.Max(_delayMsBox.Minimum, Math.Min(_delayMsBox.Maximum, _config.DelayMs));
         _syncMatchesBox.Checked = _config.SyncMatches;
+        _syncTftMatchesBox.Checked = _config.SyncTftMatches;
         _matchesCountBox.Value = Math.Max(_matchesCountBox.Minimum, Math.Min(_matchesCountBox.Maximum, _config.MatchesCount));
-        _matchesCountBox.Enabled = _syncMatchesBox.Checked;
+        _matchesCountBox.Enabled = _syncMatchesBox.Checked || _syncTftMatchesBox.Checked;
         UpdateGuidance();
     }
 
@@ -588,7 +602,8 @@ internal sealed class SettingsForm : Form
             Limit = (int)_playersPerRunBox.Value,
             DelayMs = (int)_delayMsBox.Value,
             SyncMatches = _syncMatchesBox.Checked,
-            MatchesCount = _syncMatchesBox.Checked ? (int)_matchesCountBox.Value : _config.MatchesCount,
+            SyncTftMatches = _syncTftMatchesBox.Checked,
+            MatchesCount = (_syncMatchesBox.Checked || _syncTftMatchesBox.Checked) ? (int)_matchesCountBox.Value : _config.MatchesCount,
         };
 
         await RunCommandAsync(() => _saveAsync(updated));
@@ -625,18 +640,26 @@ internal sealed class SettingsForm : Form
             Limit = (int)_playersPerRunBox.Value,
             DelayMs = (int)_delayMsBox.Value,
             SyncMatches = _syncMatchesBox.Checked,
+            SyncTftMatches = _syncTftMatchesBox.Checked,
             MatchesCount = (int)_matchesCountBox.Value,
         }.Normalize();
 
         var runsPerHour = 3600d / Math.Max(60, preview.IntervalSec);
         var playersPerHour = runsPerHour * preview.Limit;
-        var loadText = preview.SyncMatches
-            ? $"{preview.MatchesCount} latest matches"
-            : "rank-only refresh";
+        var syncTargets = preview.SyncMatches && preview.SyncTftMatches
+            ? "LoL + TFT"
+            : preview.SyncMatches
+                ? "LoL"
+                : preview.SyncTftMatches
+                    ? "TFT"
+                    : "rank-only";
+        var loadText = preview.SyncMatches || preview.SyncTftMatches
+            ? $"{syncTargets}, {preview.MatchesCount} latest matches"
+            : syncTargets;
 
         string risk;
         Color color;
-        if (preview.IntervalSec < 180 || preview.Limit > 10 || preview.DelayMs < 500 || (preview.SyncMatches && preview.MatchesCount > 15))
+        if (preview.IntervalSec < 180 || preview.Limit > 10 || preview.DelayMs < 500 || ((preview.SyncMatches || preview.SyncTftMatches) && preview.MatchesCount > 20))
         {
             risk = "Higher Riot load";
             color = Color.IndianRed;
@@ -816,16 +839,31 @@ internal sealed class RefreshLoop
             try
             {
                 var result = await RunTickAsync(config, cancellationToken);
-                _logger.Info(result.LogLine);
-                _updateLastRun($"{DateTimeOffset.Now:hh:mm tt} - ok {result.Ok}, fail {result.Fail}, skip {result.Skipped}");
-                _updateProgress("Waiting for next refresh...");
-
-                if (_lastTickFailed)
+                if (result.Fail > 0)
                 {
-                    _notify("RiftBoard Refresh", "Refresh recovered and completed successfully.", ToolTipIcon.Info);
-                }
+                    _logger.Error(result.LogLine);
+                    _updateLastRun($"{DateTimeOffset.Now:hh:mm tt} - failed {result.Fail}, ok {result.Ok}, skip {result.Skipped}");
+                    _updateProgress($"Last error: {TrimForNotification(result.ErrorSummary ?? "One or more players failed to refresh.")}");
+                    if (!_lastTickFailed)
+                    {
+                        _notify("RiftBoard Refresh Failed", TrimForNotification(result.ErrorSummary ?? result.LogLine), ToolTipIcon.Error);
+                    }
 
-                _lastTickFailed = false;
+                    _lastTickFailed = true;
+                }
+                else
+                {
+                    _logger.Info(result.LogLine);
+                    _updateLastRun($"{DateTimeOffset.Now:hh:mm tt} - ok {result.Ok}, fail {result.Fail}, skip {result.Skipped}");
+                    _updateProgress("Waiting for next refresh...");
+
+                    if (_lastTickFailed)
+                    {
+                        _notify("RiftBoard Refresh", "Refresh recovered and completed successfully.", ToolTipIcon.Info);
+                    }
+
+                    _lastTickFailed = false;
+                }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -912,8 +950,11 @@ internal sealed class RefreshLoop
                     $"Refresh failed ({(int)response.StatusCode}){(string.IsNullOrWhiteSpace(payload?.Error) ? string.Empty : $": {payload!.Error}")}");
             }
 
-            _updateProgress($"Completed: ok {payload.Result.Ok}, fail {payload.Result.Fail}, skip {payload.Result.Skipped}");
-            return new TickOutcome(payload.Result.Ok, payload.Result.Fail, payload.Result.Skipped, payload.Result.Scanned);
+            var errorSummary = BuildCronErrorSummary(payload.Result.Errors);
+            _updateProgress(payload.Result.Fail > 0
+                ? $"Completed with errors: ok {payload.Result.Ok}, fail {payload.Result.Fail}, skip {payload.Result.Skipped}"
+                : $"Completed: ok {payload.Result.Ok}, fail {payload.Result.Fail}, skip {payload.Result.Skipped}");
+            return new TickOutcome(payload.Result.Ok, payload.Result.Fail, payload.Result.Skipped, payload.Result.Scanned, errorSummary);
         }
         finally
         {
@@ -922,6 +963,27 @@ internal sealed class RefreshLoop
                 StopProcessTree(server.StartedProcess.Id);
             }
         }
+    }
+
+    private static string? BuildCronErrorSummary(IReadOnlyList<CronError>? errors)
+    {
+        if (errors is null || errors.Count == 0)
+        {
+            return null;
+        }
+
+        var parts = errors
+            .Take(3)
+            .Select(error =>
+            {
+                var name = string.IsNullOrWhiteSpace(error.Name) ? error.PlayerId : error.Name;
+                return string.IsNullOrWhiteSpace(name) ? error.Error : $"{name}: {error.Error}";
+            })
+            .Where(part => !string.IsNullOrWhiteSpace(part))
+            .ToArray();
+
+        var suffix = errors.Count > parts.Length ? $" (+{errors.Count - parts.Length} more)" : string.Empty;
+        return string.Join(" | ", parts) + suffix;
     }
 
     private async Task<StandaloneServer> StartStandaloneServerAsync(AgentConfig config, CancellationToken cancellationToken)
@@ -1146,9 +1208,9 @@ internal sealed class RefreshLoop
 
 internal sealed record StandaloneServer(string AppUrl, Process? StartedProcess);
 
-internal sealed record TickOutcome(int Ok, int Fail, int Skipped, int Scanned)
+internal sealed record TickOutcome(int Ok, int Fail, int Skipped, int Scanned, string? ErrorSummary)
 {
-    public string LogLine => $"Refreshed {Ok} players, failed {Fail}, skipped {Skipped}, scanned {Scanned}.";
+    public string LogLine => $"Refreshed {Ok} players, failed {Fail}, skipped {Skipped}, scanned {Scanned}.{(string.IsNullOrWhiteSpace(ErrorSummary) ? string.Empty : $" Errors: {ErrorSummary}")}";
 }
 
 internal sealed class AgentLogger
@@ -1207,7 +1269,7 @@ internal sealed class AgentConfig
     public bool Force { get; init; }
     public bool SyncMatches { get; init; } = true;
     public bool SyncTftMatches { get; init; } = true;
-    public int MatchesCount { get; init; } = 10;
+    public int MatchesCount { get; init; } = 20;
     public int StartupTimeoutSec { get; init; } = 120;
 
     public AgentConfig Normalize()
@@ -1291,4 +1353,12 @@ internal sealed class CronResult
     public int Fail { get; init; }
     public int Skipped { get; init; }
     public int Scanned { get; init; }
+    public List<CronError> Errors { get; init; } = [];
+}
+
+internal sealed class CronError
+{
+    public string? PlayerId { get; init; }
+    public string? Name { get; init; }
+    public string Error { get; init; } = "Refresh failed";
 }

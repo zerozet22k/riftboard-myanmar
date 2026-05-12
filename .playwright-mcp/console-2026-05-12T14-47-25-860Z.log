@@ -190,3 +190,87 @@
         - 0/16 bids on ad_right-rail-2_0
         - 0/16 bids on ad_leaderboard_0 @ https://js.rev.iq/op.gg-nocmp:31
 [ 1760029ms] [INFO] [0.00s] Refreshed ad server @ https://js.rev.iq/op.gg-nocmp:31
+[ 1790184ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://rt.marphezis.com/hb:0
+[ 1790188ms] [ERROR] Access to fetch at 'https://prebid.smilewanted.com/' from origin 'https://op.gg' has been blocked by CORS policy: The value of the 'Access-Control-Allow-Origin' header in the response must not be the wildcard '*' when the request's credentials mode is 'include'. @ https://op.gg/tft/summoners/sea/LayShee-playr?utm_source=opgg&utm_medium=button&utm_campaign=click_summoner_tft:0
+[ 1790188ms] [ERROR] Failed to load resource: net::ERR_FAILED @ https://prebid.smilewanted.com/:0
+[ 1790189ms] [ERROR] Access to fetch at 'https://fast.nexx360.io/booster' from origin 'https://op.gg' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource. @ https://op.gg/tft/summoners/sea/LayShee-playr?utm_source=opgg&utm_medium=button&utm_campaign=click_summoner_tft:0
+[ 1790189ms] [ERROR] Failed to load resource: net::ERR_FAILED @ https://fast.nexx360.io/booster:0
+[ 1790192ms] [ERROR] Access to fetch at 'https://prebid.smilewanted.com/' from origin 'https://op.gg' has been blocked by CORS policy: The value of the 'Access-Control-Allow-Origin' header in the response must not be the wildcard '*' when the request's credentials mode is 'include'. @ https://op.gg/tft/summoners/sea/LayShee-playr?utm_source=opgg&utm_medium=button&utm_campaign=click_summoner_tft:0
+[ 1790193ms] [ERROR] Failed to load resource: net::ERR_FAILED @ https://prebid.smilewanted.com/:0
+[ 1790202ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://rt.marphezis.com/prebid/error:0
+[ 1791103ms] [INFO] [0.96s] Completed auction 3fbeea4c-ea33-4034-a6d9-92144c8d0eae
+        - 0/16 bids on ad_right-rail-2_0
+        - 0/16 bids on ad_leaderboard_0 @ https://js.rev.iq/op.gg-nocmp:31
+[ 1791103ms] [INFO] [0.00s] Refreshed ad server @ https://js.rev.iq/op.gg-nocmp:31
+[ 1821265ms] [ERROR] Access to fetch at 'https://prebid.smilewanted.com/' from origin 'https://op.gg' has been blocked by CORS policy: The value of the 'Access-Control-Allow-Origin' header in the response must not be the wildcard '*' when the request's credentials mode is 'include'. @ https://op.gg/tft/summoners/sea/LayShee-playr?utm_source=opgg&utm_medium=button&utm_campaign=click_summoner_tft:0
+[ 1821265ms] [ERROR] Failed to load resource: net::ERR_FAILED @ https://prebid.smilewanted.com/:0
+[ 1821266ms] [ERROR] Access to fetch at 'https://prebid.smilewanted.com/' from origin 'https://op.gg' has been blocked by CORS policy: The value of the 'Access-Control-Allow-Origin' header in the response must not be the wildcard '*' when the request's credentials mode is 'include'. @ https://op.gg/tft/summoners/sea/LayShee-playr?utm_source=opgg&utm_medium=button&utm_campaign=click_summoner_tft:0
+[ 1821266ms] [ERROR] Failed to load resource: net::ERR_FAILED @ https://prebid.smilewanted.com/:0
+[ 1821274ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://rt.marphezis.com/hb:0
+[ 1821276ms] [ERROR] Access to fetch at 'https://fast.nexx360.io/booster' from origin 'https://op.gg' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource. @ https://op.gg/tft/summoners/sea/LayShee-playr?utm_source=opgg&utm_medium=button&utm_campaign=click_summoner_tft:0
+[ 1821276ms] [ERROR] Failed to load resource: net::ERR_FAILED @ https://fast.nexx360.io/booster:0
+[ 1821292ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://rt.marphezis.com/prebid/error:0
+[ 1822265ms] [INFO] [1.04s] Completed auction 2215167d-90b0-4a04-bcb7-323790bd657e
+        - 1/16 bids on ad_right-rail-2_0
+        - 0/16 bids on ad_leaderboard_0 @ https://js.rev.iq/op.gg-nocmp:31
+[ 1822266ms] [INFO] [0.01s] Refreshed ad server @ https://js.rev.iq/op.gg-nocmp:31
+[ 1852452ms] [ERROR] Access to fetch at 'https://fast.nexx360.io/booster' from origin 'https://op.gg' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource. @ https://op.gg/tft/summoners/sea/LayShee-playr?utm_source=opgg&utm_medium=button&utm_campaign=click_summoner_tft:0
+[ 1852452ms] [ERROR] Failed to load resource: net::ERR_FAILED @ https://fast.nexx360.io/booster:0
+[ 1852464ms] [ERROR] Access to fetch at 'https://prebid.smilewanted.com/' from origin 'https://op.gg' has been blocked by CORS policy: The value of the 'Access-Control-Allow-Origin' header in the response must not be the wildcard '*' when the request's credentials mode is 'include'. @ https://op.gg/tft/summoners/sea/LayShee-playr?utm_source=opgg&utm_medium=button&utm_campaign=click_summoner_tft:0
+[ 1852465ms] [ERROR] Failed to load resource: net::ERR_FAILED @ https://prebid.smilewanted.com/:0
+[ 1852465ms] [ERROR] Access to fetch at 'https://prebid.smilewanted.com/' from origin 'https://op.gg' has been blocked by CORS policy: The value of the 'Access-Control-Allow-Origin' header in the response must not be the wildcard '*' when the request's credentials mode is 'include'. @ https://op.gg/tft/summoners/sea/LayShee-playr?utm_source=opgg&utm_medium=button&utm_campaign=click_summoner_tft:0
+[ 1852466ms] [ERROR] Failed to load resource: net::ERR_FAILED @ https://prebid.smilewanted.com/:0
+[ 1852466ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://rt.marphezis.com/hb:0
+[ 1852492ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://rt.marphezis.com/prebid/error:0
+[ 1853404ms] [INFO] [1.01s] Completed auction 526baf55-02f4-4667-a521-6f87d8b5a5c4
+        - 0/16 bids on ad_right-rail-2_0
+        - 0/16 bids on ad_leaderboard_0 @ https://js.rev.iq/op.gg-nocmp:31
+[ 1853405ms] [INFO] [0.01s] Refreshed ad server @ https://js.rev.iq/op.gg-nocmp:31
+[ 1883587ms] [ERROR] Access to fetch at 'https://fast.nexx360.io/booster' from origin 'https://op.gg' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource. @ https://op.gg/tft/summoners/sea/LayShee-playr?utm_source=opgg&utm_medium=button&utm_campaign=click_summoner_tft:0
+[ 1883587ms] [ERROR] Failed to load resource: net::ERR_FAILED @ https://fast.nexx360.io/booster:0
+[ 1883591ms] [ERROR] Access to fetch at 'https://prebid.smilewanted.com/' from origin 'https://op.gg' has been blocked by CORS policy: The value of the 'Access-Control-Allow-Origin' header in the response must not be the wildcard '*' when the request's credentials mode is 'include'. @ https://op.gg/tft/summoners/sea/LayShee-playr?utm_source=opgg&utm_medium=button&utm_campaign=click_summoner_tft:0
+[ 1883591ms] [ERROR] Failed to load resource: net::ERR_FAILED @ https://prebid.smilewanted.com/:0
+[ 1883592ms] [ERROR] Access to fetch at 'https://prebid.smilewanted.com/' from origin 'https://op.gg' has been blocked by CORS policy: The value of the 'Access-Control-Allow-Origin' header in the response must not be the wildcard '*' when the request's credentials mode is 'include'. @ https://op.gg/tft/summoners/sea/LayShee-playr?utm_source=opgg&utm_medium=button&utm_campaign=click_summoner_tft:0
+[ 1883592ms] [ERROR] Failed to load resource: net::ERR_FAILED @ https://prebid.smilewanted.com/:0
+[ 1883598ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://rt.marphezis.com/hb:0
+[ 1883620ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://rt.marphezis.com/prebid/error:0
+[ 1884474ms] [INFO] [0.95s] Completed auction 198b1d0b-15aa-4196-93fe-9b564cf4db63
+        - 0/16 bids on ad_right-rail-2_0
+        - 0/16 bids on ad_leaderboard_0 @ https://js.rev.iq/op.gg-nocmp:31
+[ 1884474ms] [INFO] [0.00s] Refreshed ad server @ https://js.rev.iq/op.gg-nocmp:31
+[ 1914682ms] [ERROR] Access to fetch at 'https://fast.nexx360.io/booster' from origin 'https://op.gg' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource. @ https://op.gg/tft/summoners/sea/LayShee-playr?utm_source=opgg&utm_medium=button&utm_campaign=click_summoner_tft:0
+[ 1914683ms] [ERROR] Failed to load resource: net::ERR_FAILED @ https://fast.nexx360.io/booster:0
+[ 1914683ms] [ERROR] Access to fetch at 'https://prebid.smilewanted.com/' from origin 'https://op.gg' has been blocked by CORS policy: The value of the 'Access-Control-Allow-Origin' header in the response must not be the wildcard '*' when the request's credentials mode is 'include'. @ https://op.gg/tft/summoners/sea/LayShee-playr?utm_source=opgg&utm_medium=button&utm_campaign=click_summoner_tft:0
+[ 1914684ms] [ERROR] Failed to load resource: net::ERR_FAILED @ https://prebid.smilewanted.com/:0
+[ 1914684ms] [ERROR] Access to fetch at 'https://prebid.smilewanted.com/' from origin 'https://op.gg' has been blocked by CORS policy: The value of the 'Access-Control-Allow-Origin' header in the response must not be the wildcard '*' when the request's credentials mode is 'include'. @ https://op.gg/tft/summoners/sea/LayShee-playr?utm_source=opgg&utm_medium=button&utm_campaign=click_summoner_tft:0
+[ 1914696ms] [ERROR] Failed to load resource: net::ERR_FAILED @ https://prebid.smilewanted.com/:0
+[ 1914707ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://rt.marphezis.com/hb:0
+[ 1914730ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://rt.marphezis.com/prebid/error:0
+[ 1915967ms] [INFO] [1.35s] Completed auction 803036c9-27b0-432e-860a-e152c083c2bb
+        - 0/16 bids on ad_right-rail-2_0
+        - 0/16 bids on ad_leaderboard_0 @ https://js.rev.iq/op.gg-nocmp:31
+[ 1915968ms] [INFO] [0.00s] Refreshed ad server @ https://js.rev.iq/op.gg-nocmp:31
+[ 1946137ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://rt.marphezis.com/hb:0
+[ 1946139ms] [ERROR] Access to fetch at 'https://fast.nexx360.io/booster' from origin 'https://op.gg' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource. @ https://op.gg/tft/summoners/sea/LayShee-playr?utm_source=opgg&utm_medium=button&utm_campaign=click_summoner_tft:0
+[ 1946140ms] [ERROR] Failed to load resource: net::ERR_FAILED @ https://fast.nexx360.io/booster:0
+[ 1946145ms] [ERROR] Access to fetch at 'https://prebid.smilewanted.com/' from origin 'https://op.gg' has been blocked by CORS policy: The value of the 'Access-Control-Allow-Origin' header in the response must not be the wildcard '*' when the request's credentials mode is 'include'. @ https://op.gg/tft/summoners/sea/LayShee-playr?utm_source=opgg&utm_medium=button&utm_campaign=click_summoner_tft:0
+[ 1946146ms] [ERROR] Failed to load resource: net::ERR_FAILED @ https://prebid.smilewanted.com/:0
+[ 1946147ms] [ERROR] Access to fetch at 'https://prebid.smilewanted.com/' from origin 'https://op.gg' has been blocked by CORS policy: The value of the 'Access-Control-Allow-Origin' header in the response must not be the wildcard '*' when the request's credentials mode is 'include'. @ https://op.gg/tft/summoners/sea/LayShee-playr?utm_source=opgg&utm_medium=button&utm_campaign=click_summoner_tft:0
+[ 1946147ms] [ERROR] Failed to load resource: net::ERR_FAILED @ https://prebid.smilewanted.com/:0
+[ 1946156ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://rt.marphezis.com/prebid/error:0
+[ 1947550ms] [INFO] [1.46s] Completed auction b07e72b4-99ec-4b76-97db-bacca83d959b
+        - 0/16 bids on ad_right-rail-2_0
+        - 0/16 bids on ad_leaderboard_0 @ https://js.rev.iq/op.gg-nocmp:31
+[ 1947550ms] [INFO] [0.00s] Refreshed ad server @ https://js.rev.iq/op.gg-nocmp:31
+[ 1977722ms] [ERROR] Access to fetch at 'https://prebid.smilewanted.com/' from origin 'https://op.gg' has been blocked by CORS policy: The value of the 'Access-Control-Allow-Origin' header in the response must not be the wildcard '*' when the request's credentials mode is 'include'. @ https://op.gg/tft/summoners/sea/LayShee-playr?utm_source=opgg&utm_medium=button&utm_campaign=click_summoner_tft:0
+[ 1977722ms] [ERROR] Failed to load resource: net::ERR_FAILED @ https://prebid.smilewanted.com/:0
+[ 1977724ms] [ERROR] Access to fetch at 'https://prebid.smilewanted.com/' from origin 'https://op.gg' has been blocked by CORS policy: The value of the 'Access-Control-Allow-Origin' header in the response must not be the wildcard '*' when the request's credentials mode is 'include'. @ https://op.gg/tft/summoners/sea/LayShee-playr?utm_source=opgg&utm_medium=button&utm_campaign=click_summoner_tft:0
+[ 1977724ms] [ERROR] Failed to load resource: net::ERR_FAILED @ https://prebid.smilewanted.com/:0
+[ 1977725ms] [ERROR] Access to fetch at 'https://fast.nexx360.io/booster' from origin 'https://op.gg' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource. @ https://op.gg/tft/summoners/sea/LayShee-playr?utm_source=opgg&utm_medium=button&utm_campaign=click_summoner_tft:0
+[ 1977725ms] [ERROR] Failed to load resource: net::ERR_FAILED @ https://fast.nexx360.io/booster:0
+[ 1977738ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://rt.marphezis.com/hb:0
+[ 1977757ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://rt.marphezis.com/prebid/error:0
+[ 1979799ms] [INFO] [1.67s] Completed auction 69cd09e6-5226-433b-8b8f-4f36b9207351
+        - 1/16 bids on ad_right-rail-2_0
+        - 0/16 bids on ad_leaderboard_0 @ https://js.rev.iq/op.gg-nocmp:31
+[ 1979799ms] [INFO] [0.46s] Refreshed ad server @ https://js.rev.iq/op.gg-nocmp:31

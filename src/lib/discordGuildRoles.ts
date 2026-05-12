@@ -57,6 +57,13 @@ type SyncDiscordGuildRankRoleOptions = {
   force?: boolean;
 };
 
+function canSyncGuildRankRoles(link: { verifiedBinding?: boolean | null; verificationSource?: string | null }) {
+  return (
+    link.verifiedBinding === true &&
+    (link.verificationSource === "discord_connections" || link.verificationSource === "legacy_manual")
+  );
+}
+
 const MANAGED_RANK_ROLE_SPECS: ManagedRoleSpec[] = [
   { tier: "CHALLENGER", color: 0xf0c74b },
   { tier: "GRANDMASTER", color: 0xd14b5a },
@@ -336,8 +343,8 @@ export async function syncDiscordGuildRankRoleForStoredLink(
 
   const link = await DiscordLink.findById(linkId);
   if (!link?._id) throw new Error("Discord link not found.");
-  if (!link.verifiedBinding || link.verificationSource !== "discord_connections") {
-    throw new Error("Reconnect Discord before syncing server rank roles.");
+  if (!canSyncGuildRankRoles(link)) {
+    throw new Error("Bind this Discord user before syncing server rank roles.");
   }
 
   const player = await Player.findById(link.playerId, {
@@ -389,7 +396,7 @@ export async function syncAllDiscordGuildRankRoles() {
   const links = await DiscordLink.find(
     {
       verifiedBinding: true,
-      verificationSource: "discord_connections",
+      verificationSource: { $in: ["discord_connections", "legacy_manual"] },
     },
     {
       discordUserId: 1,

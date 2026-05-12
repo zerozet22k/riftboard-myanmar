@@ -24,17 +24,55 @@ type RemovedPlayer = {
   };
 };
 
-export default function AdminAddPlayerForm() {
+type AdminStats = {
+  trackedPlayers: number;
+  discordLinks: number;
+  tftPlayersWithMatches: number;
+  tftApiConfigured: boolean;
+  recentDiscordLinks: Array<{
+    discordUserId: string;
+    discordUsername: string | null;
+    gameName: string;
+    tagLine: string;
+    verifiedBinding: boolean;
+    lastSyncedAt: string | null;
+  }>;
+};
+
+type AdminRefreshResult = {
+  ok: number;
+  fail: number;
+  skipped: number;
+  scanned: number;
+  errors?: Array<{ name?: string; error?: string }>;
+};
+
+type BoundDiscordLink = {
+  discordUserId: string;
+  discordUsername: string | null;
+  gameName: string;
+  tagLine: string;
+  roleSyncError: string | null;
+};
+
+export default function AdminAddPlayerForm({ stats }: { stats: AdminStats }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [riotId, setRiotId] = useState("");
   const [removeRiotId, setRemoveRiotId] = useState("");
+  const [discordUserId, setDiscordUserId] = useState("");
+  const [discordUsername, setDiscordUsername] = useState("");
+  const [discordRiotId, setDiscordRiotId] = useState("");
   const [pending, setPending] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [bindingDiscord, setBindingDiscord] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refreshResult, setRefreshResult] = useState<AdminRefreshResult | null>(null);
   const [added, setAdded] = useState<AddedPlayer[]>([]);
   const [removed, setRemoved] = useState<RemovedPlayer[]>([]);
+  const [boundLinks, setBoundLinks] = useState<BoundDiscordLink[]>([]);
 
   async function handleAdd(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -144,11 +182,82 @@ export default function AdminAddPlayerForm() {
     }
   }
 
+  async function handleRefreshNow() {
+    setRefreshing(true);
+    setError(null);
+    setRefreshResult(null);
+
+    try {
+      const response = await fetch("/api/admin/refresh-leaderboard", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          limit: 15,
+          delayMs: 900,
+          matchesCount: 20,
+          syncMatches: true,
+          syncTftMatches: true,
+          force: false,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) {
+        setError(data.error || "Refresh failed");
+        return;
+      }
+      setRefreshResult(data.result);
+      router.refresh();
+    } catch {
+      setError("Network error");
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  async function handleBindDiscord(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+
+    if (!discordUserId.trim() || !discordRiotId.trim()) {
+      setError("Enter Discord user ID and Riot ID");
+      return;
+    }
+
+    setBindingDiscord(true);
+    try {
+      const response = await fetch("/api/admin/bind-discord", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          discordUserId,
+          discordUsername,
+          riotId: discordRiotId,
+          syncRoles: true,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) {
+        setError(data.error || "Discord bind failed");
+        return;
+      }
+
+      setBoundLinks((current) => [data.link, ...current]);
+      setDiscordUserId("");
+      setDiscordUsername("");
+      setDiscordRiotId("");
+      router.refresh();
+    } catch {
+      setError("Network error");
+    } finally {
+      setBindingDiscord(false);
+    }
+  }
+
   return (
-    <div className="min-h-screen bg-background px-4 pt-20">
-      <div className="mx-auto w-full max-w-md">
+    <div className="min-h-screen bg-background px-4 py-10">
+      <div className="mx-auto w-full max-w-4xl space-y-4">
         <div className="mb-4 flex items-center justify-between gap-3">
-          <h1 className="text-lg font-semibold text-foreground">Add or remove players</h1>
+          <h1 className="text-lg font-semibold text-foreground">RiftBoard admin</h1>
           <button
             type="button"
             onClick={handleLogout}
@@ -159,6 +268,46 @@ export default function AdminAddPlayerForm() {
           </button>
         </div>
 
+        <section className="grid gap-3 md:grid-cols-4">
+          <AdminStat label="Tracked" value={stats.trackedPlayers} />
+          <AdminStat label="Discord links" value={stats.discordLinks} />
+          <AdminStat label="TFT histories" value={stats.tftPlayersWithMatches} />
+          <AdminStat label="TFT API" value={stats.tftApiConfigured ? "Configured" : "Missing"} tone={stats.tftApiConfigured ? "good" : "bad"} />
+        </section>
+
+        <section className="rounded border border-neutral-200 p-4 dark:border-neutral-800">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-foreground">Refresh runner</h2>
+              <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                Same job as the tray app: 15 players, 900ms delay, LoL + TFT match sync, 20 matches.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleRefreshNow}
+              disabled={refreshing}
+              className="rounded bg-neutral-800 px-4 py-2 text-sm text-white transition-colors hover:bg-neutral-700 disabled:opacity-50 dark:bg-neutral-200 dark:text-black dark:hover:bg-neutral-300"
+            >
+              {refreshing ? "Refreshing..." : "Run refresh now"}
+            </button>
+          </div>
+          {refreshResult ? (
+            <div className="mt-3 rounded bg-neutral-50 p-3 text-sm text-neutral-700 dark:bg-neutral-950 dark:text-neutral-300">
+              ok {refreshResult.ok}, failed {refreshResult.fail}, skipped {refreshResult.skipped}, scanned {refreshResult.scanned}
+              {refreshResult.errors?.length ? (
+                <ul className="mt-2 space-y-1 text-xs text-red-500">
+                  {refreshResult.errors.slice(0, 3).map((item, index) => (
+                    <li key={`${item.name ?? "error"}-${index}`}>{item.name ? `${item.name}: ` : ""}{item.error}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+        </section>
+
+        <section className="rounded border border-neutral-200 p-4 dark:border-neutral-800">
+          <h2 className="mb-3 text-sm font-semibold text-foreground">Players</h2>
         <form onSubmit={handleAdd} className="flex gap-2">
           <input
             ref={inputRef}
@@ -196,6 +345,83 @@ export default function AdminAddPlayerForm() {
             {removing ? "Removing..." : "Remove"}
           </button>
         </form>
+        </section>
+
+        <section className="rounded border border-neutral-200 p-4 dark:border-neutral-800">
+          <h2 className="text-sm font-semibold text-foreground">Recent Discord links</h2>
+          <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+            Discord binding should still happen through OAuth so role sync has valid tokens.
+          </p>
+          <ul className="mt-3 divide-y divide-neutral-200 dark:divide-neutral-800">
+            {stats.recentDiscordLinks.length ? stats.recentDiscordLinks.map((link) => (
+              <li key={`${link.discordUserId}-${link.gameName}-${link.tagLine}`} className="flex items-center justify-between gap-3 py-2 text-sm">
+                <div className="min-w-0">
+                  <div className="truncate font-medium text-foreground">{link.gameName}#{link.tagLine}</div>
+                  <div className="truncate text-xs text-neutral-500">{link.discordUsername ?? link.discordUserId}</div>
+                </div>
+                <span className={`rounded px-2 py-1 text-xs ${link.verifiedBinding ? "bg-green-500/10 text-green-600 dark:text-green-400" : "bg-amber-500/10 text-amber-600 dark:text-amber-400"}`}>
+                  {link.verifiedBinding ? "verified" : "legacy"}
+                </span>
+              </li>
+            )) : (
+              <li className="py-2 text-sm text-neutral-500">No Discord links yet.</li>
+            )}
+          </ul>
+        </section>
+
+        <section className="rounded border border-neutral-200 p-4 dark:border-neutral-800">
+          <h2 className="text-sm font-semibold text-foreground">Manual Discord bind</h2>
+          <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+            Use Discord user ID, not display tag, so the bot can assign server rank roles reliably. OAuth is still needed for Discord Linked Role metadata.
+          </p>
+          <form onSubmit={handleBindDiscord} className="mt-3 grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto]">
+            <input
+              type="text"
+              placeholder="Discord user ID"
+              value={discordUserId}
+              onChange={(event) => setDiscordUserId(event.target.value)}
+              disabled={bindingDiscord}
+              className="rounded border border-neutral-300 bg-transparent px-3 py-2 text-sm disabled:opacity-50 dark:border-neutral-700"
+            />
+            <input
+              type="text"
+              placeholder="Discord username optional"
+              value={discordUsername}
+              onChange={(event) => setDiscordUsername(event.target.value)}
+              disabled={bindingDiscord}
+              className="rounded border border-neutral-300 bg-transparent px-3 py-2 text-sm disabled:opacity-50 dark:border-neutral-700"
+            />
+            <input
+              type="text"
+              placeholder="GameName#TagLine"
+              value={discordRiotId}
+              onChange={(event) => setDiscordRiotId(event.target.value)}
+              disabled={bindingDiscord}
+              className="rounded border border-neutral-300 bg-transparent px-3 py-2 text-sm disabled:opacity-50 dark:border-neutral-700"
+            />
+            <button
+              type="submit"
+              disabled={bindingDiscord || !discordUserId.trim() || !discordRiotId.trim()}
+              className="rounded bg-neutral-800 px-4 py-2 text-sm text-white transition-colors hover:bg-neutral-700 disabled:opacity-50 dark:bg-neutral-200 dark:text-black dark:hover:bg-neutral-300"
+            >
+              {bindingDiscord ? "Binding..." : "Bind"}
+            </button>
+          </form>
+          {boundLinks.length ? (
+            <ul className="mt-3 space-y-2">
+              {boundLinks.map((link, index) => (
+                <li key={`${link.discordUserId}-${index}`} className="rounded border border-neutral-200 px-3 py-2 text-sm dark:border-neutral-800">
+                  <div className="font-medium text-foreground">
+                    {link.discordUsername ?? link.discordUserId} {"->"} {link.gameName}#{link.tagLine}
+                  </div>
+                  <div className={`mt-1 text-xs ${link.roleSyncError ? "text-amber-500" : "text-green-600 dark:text-green-400"}`}>
+                    {link.roleSyncError ? `Bound, but role sync failed: ${link.roleSyncError}` : "Bound and server roles synced"}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
 
         {error ? <p className="mt-2 text-sm text-red-500">{error}</p> : null}
 
@@ -240,6 +466,21 @@ export default function AdminAddPlayerForm() {
           </ul>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function AdminStat({ label, value, tone }: { label: string; value: number | string; tone?: "good" | "bad" }) {
+  const toneClass =
+    tone === "good"
+      ? "text-green-600 dark:text-green-400"
+      : tone === "bad"
+        ? "text-red-600 dark:text-red-400"
+        : "text-foreground";
+  return (
+    <div className="rounded border border-neutral-200 p-3 dark:border-neutral-800">
+      <div className="text-xs text-neutral-500">{label}</div>
+      <div className={`mt-1 text-lg font-semibold ${toneClass}`}>{value}</div>
     </div>
   );
 }

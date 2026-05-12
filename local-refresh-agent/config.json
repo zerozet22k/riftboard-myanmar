@@ -7,6 +7,6 @@
   "force": false,
   "syncMatches": true,
   "syncTftMatches": true,
-  "matchesCount": 10,
+  "matchesCount": 20,
   "startupTimeoutSec": 120
 }
