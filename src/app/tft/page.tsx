@@ -77,7 +77,6 @@ type TftPlayer = {
 };
 
 type TftRecentMatch = {
-  playerId?: unknown;
   gameDatetime?: number | null;
   level?: number | null;
   goldLeft?: number | null;
@@ -111,7 +110,6 @@ const getRecentMatchesForLeaderboardPage = unstable_cache(
           _id: "$playerId",
           matches: {
             $push: {
-              playerId: "$playerId",
               gameDatetime: "$gameDatetime",
               level: "$level",
               goldLeft: "$goldLeft",
@@ -126,7 +124,7 @@ const getRecentMatchesForLeaderboardPage = unstable_cache(
 
     return recentGroups.map((group) => [String(group._id), group.matches ?? []] as [string, TftRecentMatch[]]);
   },
-  ["tft-leaderboard-recent-matches-v4"],
+  ["tft-leaderboard-recent-matches-v5"],
   { revalidate: 300 }
 );
 
@@ -222,6 +220,7 @@ export default async function TftPage() {
     },
   };
   const tftReady = hasTftApiKey();
+  const renderedAt = Date.now();
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
@@ -265,7 +264,7 @@ export default async function TftPage() {
         ) : null}
 
         {tableRows.length ? (
-          <TftLeaderboardTable rows={tableRows} />
+          <TftLeaderboardTable rows={tableRows} renderedAt={renderedAt} />
         ) : (
           <section className="rounded-[26px] bg-zinc-900/22 p-6 ring-1 ring-white/5">
             <h2 className="text-lg font-semibold text-zinc-50">No TFT players yet</h2>

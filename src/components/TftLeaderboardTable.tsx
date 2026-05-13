@@ -46,10 +46,10 @@ function prettyRank(tier?: string | null, div?: string | null) {
   return `${String(tier).toUpperCase()}${div ? ` ${String(div).toUpperCase()}` : ""}`;
 }
 
-function relativeUpdated(iso: string | null) {
+function relativeUpdated(iso: string | null, renderedAt: number) {
   if (!iso) return "--";
   const ms = Date.parse(iso);
-  return Number.isFinite(ms) ? formatRelativeTime(ms, Date.now()) ?? "--" : "--";
+  return Number.isFinite(ms) ? formatRelativeTime(ms, renderedAt) ?? "--" : "--";
 }
 
 function badgeTone(tone: TftPlaystyleSummary["badges"][number]["tone"]) {
@@ -100,7 +100,7 @@ function PlaystylePills({ playstyle }: { playstyle: TftPlaystyleSummary | null }
   );
 }
 
-export default function TftLeaderboardTable({ rows }: { rows: TftLeaderboardRow[] }) {
+export default function TftLeaderboardTable({ rows, renderedAt }: { rows: TftLeaderboardRow[]; renderedAt: number }) {
   const [query, setQuery] = useState("");
   const [rankFilter, setRankFilter] = useState<RankFilter>("all");
   const [page, setPage] = useState(1);
@@ -218,7 +218,7 @@ export default function TftLeaderboardTable({ rows }: { rows: TftLeaderboardRow[
                   {row.name}
                 </Link>
                 <div className="mt-1 text-xs text-zinc-500">
-                  {row.platform} / Updated <span className="text-zinc-300">{relativeUpdated(row.updatedAt)}</span>
+                  {row.platform} / Updated <span className="text-zinc-300">{relativeUpdated(row.updatedAt, renderedAt)}</span>
                 </div>
               </div>
             </div>
@@ -288,7 +288,7 @@ export default function TftLeaderboardTable({ rows }: { rows: TftLeaderboardRow[
                   <div className="mt-1 text-xs text-zinc-500">{row.wr != null ? `${row.wr}% WR` : "--"}</div>
                 </td>
                 <td className="p-4"><PlaystylePills playstyle={row.playstyle} /></td>
-                <td className="p-4 text-zinc-400">{relativeUpdated(row.updatedAt)}</td>
+                <td className="p-4 text-zinc-400">{relativeUpdated(row.updatedAt, renderedAt)}</td>
               </tr>
             ))}
             {!slice.length ? (
