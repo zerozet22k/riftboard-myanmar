@@ -266,6 +266,8 @@ export async function POST(req: NextRequest) {
         `Synced: ${summary.synced}`,
         `Bind role added: ${summary.bindRoleAdded}`,
         `Bind role removed: ${summary.bindRoleRemoved}`,
+        `Riftboarded added: ${summary.verifiedRoleAdded}`,
+        `Riftboarded removed: ${summary.verifiedRoleRemoved}`,
         `Rank roles removed: ${summary.cleanedRoles}`,
         `Missing: ${summary.missingMembers} members, ${summary.missingPlayers} players`,
         `DMs: ${summary.messagedUnboundMembers} sent, ${summary.unboundMessageFailures} failed`,

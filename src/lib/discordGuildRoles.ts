@@ -50,6 +50,7 @@ type ManagedRoleContext = {
   rolesByName: Map<string, DiscordGuildRole>;
   managedRolesByQueue: Map<ManagedRankQueueKey, DiscordGuildRole[]>;
   bindRole: DiscordGuildRole;
+  verifiedRole: DiscordGuildRole;
   createdRoleNames: string[];
 };
 
@@ -104,6 +105,16 @@ function bindRoleColor() {
   const raw = String(process.env.DISCORD_BIND_ROLE_COLOR ?? "5865F2").trim().replace(/^#/, "");
   const parsed = Number.parseInt(raw, 16);
   return Number.isFinite(parsed) ? parsed : 0x5865f2;
+}
+
+function verifiedRoleName() {
+  return String(process.env.DISCORD_VERIFIED_ROLE_NAME ?? "").trim() || "Riftboarded";
+}
+
+function verifiedRoleColor() {
+  const raw = String(process.env.DISCORD_VERIFIED_ROLE_COLOR ?? "2ECC71").trim().replace(/^#/, "");
+  const parsed = Number.parseInt(raw, 16);
+  return Number.isFinite(parsed) ? parsed : 0x2ecc71;
 }
 
 function managedRoleName(queue: ManagedRankQueue, tier: string) {
@@ -225,6 +236,19 @@ async function ensureManagedRoleContext(existingRoles?: DiscordGuildRole[]) {
     createdRoleNames.push(bindRole.name);
   }
 
+  let verifiedRole = byName.get(verifiedRoleName());
+  if (!verifiedRole) {
+    verifiedRole = await createDiscordGuildRole({
+      guildId,
+      name: verifiedRoleName(),
+      color: verifiedRoleColor(),
+      reason: "Create Riftboard verified member role",
+    });
+    roles.push(verifiedRole);
+    byName.set(verifiedRole.name, verifiedRole);
+    createdRoleNames.push(verifiedRole.name);
+  }
+
   for (const queue of MANAGED_RANK_QUEUES) {
     for (const spec of MANAGED_RANK_ROLE_SPECS) {
       const name = managedRoleName(queue, spec.tier);
@@ -246,6 +270,7 @@ async function ensureManagedRoleContext(existingRoles?: DiscordGuildRole[]) {
     guildId,
     rolesByName: byName,
     bindRole,
+    verifiedRole,
     managedRolesByQueue: new Map(
       MANAGED_RANK_QUEUES.map((queue) => [
         queue.key,
@@ -274,6 +299,7 @@ export async function syncDiscordGuildRankRoleForIdentity(input: {
   let addedRoleName: string | null = null;
   let removedRoles = 0;
   let removedBindRole = false;
+  let addedVerifiedRole = false;
   const assignedRoleNames = Object.fromEntries(
     MANAGED_RANK_QUEUES.map((queue) => [queue.key, null])
   ) as Record<ManagedRankQueueKey, string | null>;
@@ -325,6 +351,17 @@ export async function syncDiscordGuildRankRoleForIdentity(input: {
     removedBindRole = true;
   }
 
+  if (!existingRoleIds.has(context.verifiedRole.id)) {
+    await addDiscordGuildMemberRole({
+      guildId: context.guildId,
+      userId: input.discordUserId,
+      roleId: context.verifiedRole.id,
+      reason: `Assign Riftboard verified role for ${input.player.gameName}#${input.player.tagLine}`,
+    });
+    existingRoleIds.add(context.verifiedRole.id);
+    addedVerifiedRole = true;
+  }
+
   return {
     createdRoleNames: context.createdRoleNames,
     assignedRoleName: assignedRoleNames.solo,
@@ -332,6 +369,7 @@ export async function syncDiscordGuildRankRoleForIdentity(input: {
     addedRoleName,
     removedRoles,
     removedBindRole,
+    addedVerifiedRole,
   };
 }
 
@@ -370,6 +408,7 @@ export async function syncDiscordGuildRankRoleForStoredLink(
       addedRoleName: null,
       removedRoles: 0,
       removedBindRole: false,
+      addedVerifiedRole: false,
       skipped: true,
     };
   }
@@ -431,6 +470,8 @@ export async function syncAllDiscordGuildRankRoles() {
   let cleanedRoles = 0;
   let bindRoleAdded = 0;
   let bindRoleRemoved = 0;
+  let verifiedRoleAdded = 0;
+  let verifiedRoleRemoved = 0;
   let messagedUnboundMembers = 0;
   let unboundMessageFailures = 0;
   const errors: string[] = [];
@@ -452,6 +493,7 @@ export async function syncAllDiscordGuildRankRoles() {
       synced++;
       if (!result.assignedRoleName) unranked++;
       if (result.removedBindRole) bindRoleRemoved++;
+      if (result.addedVerifiedRole) verifiedRoleAdded++;
       const snapshot = guildRankRoleSnapshot(player);
       await DiscordLink.updateOne(
         { _id: link._id },
@@ -479,6 +521,7 @@ export async function syncAllDiscordGuildRankRoles() {
 
   try {
     const removableRolesById = new Map(managedRoles(context).map((role) => [role.id, role]));
+    removableRolesById.set(context.verifiedRole.id, context.verifiedRole);
     if (removableRolesById.size) {
       const members = await listAllDiscordGuildMembers(context.guildId);
 
@@ -502,6 +545,7 @@ export async function syncAllDiscordGuildRankRoles() {
             reason: "Remove Riftboard managed rank role from unbound member",
           });
           cleanedRoles++;
+          if (role.id === context.verifiedRole.id) verifiedRoleRemoved++;
         }
 
         let addedBindRole = false;
@@ -544,6 +588,8 @@ export async function syncAllDiscordGuildRankRoles() {
     cleanedRoles,
     bindRoleAdded,
     bindRoleRemoved,
+    verifiedRoleAdded,
+    verifiedRoleRemoved,
     messagedUnboundMembers,
     unboundMessageFailures,
     createdRoleNames: context.createdRoleNames,

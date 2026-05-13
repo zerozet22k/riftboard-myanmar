@@ -50,6 +50,16 @@ function bindRoleColor() {
   return Number.isFinite(parsed) ? parsed : 0x5865f2;
 }
 
+function verifiedRoleName() {
+  return firstNonEmpty([process.env.DISCORD_VERIFIED_ROLE_NAME]) || "Riftboarded";
+}
+
+function verifiedRoleColor() {
+  const raw = firstNonEmpty([process.env.DISCORD_VERIFIED_ROLE_COLOR]) || "2ECC71";
+  const parsed = Number.parseInt(raw.replace(/^#/, ""), 16);
+  return Number.isFinite(parsed) ? parsed : 0x2ecc71;
+}
+
 function bindMessage() {
   const linkedRolesUrl = `${appBaseUrl()}/discord/linked-roles`;
   return [
@@ -119,10 +129,25 @@ async function ensureBindRole(guild) {
   });
 }
 
+async function ensureVerifiedRole(guild) {
+  const roles = await guild.roles.fetch();
+  const existing = roles.find((role) => role.name === verifiedRoleName());
+  if (existing) return existing;
+
+  return guild.roles.create({
+    name: verifiedRoleName(),
+    color: verifiedRoleColor(),
+    mentionable: false,
+    hoist: false,
+    reason: "Create Riftboard verified member role",
+  });
+}
+
 async function reconcileJoinedMember(member) {
   if (member.user.bot) return;
 
   const role = await ensureBindRole(member.guild);
+  const verifiedRole = await ensureVerifiedRole(member.guild);
   const verified = await isVerifiedApprovedMember(member.id);
 
   if (verified) {
@@ -130,7 +155,16 @@ async function reconcileJoinedMember(member) {
       await member.roles.remove(role, "Remove Riftboard bind role from verified member");
       console.log(`[discord-worker] removed bind role from verified member ${member.id}`);
     }
+    if (!member.roles.cache.has(verifiedRole.id)) {
+      await member.roles.add(verifiedRole, "Assign Riftboard verified role to linked member");
+      console.log(`[discord-worker] added verified role to member ${member.id}`);
+    }
     return;
+  }
+
+  if (member.roles.cache.has(verifiedRole.id)) {
+    await member.roles.remove(verifiedRole, "Remove Riftboard verified role from unlinked member");
+    console.log(`[discord-worker] removed verified role from unlinked member ${member.id}`);
   }
 
   if (!member.roles.cache.has(role.id)) {
@@ -164,6 +198,7 @@ async function main() {
     console.log(`[discord-worker] ready as ${client.user?.tag ?? client.user?.id}`);
     const guild = await client.guilds.fetch(guildId);
     await ensureBindRole(guild);
+    await ensureVerifiedRole(guild);
     console.log(`[discord-worker] watching joins in guild ${guildId}`);
   });
 
