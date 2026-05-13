@@ -102,6 +102,7 @@ type TftRow = {
 
 type TftRecentMatch = {
   playerId?: unknown;
+  gameDatetime?: number | null;
   level?: number | null;
   goldLeft?: number | null;
   totalDamageToPlayers?: number | null;
@@ -114,11 +115,6 @@ type TftRecentMatch = {
   }>;
 };
 
-type TftRecentMatchGroup = {
-  _id: string;
-  matches?: TftRecentMatch[];
-};
-
 const getRecentMatchesForLeaderboardPage = unstable_cache(
   async (rawPlayerIds: string[]) => {
     await dbConnect();
@@ -128,46 +124,29 @@ const getRecentMatchesForLeaderboardPage = unstable_cache(
 
     if (!playerIds.length) return [] as Array<[string, TftRecentMatch[]]>;
 
-    const recentGroups = await TftPlayerMatch.aggregate<TftRecentMatchGroup>([
-      { $match: { playerId: { $in: playerIds } } },
-      {
-        $setWindowFields: {
-          partitionBy: "$playerId",
-          sortBy: { gameDatetime: -1, _id: -1 },
-          output: { rowNumber: { $documentNumber: {} } },
-        },
-      },
-      { $match: { rowNumber: { $lte: 20 } } },
-      {
-        $project: {
-          playerId: 1,
-          gameDatetime: 1,
-          level: 1,
-          goldLeft: 1,
-          totalDamageToPlayers: 1,
-          units: 1,
-        },
-      },
-      { $sort: { playerId: 1, gameDatetime: -1, _id: -1 } },
-      {
-        $group: {
-          _id: "$playerId",
-          matches: {
-            $push: {
-              level: "$level",
-              goldLeft: "$goldLeft",
-              totalDamageToPlayers: "$totalDamageToPlayers",
-              units: "$units",
-            },
-          },
-        },
-      },
-      { $project: { _id: { $toString: "$_id" }, matches: 1 } },
-    ]);
+    const recentGroups = await Promise.all(
+      playerIds.map(async (playerId) => {
+        const matches = await TftPlayerMatch.find(
+          { playerId },
+          {
+            gameDatetime: 1,
+            level: 1,
+            goldLeft: 1,
+            totalDamageToPlayers: 1,
+            units: 1,
+          }
+        )
+          .sort({ gameDatetime: -1, _id: -1 })
+          .limit(20)
+          .lean<TftRecentMatch[]>();
 
-    return recentGroups.map((group) => [group._id, group.matches ?? []] as [string, TftRecentMatch[]]);
+        return [String(playerId), matches] as [string, TftRecentMatch[]];
+      })
+    );
+
+    return recentGroups;
   },
-  ["tft-leaderboard-recent-matches-v2"],
+  ["tft-leaderboard-recent-matches-v3"],
   { revalidate: 300 }
 );
 

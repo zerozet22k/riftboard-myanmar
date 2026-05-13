@@ -346,7 +346,9 @@ export async function refreshStoredDiscordProfile(
   }
 
   try {
-    const synced = await syncDiscordGuildRankRoleForStoredLink(String(link._id));
+    const synced = await syncDiscordGuildRankRoleForStoredLink(String(link._id), {
+      force: opts?.force ?? false,
+    });
     guildRoleSkipped = synced.skipped;
   } catch (error) {
     guildRoleError =
