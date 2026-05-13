@@ -46,11 +46,6 @@ export const DISCORD_COMMAND_DEFINITIONS = [
     type: 1,
   },
   {
-    name: "bind",
-    description: "Alias for /link.",
-    type: 1,
-  },
-  {
     name: "help",
     description: "Show commands.",
     type: 1,
@@ -89,6 +84,77 @@ export const DISCORD_COMMAND_DEFINITIONS = [
     name: "sync-server-roles",
     description: "Sync server rank roles.",
     type: 1,
+  },
+  {
+    name: "sync-bind-roles",
+    description: "Staff only: assign bind role to unlinked members.",
+    type: 1,
+    options: [
+      {
+        name: "dm",
+        description: "Also DM unlinked members the bind link.",
+        type: 5,
+        required: false,
+      },
+    ],
+  },
+  {
+    name: "linked-accounts",
+    description: "Show linked Riot accounts.",
+    type: 1,
+    options: [
+      {
+        name: "user",
+        description: "Staff only: inspect another Discord user.",
+        type: 6,
+        required: false,
+      },
+    ],
+  },
+  {
+    name: "set-primary",
+    description: "Choose which linked Riot account commands use by default.",
+    type: 1,
+    options: [
+      {
+        name: "riot_id",
+        description: "Riot ID, for example Zet#kat22.",
+        type: 3,
+        required: true,
+      },
+    ],
+  },
+  {
+    name: "sync-user-roles",
+    description: "Staff only: sync rank roles for one linked Discord user.",
+    type: 1,
+    options: [
+      {
+        name: "user",
+        description: "Discord user to sync.",
+        type: 6,
+        required: true,
+      },
+    ],
+  },
+  {
+    name: "admin-bind",
+    description: "Staff only: bind a Riot account to a Discord user.",
+    type: 1,
+    options: [
+      {
+        name: "user",
+        description: "Discord user who owns this Riot account.",
+        type: 6,
+        required: true,
+      },
+      {
+        name: "riot_id",
+        description: "Riot ID, for example Zet#kat22.",
+        type: 3,
+        required: true,
+      },
+    ],
   },
   {
     name: "setup-bind-message",

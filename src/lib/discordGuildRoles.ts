@@ -57,6 +57,11 @@ type SyncDiscordGuildRankRoleOptions = {
   force?: boolean;
 };
 
+type SyncAllDiscordGuildRankRolesOptions = {
+  syncUnboundMembers?: boolean;
+  messageUnboundMembers?: boolean;
+};
+
 function canSyncGuildRankRoles(link: { verifiedBinding?: boolean | null; verificationSource?: string | null }) {
   return (
     link.verifiedBinding === true &&
@@ -428,7 +433,7 @@ export async function syncDiscordGuildRankRoleForStoredLink(
   return { ...result, skipped: false };
 }
 
-export async function syncAllDiscordGuildRankRoles() {
+export async function syncAllDiscordGuildRankRoles(opts?: SyncAllDiscordGuildRankRolesOptions) {
   await dbConnect();
 
   const links = await DiscordLink.find(
@@ -519,7 +524,7 @@ export async function syncAllDiscordGuildRankRoles() {
     }
   }
 
-  try {
+  if (opts?.syncUnboundMembers) try {
     const removableRolesById = new Map(managedRoles(context).map((role) => [role.id, role]));
     removableRolesById.set(context.verifiedRole.id, context.verifiedRole);
     if (removableRolesById.size) {
@@ -563,12 +568,14 @@ export async function syncAllDiscordGuildRankRoles() {
         if (!rolesToRemove.length && !addedBindRole) continue;
         if (rolesToRemove.length || addedBindRole) cleanedMembers++;
 
-        try {
-          await messageUnboundMember(userId);
-          messagedUnboundMembers++;
-        } catch (error) {
-          unboundMessageFailures++;
-          console.error("[discordGuildRoles] failed to DM unbound member", userId, error);
+        if (opts?.messageUnboundMembers) {
+          try {
+            await messageUnboundMember(userId);
+            messagedUnboundMembers++;
+          } catch (error) {
+            unboundMessageFailures++;
+            console.error("[discordGuildRoles] failed to DM unbound member", userId, error);
+          }
         }
       }
     }

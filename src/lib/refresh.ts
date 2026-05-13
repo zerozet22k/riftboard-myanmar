@@ -69,6 +69,11 @@ function rateLimitWaitMs(e: unknown, fallbackMs = 2000) {
   return typeof ra === "number" && ra > 0 ? ra : fallbackMs;
 }
 
+function isRiotDecryptingBadRequest(e: unknown) {
+  const message = errToString(e);
+  return /decrypt/i.test(message) && /400|Bad Request/i.test(message);
+}
+
 function normalize(s: string) {
   return s.trim().toLowerCase();
 }
@@ -527,11 +532,17 @@ export async function refreshPlayerById(
   const now = new Date();
 
   let puuid = String(player.puuid ?? "").trim();
-  if (!puuid) {
+  try {
     const acct = await getPuuidByRiotId(player.gameName, player.tagLine);
-    puuid = acct.puuid;
-    player.puuid = puuid;
-    await player.save();
+    if (acct?.puuid && acct.puuid !== puuid) {
+      puuid = acct.puuid;
+      player.puuid = puuid;
+      player.tftPuuid = acct.puuid;
+      await player.save();
+    }
+  } catch (e) {
+    if (!puuid) throw e;
+    console.error("Riot ID PUUID sync failed:", e);
   }
 
   try {
@@ -607,13 +618,27 @@ export async function refreshPlayerById(
   if (hasTftApiKey()) {
     try {
       let tftPuuid = String(player.tftPuuid ?? "").trim();
-      if (!tftPuuid) {
+      try {
+        const tftAccount = await getPuuidByRiotId(player.gameName, player.tagLine, "tft");
+        if (tftAccount?.puuid && tftAccount.puuid !== tftPuuid) {
+          tftPuuid = tftAccount.puuid;
+          player.tftPuuid = tftPuuid;
+        }
+      } catch (e) {
+        if (!tftPuuid) throw e;
+      }
+
+      let foundTftLeague;
+      try {
+        foundTftLeague = await findTftLeagueEntriesByPuuid(tftPuuid, platform);
+      } catch (e) {
+        if (!isRiotDecryptingBadRequest(e)) throw e;
         const tftAccount = await getPuuidByRiotId(player.gameName, player.tagLine, "tft");
         tftPuuid = tftAccount.puuid;
         player.tftPuuid = tftPuuid;
+        foundTftLeague = await findTftLeagueEntriesByPuuid(tftPuuid, platform);
       }
-
-      const { entries: tftEntries } = await findTftLeagueEntriesByPuuid(tftPuuid, platform);
+      const { entries: tftEntries } = foundTftLeague;
       const tft = tftEntries.find((entry) => entry.queueType === TFT);
 
       player.tft = tft
@@ -643,7 +668,13 @@ export async function refreshPlayerById(
       if (!isRiot404(e)) {
         console.error("TFT sync failed:", e);
       }
-      player.tft = { fetchedAt: now };
+      // Do not wipe a previously saved TFT rank just because Riot rejected one
+      // auxiliary TFT lookup. Match history and active-shard calls can fail
+      // independently from the player's actual ranked state.
+      player.tft = {
+        ...(player.tft?.toObject ? player.tft.toObject() : player.tft ?? {}),
+        fetchedAt: player.tft?.fetchedAt ?? now,
+      };
     }
   }
 

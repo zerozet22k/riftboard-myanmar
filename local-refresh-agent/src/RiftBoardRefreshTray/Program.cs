@@ -1262,10 +1262,21 @@ internal sealed class CSharpRefreshService
         var gameName = ReadString(player, "gameName") ?? throw new InvalidOperationException("Player missing gameName");
         var tagLine = ReadString(player, "tagLine") ?? throw new InvalidOperationException("Player missing tagLine");
         var puuid = ReadString(player, "puuid");
-        if (string.IsNullOrWhiteSpace(puuid))
+        try
         {
             var account = await GetAccountByRiotIdAsync(gameName, tagLine, "lol", cancellationToken);
-            puuid = account.GetProperty("puuid").GetString();
+            var currentPuuid = account.GetProperty("puuid").GetString();
+            if (!string.IsNullOrWhiteSpace(currentPuuid))
+            {
+                puuid = currentPuuid;
+            }
+        }
+        catch
+        {
+            if (string.IsNullOrWhiteSpace(puuid))
+            {
+                throw;
+            }
         }
 
         if (string.IsNullOrWhiteSpace(puuid))
@@ -1329,14 +1340,25 @@ internal sealed class CSharpRefreshService
         var gameName = ReadString(player, "gameName") ?? throw new InvalidOperationException("Player missing gameName");
         var tagLine = ReadString(player, "tagLine") ?? throw new InvalidOperationException("Player missing tagLine");
         var puuid = ReadString(player, "tftPuuid") ?? ReadString(player, "puuid");
-        if (string.IsNullOrWhiteSpace(puuid))
+        try
         {
             var account = await GetAccountByRiotIdAsync(
                 gameName,
                 tagLine,
                 "tft",
                 cancellationToken);
-            puuid = account.GetProperty("puuid").GetString();
+            var currentPuuid = account.GetProperty("puuid").GetString();
+            if (!string.IsNullOrWhiteSpace(currentPuuid))
+            {
+                puuid = currentPuuid;
+            }
+        }
+        catch
+        {
+            if (string.IsNullOrWhiteSpace(puuid))
+            {
+                throw;
+            }
         }
 
         if (string.IsNullOrWhiteSpace(puuid))

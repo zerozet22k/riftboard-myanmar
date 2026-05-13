@@ -2,6 +2,7 @@ import { after, NextRequest, NextResponse } from "next/server";
 import { dbConnect } from "@/lib/mongodb";
 import { getAppBaseUrl } from "@/lib/runtimeConfig";
 import {
+  encryptDiscordSecret,
   editDiscordInteractionOriginalResponse,
   getDiscordGuildId,
   verifyDiscordInteraction,
@@ -12,11 +13,19 @@ import {
   syncDiscordLinkedRoleForStoredLink,
 } from "@/lib/discordLinkedRoles";
 import {
+  syncDiscordGuildRankRoleForStoredLink,
   syncAllDiscordGuildRankRoles,
 } from "@/lib/discordGuildRoles";
-import { findPrimaryDiscordLink } from "@/lib/discordLinkStore";
+import {
+  ensureDiscordLinkMultiAccountIndexes,
+  findPrimaryDiscordLink,
+  setPrimaryDiscordLink,
+} from "@/lib/discordLinkStore";
+import { buildPlayerLookupQuery, canonicalPlayerPath } from "@/lib/playerIdentity";
+import { upsertAndRefreshByRiotId } from "@/lib/refresh";
+import { parseRiotId } from "@/lib/tournaments";
+import { DiscordLink } from "@/models/discordLink";
 import { Player } from "@/models/player";
-import { canonicalPlayerPath } from "@/lib/playerIdentity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,6 +37,11 @@ type DiscordInteraction = {
   guild_id?: string;
   data?: {
     name?: string;
+    options?: Array<{
+      name?: string;
+      type?: number;
+      value?: string | number | boolean;
+    }>;
   };
   member?: {
     user?: { id?: string };
@@ -84,14 +98,21 @@ function linkInstructions(linkedRolesUrl: string) {
 function helpText(linkedRolesUrl: string, canSyncServerRoles: boolean) {
   const lines = [
     "Commands:",
-    `/bind - link Riot: ${linkedRolesUrl}`,
+    `/link - link Riot: ${linkedRolesUrl}`,
     "/status - linked account",
+    "/linked-accounts - all saved smurfs",
+    "/set-primary - choose default smurf",
     "/myrank - solo rank",
     "/profile - profile link",
     "/refresh-profile - refresh rank roles",
     "/roles - role info",
   ];
-  if (canSyncServerRoles) lines.push("/sync-server-roles - sync server roles");
+  if (canSyncServerRoles) {
+    lines.push("/sync-server-roles - sync server roles");
+    lines.push("/sync-bind-roles - bind-role sweep, optional DM");
+    lines.push("/sync-user-roles - sync one member");
+    lines.push("/admin-bind - staff bind Discord user to Riot ID");
+  }
   return lines.join("\n");
 }
 
@@ -202,6 +223,86 @@ function hasDiscordRole(interaction: DiscordInteraction, roleId: string) {
   );
 }
 
+function commandOption(interaction: DiscordInteraction, name: string) {
+  return interaction.data?.options?.find((option) => option.name === name)?.value;
+}
+
+function commandStringOption(interaction: DiscordInteraction, name: string) {
+  return String(commandOption(interaction, name) ?? "").trim();
+}
+
+function commandUserOption(interaction: DiscordInteraction, name: string) {
+  return String(commandOption(interaction, name) ?? "").trim();
+}
+
+function canManageRoles(interaction: DiscordInteraction) {
+  return hasAdministratorPermission(interaction) || hasDiscordRole(interaction, SYNC_SERVER_ROLES_ROLE_ID);
+}
+
+async function listLinkedAccountsForDiscordUser(discordUserId: string) {
+  await ensureDiscordLinkMultiAccountIndexes();
+  return DiscordLink.find({
+    discordUserId: String(discordUserId).trim(),
+    verifiedBinding: true,
+    verificationSource: { $in: ["discord_connections", "legacy_manual"] },
+  }).sort({ isPrimary: -1, updatedAt: -1, _id: -1 });
+}
+
+async function adminBindDiscordUserToRiot(input: {
+  discordUserId: string;
+  riotId: string;
+}) {
+  const parsed = parseRiotId(input.riotId);
+  if (!parsed) throw new Error("Enter Riot ID as GameName#TagLine.");
+
+  await upsertAndRefreshByRiotId(
+    { gameName: parsed.gameName, tagLine: parsed.tagLine },
+    { force: true, syncMatches: false, fullMastery: false }
+  ).catch(() => null);
+
+  const player = await Player.findOne(buildPlayerLookupQuery(parsed.gameName, parsed.tagLine), {
+    gameName: 1,
+    tagLine: 1,
+  });
+  if (!player?._id) throw new Error("Could not resolve that Riot ID.");
+
+  const now = new Date();
+  await ensureDiscordLinkMultiAccountIndexes();
+  await DiscordLink.deleteMany({
+    playerId: player._id,
+    discordUserId: { $ne: input.discordUserId },
+  } as Record<string, unknown>);
+
+  const link = await DiscordLink.findOneAndUpdate(
+    { discordUserId: input.discordUserId, playerId: player._id } as Record<string, unknown>,
+    {
+      $set: {
+        playerId: player._id,
+        isPrimary: true,
+        gameName: player.gameName,
+        tagLine: player.tagLine,
+        tokenType: "Manual",
+        scopes: [],
+        expiresAt: null,
+        verifiedBinding: true,
+        verificationSource: "legacy_manual",
+        lastVerifiedAt: now,
+        proofConnectionType: "admin_manual",
+        proofConnectionLabel: `${player.gameName}#${player.tagLine}`,
+      },
+      $setOnInsert: {
+        accessTokenEnc: encryptDiscordSecret(`admin-manual:${input.discordUserId}:${now.getTime()}`),
+        refreshTokenEnc: null,
+      },
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+  await setPrimaryDiscordLink(input.discordUserId, link._id);
+  await syncDiscordGuildRankRoleForStoredLink(String(link._id), { force: true });
+
+  return { player, link };
+}
+
 export async function POST(req: NextRequest) {
   const signature = req.headers.get("x-signature-ed25519") ?? "";
   const timestamp = req.headers.get("x-signature-timestamp") ?? "";
@@ -279,6 +380,37 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  if (commandName === "sync-bind-roles") {
+    if (!canSyncServerRoles) {
+      return messageResponse("You need the server role-sync staff role to use this.");
+    }
+
+    const shouldDm = commandOption(interaction, "dm") === true;
+    return scheduleDeferredReply(interaction, async () => {
+      const summary = await syncAllDiscordGuildRankRoles({
+        syncUnboundMembers: true,
+        messageUnboundMembers: shouldDm,
+      });
+      const errors =
+        summary.errors.length
+          ? `Errors: ${summary.errors.slice(0, 3).join(" | ")}${summary.errors.length > 3 ? " | ..." : ""}`
+          : "";
+
+      return [
+        "**Bind-role sweep complete**",
+        `Bind role added: ${summary.bindRoleAdded}`,
+        `Bind role removed from verified: ${summary.bindRoleRemoved}`,
+        `Riftboarded removed from unbound: ${summary.verifiedRoleRemoved}`,
+        `Rank roles removed from unbound: ${summary.cleanedRoles}`,
+        `Cleaned members: ${summary.cleanedMembers}`,
+        shouldDm
+          ? `DMs: ${summary.messagedUnboundMembers} sent, ${summary.unboundMessageFailures} failed`
+          : "DMs: skipped",
+        errors,
+      ].filter(Boolean).join("\n");
+    });
+  }
+
   if (commandName === "setup-bind-message") {
     if (!hasAdministratorPermission(interaction)) {
       return messageResponse("This command is only available to server administrators.");
@@ -287,17 +419,102 @@ export async function POST(req: NextRequest) {
     return publicMessageResponse(publicBindMessage(linkedRolesUrl));
   }
 
+  if (commandName === "admin-bind") {
+    if (!canManageRoles(interaction)) {
+      return messageResponse("You need the server role-sync staff role to use this.");
+    }
+
+    const targetUserId = commandUserOption(interaction, "user");
+    const riotId = commandStringOption(interaction, "riot_id");
+    if (!targetUserId || !riotId) {
+      return messageResponse("Use /admin-bind with a Discord user and Riot ID.");
+    }
+
+    return scheduleDeferredReply(interaction, async () => {
+      const bound = await adminBindDiscordUserToRiot({ discordUserId: targetUserId, riotId });
+      return `Bound <@${targetUserId}> to ${bound.player.gameName}#${bound.player.tagLine} and synced server roles.`;
+    });
+  }
+
+  if (commandName === "sync-user-roles") {
+    if (!canManageRoles(interaction)) {
+      return messageResponse("You need the server role-sync staff role to use this.");
+    }
+
+    const targetUserId = commandUserOption(interaction, "user");
+    if (!targetUserId) return messageResponse("Pick a Discord user to sync.");
+
+    return scheduleDeferredReply(interaction, async () => {
+      const links = await listLinkedAccountsForDiscordUser(targetUserId);
+      if (!links.length) return `<@${targetUserId}> has no saved Riot links.`;
+
+      let ok = 0;
+      const errors: string[] = [];
+      for (const linked of links) {
+        try {
+          await syncDiscordGuildRankRoleForStoredLink(String(linked._id), { force: true });
+          ok++;
+        } catch (error) {
+          errors.push(`${linked.gameName}#${linked.tagLine}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+
+      return [
+        `Synced <@${targetUserId}>: ${ok}/${links.length} Riot links.`,
+        errors.length ? `Errors: ${errors.slice(0, 2).join(" | ")}${errors.length > 2 ? " | ..." : ""}` : "",
+      ].filter(Boolean).join("\n");
+    });
+  }
+
   if (!userId) {
     return messageResponse("Could not determine the Discord user for this command.");
   }
 
   await dbConnect();
+
+  if (commandName === "linked-accounts") {
+    const targetUserId = commandUserOption(interaction, "user");
+    const requestedOtherUser = targetUserId && targetUserId !== userId;
+    if (requestedOtherUser && !canManageRoles(interaction)) {
+      return messageResponse("Only staff can inspect another member's linked accounts.");
+    }
+
+    const ownerId = targetUserId || userId;
+    const links = await listLinkedAccountsForDiscordUser(ownerId);
+    if (!links.length) {
+      return messageResponse(requestedOtherUser ? `<@${ownerId}> has no saved Riot links.` : "You have no saved Riot links.");
+    }
+
+    return messageResponse([
+      requestedOtherUser ? `**Linked accounts for <@${ownerId}>**` : "**Your linked Riot accounts**",
+      ...links.slice(0, 10).map((entry, index) =>
+        `${entry.isPrimary ? "Primary" : `${index + 1}.`} ${entry.gameName}#${entry.tagLine} (${entry.verificationSource ?? "unknown"})`
+      ),
+      links.length > 10 ? `+${links.length - 10} more` : "",
+    ].filter(Boolean).join("\n"));
+  }
+
   const link = await findPrimaryDiscordLink(userId);
 
   if (!link?._id) {
     return messageResponse(
       `**You're not linked yet.**\nBind your Riot ID here: ${linkedRolesUrl}\nOnce linked, run /refresh-profile.`
     );
+  }
+
+  if (commandName === "set-primary") {
+    const parsed = parseRiotId(commandStringOption(interaction, "riot_id"));
+    if (!parsed) return messageResponse("Enter Riot ID as GameName#TagLine.");
+
+    const wanted = `${parsed.gameName}#${parsed.tagLine}`.toLowerCase();
+    const links = await listLinkedAccountsForDiscordUser(userId);
+    const match = links.find((entry) => `${entry.gameName}#${entry.tagLine}`.toLowerCase() === wanted);
+    if (!match?._id) {
+      return messageResponse("That Riot account is not saved under your Discord. Link it first.");
+    }
+
+    await setPrimaryDiscordLink(userId, match._id);
+    return messageResponse(`Primary Riot account is now ${match.gameName}#${match.tagLine}.`);
   }
   if (!isVerifiedDiscordLink(link)) {
     return messageResponse(
@@ -363,6 +580,6 @@ export async function POST(req: NextRequest) {
   }
 
   return messageResponse(
-    "Unknown command. Try /help, /bind, /status, /profile, /myrank, /roles, /refresh-profile, /refresh-linked-role, or /sync-server-roles."
+    "Unknown command. Try /help, /link, /status, /linked-accounts, /set-primary, /profile, /myrank, /roles, /refresh-profile, /refresh-linked-role, or /sync-server-roles."
   );
 }
