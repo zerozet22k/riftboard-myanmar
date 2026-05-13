@@ -108,7 +108,7 @@ export function LeaderboardPager({
 
       <div className="flex items-center gap-2">
         {previousHref && !previousDisabled ? (
-          <Link href={previousHref} className={buttonClass}>
+          <Link href={previousHref} prefetch={false} className={buttonClass}>
             Previous
           </Link>
         ) : onPrevious ? (
@@ -124,7 +124,7 @@ export function LeaderboardPager({
         </span>
 
         {nextHref && !nextDisabled ? (
-          <Link href={nextHref} className={buttonClass}>
+          <Link href={nextHref} prefetch={false} className={buttonClass}>
             Next
           </Link>
         ) : onNext ? (

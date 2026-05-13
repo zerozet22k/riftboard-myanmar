@@ -130,6 +130,24 @@ const getRecentMatchesForLeaderboardPage = unstable_cache(
 
     const recentGroups = await TftPlayerMatch.aggregate<TftRecentMatchGroup>([
       { $match: { playerId: { $in: playerIds } } },
+      {
+        $setWindowFields: {
+          partitionBy: "$playerId",
+          sortBy: { gameDatetime: -1, _id: -1 },
+          output: { rowNumber: { $documentNumber: {} } },
+        },
+      },
+      { $match: { rowNumber: { $lte: 20 } } },
+      {
+        $project: {
+          playerId: 1,
+          gameDatetime: 1,
+          level: 1,
+          goldLeft: 1,
+          totalDamageToPlayers: 1,
+          units: 1,
+        },
+      },
       { $sort: { playerId: 1, gameDatetime: -1, _id: -1 } },
       {
         $group: {
@@ -144,7 +162,7 @@ const getRecentMatchesForLeaderboardPage = unstable_cache(
           },
         },
       },
-      { $project: { _id: { $toString: "$_id" }, matches: { $slice: ["$matches", 20] } } },
+      { $project: { _id: { $toString: "$_id" }, matches: 1 } },
     ]);
 
     return recentGroups.map((group) => [group._id, group.matches ?? []] as [string, TftRecentMatch[]]);

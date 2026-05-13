@@ -14,6 +14,7 @@ import {
   formatNumber,
 } from "@/lib/displayTime";
 import { getOptionalDiscordSession } from "@/lib/discordSession";
+import { approvedCommunityLeaderboardQuery } from "@/lib/communityLeaderboard";
 import { analyzeMatchPerformance, matchPerformanceToneClass, type MatchPerformanceBadge } from "@/lib/matchAnalysis";
 import { dbConnect } from "@/lib/mongodb";
 import { buildPlayerLookupQuery, canonicalPlayerPath } from "@/lib/playerIdentity";
@@ -72,6 +73,14 @@ type PlayerView = {
   }> | null;
 };
 
+type LeaderboardRankView = {
+  _id: unknown;
+  gameName?: string | null;
+  tagLine?: string | null;
+  solo?: PeakRankLike | null;
+  flex?: PeakRankLike | null;
+};
+
 type RankHistoryRow = PeakRankLike & {
   queue: "RANKED_SOLO_5x5" | "RANKED_FLEX_SR";
 };
@@ -111,9 +120,17 @@ type RecentQueueSummary = {
   wins: number;
   winrate: number | null;
   avgKda: number | null;
+  results: Array<{ matchId: string; win: boolean | null; championId: number | null }>;
   mainRoles: Array<{ role: string; games: number; winrate: number | null }>;
   champions: Array<{ championId: number; games: number; winrate: number | null }>;
   badges: MatchPerformanceBadge[];
+};
+
+type LadderRanks = {
+  solo: number | null;
+  flex: number | null;
+  soloTotal: number;
+  flexTotal: number;
 };
 
 function safeDecode(seg: unknown) {
@@ -137,6 +154,29 @@ function rankLine(tier?: string | null, division?: string | null, lp?: number | 
   const divisionText = division ? ` ${String(division).toUpperCase()}` : "";
   const lpText = lp != null && Number.isFinite(Number(lp)) ? ` - ${Number(lp)} LP` : "";
   return `${tierText}${divisionText}${lpText}`;
+}
+
+const TIER_ORDER: Record<string, number> = {
+  CHALLENGER: 9,
+  GRANDMASTER: 8,
+  MASTER: 7,
+  DIAMOND: 6,
+  EMERALD: 5,
+  PLATINUM: 4,
+  GOLD: 3,
+  SILVER: 2,
+  BRONZE: 1,
+  IRON: 0,
+};
+
+const DIV_ORDER: Record<string, number> = { I: 4, II: 3, III: 2, IV: 1 };
+
+function rankKey(tier?: string | null, division?: string | null, lp?: number | null) {
+  const tierValue = tier ? TIER_ORDER[String(tier).toUpperCase()] : undefined;
+  if (tierValue === undefined) return -1;
+  const divisionValue = division ? (DIV_ORDER[String(division).toUpperCase()] ?? 0) : 0;
+  const lpValue = Number.isFinite(Number(lp)) ? Number(lp) : 0;
+  return tierValue * 100000 + divisionValue * 1000 + lpValue;
 }
 
 function peakRankFromHistory(history: PeakRankLike[], current: PeakRankLike | null | undefined) {
@@ -207,6 +247,27 @@ function pct(wins: number, games: number) {
   return Math.round((wins / games) * 100);
 }
 
+function ladderRanks(players: LeaderboardRankView[], playerId: unknown): LadderRanks {
+  const id = String(playerId);
+  const soloRows = players
+    .filter((row) => row.solo?.tier)
+    .map((row) => ({ id: String(row._id), key: rankKey(row.solo?.tier, row.solo?.division, row.solo?.lp) }))
+    .sort((left, right) => right.key - left.key || left.id.localeCompare(right.id));
+  const flexRows = players
+    .filter((row) => row.flex?.tier)
+    .map((row) => ({ id: String(row._id), key: rankKey(row.flex?.tier, row.flex?.division, row.flex?.lp) }))
+    .sort((left, right) => right.key - left.key || left.id.localeCompare(right.id));
+  const soloIndex = soloRows.findIndex((row) => row.id === id);
+  const flexIndex = flexRows.findIndex((row) => row.id === id);
+
+  return {
+    solo: soloIndex >= 0 ? soloIndex + 1 : null,
+    flex: flexIndex >= 0 ? flexIndex + 1 : null,
+    soloTotal: soloRows.length,
+    flexTotal: flexRows.length,
+  };
+}
+
 function recentQueueSummary(matches: MatchDoc[], queueId: number): RecentQueueSummary | null {
   const window = matches.filter((match) => match.queueId === queueId).slice(0, 20);
   if (!window.length) return null;
@@ -254,6 +315,11 @@ function recentQueueSummary(matches: MatchDoc[], queueId: number): RecentQueueSu
     wins,
     winrate: pct(wins, window.length),
     avgKda: kdaTotal / window.length,
+    results: window.map((match) => ({
+      matchId: String(match.matchId),
+      win: typeof match.win === "boolean" ? match.win : null,
+      championId: typeof match.championId === "number" ? match.championId : null,
+    })),
     mainRoles: [...roleMap.entries()]
       .map(([role, row]) => ({ role, games: row.games, winrate: pct(row.wins, row.games) }))
       .sort((left, right) => right.games - left.games || (right.winrate ?? 0) - (left.winrate ?? 0))
@@ -385,7 +451,7 @@ export default async function PlayerProfilePage({
     redirect(canonicalPath);
   }
 
-  const [ddVer, champNames, rankHistory, matchDocs, viewer, commentDocs] = await Promise.all([
+  const [ddVer, champNames, rankHistory, matchDocs, viewer, commentDocs, leaderboardPlayers] = await Promise.all([
     getLatestDdragonVersion(),
     getChampNameMap(),
     RankEntry.find(
@@ -443,6 +509,10 @@ export default async function PlayerProfilePage({
       .sort({ createdAt: -1, _id: -1 })
       .limit(100)
       .lean() as Promise<StoredProfileComment[]>,
+    Player.find(
+      approvedCommunityLeaderboardQuery(),
+      { gameName: 1, tagLine: 1, solo: 1, flex: 1 }
+    ).lean() as Promise<LeaderboardRankView[]>,
   ]);
 
   const initialMatchDocs = matchDocs.slice(0, 10);
@@ -490,6 +560,7 @@ export default async function PlayerProfilePage({
   );
   const soloRecent = recentQueueSummary(matchDocs, 420);
   const flexRecent = recentQueueSummary(matchDocs, 440);
+  const ladder = ladderRanks(leaderboardPlayers, player._id);
   // eslint-disable-next-line react-hooks/purity
   const renderedAtMs = Date.now();
 
@@ -500,6 +571,12 @@ export default async function PlayerProfilePage({
     formatDisplayMetaDateTime(isoOrNull(player.flex?.fetchedAt));
   const masteryUpdatedShort = formatDisplayMetaDateTime(player.masterySyncedAt);
   const masteryPath = `${canonicalPath}/mastery`;
+  const profileUrl = absoluteUrl(canonicalPath);
+  const facebookShareUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(profileUrl)}`;
+  const mainChampion = Array.isArray(player.mains) ? player.mains[0] : null;
+  const mainChampionId = typeof mainChampion?.championId === "number" ? mainChampion.championId : null;
+  const mainChampionName = mainChampionId != null ? champNames[String(mainChampionId)] ?? `Champion ${mainChampionId}` : null;
+  const mainChampionIcon = champIconUrl(mainChampionId);
   const initialCursor = cursorFromLast(initialMatchDocs[initialMatchDocs.length - 1]);
   const initialComments: ProfileCommentView[] = commentDocs.map(serializeProfileComment);
   const profileJsonLd = {
@@ -568,7 +645,16 @@ export default async function PlayerProfilePage({
                 </div>
 
                 <div className="flex flex-wrap items-start gap-2.5">
-                  <StatTile label="Level" value={formatNumber(player.summonerLevel) ?? "--"} />
+                  <StatTile
+                    label="Solo ladder"
+                    value={ladder.solo != null ? `#${formatNumber(ladder.solo)}` : "--"}
+                    title={ladder.solo != null ? `${ladder.solo} of ${ladder.soloTotal} ranked Solo players` : undefined}
+                  />
+                  <StatTile
+                    label="Flex ladder"
+                    value={ladder.flex != null ? `#${formatNumber(ladder.flex)}` : "--"}
+                    title={ladder.flex != null ? `${ladder.flex} of ${ladder.flexTotal} ranked Flex players` : undefined}
+                  />
                   <MetaInfoButton
                     lastUpdated={lastUpdatedShort}
                     masteryUpdated={masteryUpdatedShort}
@@ -582,6 +668,14 @@ export default async function PlayerProfilePage({
                   >
                     Full mastery
                   </Link>
+                  <a
+                    href={facebookShareUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-xl bg-zinc-950/42 px-3.5 py-2 text-sm font-medium text-zinc-300 transition hover:bg-white/5"
+                  >
+                    Share Facebook
+                  </a>
                 </div>
               </div>
             </div>
@@ -595,9 +689,17 @@ export default async function PlayerProfilePage({
                 primaryLabel="Solo"
                 primaryLine={rankLine(solo.tier ?? null, solo.division ?? null, solo.lp ?? null)}
                 primaryTier={solo.tier ?? null}
+                primaryRank={ladder.solo}
                 secondaryLabel="Flex"
                 secondaryLine={rankLine(flex.tier ?? null, flex.division ?? null, flex.lp ?? null)}
                 secondaryTier={flex.tier ?? null}
+                secondaryRank={ladder.flex}
+              />
+              <MainChampionCard
+                name={mainChampionName}
+                icon={mainChampionIcon}
+                points={typeof mainChampion?.championPoints === "number" ? mainChampion.championPoints : null}
+                masteryPath={masteryPath}
               />
             </div>
           </div>
@@ -760,9 +862,9 @@ function Pill({ children, className = "" }: { children: ReactNode; className?: s
   );
 }
 
-function StatTile({ label, value }: { label: string; value: ReactNode }) {
+function StatTile({ label, value, title }: { label: string; value: ReactNode; title?: string }) {
   return (
-    <div className="min-w-[104px] rounded-xl bg-zinc-900/18 px-3 py-2">
+    <div className="min-w-[104px] rounded-xl bg-zinc-900/18 px-3 py-2" title={title}>
       <div className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">{label}</div>
       <div className="mt-1 text-sm text-zinc-200">{value}</div>
     </div>
@@ -806,25 +908,29 @@ function HeroQueueSummary({
   primaryLabel,
   primaryLine,
   primaryTier,
+  primaryRank,
   secondaryLabel,
   secondaryLine,
   secondaryTier,
+  secondaryRank,
 }: {
   title: string;
   primaryLabel: string;
   primaryLine: string;
   primaryTier: string | null;
+  primaryRank: number | null;
   secondaryLabel: string;
   secondaryLine: string;
   secondaryTier: string | null;
+  secondaryRank: number | null;
 }) {
   return (
     <div className="rounded-[18px] bg-zinc-900/20 p-2.5 ring-1 ring-white/5">
       <div className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">{title}</div>
 
       <div className="mt-2 space-y-1.5">
-        <HeroQueueSummaryRow label={primaryLabel} line={primaryLine} tier={primaryTier} />
-        <HeroQueueSummaryRow label={secondaryLabel} line={secondaryLine} tier={secondaryTier} />
+        <HeroQueueSummaryRow label={primaryLabel} line={primaryLine} tier={primaryTier} rank={primaryRank} />
+        <HeroQueueSummaryRow label={secondaryLabel} line={secondaryLine} tier={secondaryTier} rank={secondaryRank} />
       </div>
     </div>
   );
@@ -834,19 +940,54 @@ function HeroQueueSummaryRow({
   label,
   line,
   tier,
+  rank,
 }: {
   label: string;
   line: string;
   tier: string | null;
+  rank: number | null;
 }) {
   return (
     <div className="flex items-center gap-2 rounded-xl bg-zinc-950/34 px-2.5 py-2">
       <RankEmblem tier={tier} className="h-7 w-7 shrink-0" alt="" />
       <div className="min-w-0">
-        <div className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">{label}</div>
+        <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-[0.18em] text-zinc-500">
+          <span>{label}</span>
+          {rank != null ? <span className="tracking-normal text-zinc-300">#{rank}</span> : null}
+        </div>
         <div className="mt-0.5 truncate text-xs font-medium text-zinc-100">{line}</div>
       </div>
     </div>
+  );
+}
+
+function MainChampionCard({
+  name,
+  icon,
+  points,
+  masteryPath,
+}: {
+  name: string | null;
+  icon: string | null;
+  points: number | null;
+  masteryPath: string;
+}) {
+  if (!name && !icon) return null;
+
+  return (
+    <Link href={masteryPath} className="flex items-center gap-3 rounded-[18px] bg-zinc-900/20 p-2.5 ring-1 ring-white/5 transition hover:bg-white/5">
+      {icon ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={icon} alt={name ?? "Main champion"} className="h-10 w-10 rounded-xl" loading="lazy" />
+      ) : (
+        <div className="h-10 w-10 rounded-xl bg-zinc-950/40" />
+      )}
+      <div className="min-w-0">
+        <div className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Main champion</div>
+        <div className="mt-0.5 truncate text-sm font-semibold text-zinc-100">{name ?? "--"}</div>
+        <div className="mt-0.5 text-xs tabular-nums text-zinc-500">{formatNumber(points) ?? "--"} mastery</div>
+      </div>
+    </Link>
   );
 }
 
@@ -965,6 +1106,29 @@ function RecentQueueCard({
       </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <div className="flex w-full flex-wrap gap-1">
+          {summary.results.map((result, index) => {
+            const label = result.win === true ? "W" : result.win === false ? "L" : "-";
+            const championName = result.championId != null ? champNames[String(result.championId)] ?? `Champion ${result.championId}` : "Unknown champion";
+            return (
+              <span
+                key={`${result.matchId}-${index}`}
+                className={
+                  "inline-flex h-5 w-5 items-center justify-center rounded-md text-[10px] font-semibold tabular-nums " +
+                  (result.win === true
+                    ? "bg-emerald-400/16 text-emerald-100 ring-1 ring-emerald-300/20"
+                    : result.win === false
+                      ? "bg-rose-400/14 text-rose-100 ring-1 ring-rose-300/18"
+                      : "bg-zinc-900/60 text-zinc-500 ring-1 ring-white/5")
+                }
+                title={`${label} vs ${championName}`}
+              >
+                {label}
+              </span>
+            );
+          })}
+        </div>
+
         {summary.mainRoles.map((role) => (
           <span
             key={role.role}
