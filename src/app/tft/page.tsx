@@ -220,7 +220,7 @@ export default async function TftPage() {
     },
   };
   const tftReady = hasTftApiKey();
-  const renderedAt = Date.now();
+  const renderedAt = new Date().getTime();
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
