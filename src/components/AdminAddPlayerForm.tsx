@@ -52,6 +52,7 @@ type BoundDiscordLink = {
   discordUsername: string | null;
   gameName: string;
   tagLine: string;
+  refreshWarning?: string | null;
   roleSyncError: string | null;
 };
 
@@ -372,7 +373,7 @@ export default function AdminAddPlayerForm({ stats }: { stats: AdminStats }) {
         <section className="rounded border border-neutral-200 p-4 dark:border-neutral-800">
           <h2 className="text-sm font-semibold text-foreground">Manual Discord bind</h2>
           <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-            Use Discord user ID, not display tag, so the bot can assign server rank roles reliably. OAuth is still needed for Discord Linked Role metadata.
+            Paste a Discord numeric user ID. You can paste it with the username too, like 1255434368717951019 thanag36412.
           </p>
           <form onSubmit={handleBindDiscord} className="mt-3 grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto]">
             <input
@@ -417,6 +418,11 @@ export default function AdminAddPlayerForm({ stats }: { stats: AdminStats }) {
                   <div className={`mt-1 text-xs ${link.roleSyncError ? "text-amber-500" : "text-green-600 dark:text-green-400"}`}>
                     {link.roleSyncError ? `Bound, but role sync failed: ${link.roleSyncError}` : "Bound and server roles synced"}
                   </div>
+                  {link.refreshWarning ? (
+                    <div className="mt-1 text-xs text-amber-500">
+                      Bound using stored player. Refresh warning: {link.refreshWarning}
+                    </div>
+                  ) : null}
                 </li>
               ))}
             </ul>

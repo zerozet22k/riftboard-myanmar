@@ -14,7 +14,6 @@ import {
 } from "@/lib/discord";
 import { DiscordLink } from "@/models/discordLink";
 import { Player } from "@/models/player";
-import { approvedCommunityLeaderboardQuery } from "@/lib/communityLeaderboard";
 import { getAppBaseUrl, isCommunityCodeRequired } from "@/lib/runtimeConfig";
 
 type GuildRolePlayerProjection = {
@@ -452,10 +451,7 @@ export async function syncAllDiscordGuildRankRoles() {
   );
 
   const players = await Player.find(
-    {
-      _id: { $in: playerIds },
-      ...approvedCommunityLeaderboardQuery(),
-    },
+    { _id: { $in: playerIds } },
     { gameName: 1, tagLine: 1, solo: 1, tft: 1, flex: 1 }
   ).lean<GuildRolePlayerProjection[]>();
   const playersById = new Map(players.map((player) => [String(player._id), player]));
@@ -477,6 +473,11 @@ export async function syncAllDiscordGuildRankRoles() {
   const errors: string[] = [];
 
   for (const link of links) {
+    const discordUserId = String(link.discordUserId ?? "").trim();
+    if (discordUserId) {
+      allowedDiscordUserIds.add(discordUserId);
+    }
+
     const player = playersById.get(String(link.playerId ?? ""));
     if (!player?._id) {
       missingPlayers++;
@@ -484,9 +485,8 @@ export async function syncAllDiscordGuildRankRoles() {
     }
 
     try {
-      allowedDiscordUserIds.add(String(link.discordUserId));
       const result = await syncDiscordGuildRankRoleForIdentity({
-        discordUserId: String(link.discordUserId),
+        discordUserId,
         player,
         context,
       });

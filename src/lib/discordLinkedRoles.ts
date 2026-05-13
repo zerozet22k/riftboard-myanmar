@@ -210,7 +210,7 @@ export async function loadStoredDiscordIdentity(discordUserId: string) {
 
   const link = await DiscordLink.findOne({ discordUserId: String(discordUserId).trim() });
   if (!link?._id) throw new Error("No Discord link found. Connect Discord first.");
-  if (!link.verifiedBinding || link.verificationSource !== "discord_connections") {
+  if (!isVerifiedDiscordLink(link)) {
     throw new Error("Reconnect Discord to verify your Riot account again.");
   }
 
@@ -335,7 +335,7 @@ export async function refreshStoredDiscordProfile(
   let guildRoleError: string | null = null;
   let linkedRoleSkipped = false;
   let guildRoleSkipped = false;
-  if (opts?.syncLinkedRole !== false) {
+  if (opts?.syncLinkedRole !== false && link.verificationSource === "discord_connections") {
     try {
       const synced = await syncDiscordLinkedRoleForStoredLink(String(link._id));
       linkedRoleSkipped = synced.skipped;
@@ -343,6 +343,8 @@ export async function refreshStoredDiscordProfile(
       linkedRoleError =
         error instanceof Error ? error.message : "Could not refresh linked-role metadata.";
     }
+  } else if (opts?.syncLinkedRole !== false) {
+    linkedRoleSkipped = true;
   }
 
   try {
@@ -368,5 +370,8 @@ export async function refreshStoredDiscordProfile(
 export function isVerifiedDiscordLink(
   link: Pick<DiscordLinkDoc, "verifiedBinding" | "verificationSource"> | null | undefined
 ) {
-  return !!link?.verifiedBinding && link.verificationSource === "discord_connections";
+  return (
+    !!link?.verifiedBinding &&
+    (link.verificationSource === "discord_connections" || link.verificationSource === "legacy_manual")
+  );
 }

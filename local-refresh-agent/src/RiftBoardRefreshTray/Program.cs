@@ -1135,14 +1135,61 @@ internal enum RefreshJob
     Tft,
 }
 
+internal sealed record DiscordRole(string Id, string Name);
+
+internal sealed record DiscordRoleContext(
+    string GuildId,
+    Dictionary<string, DiscordRole> RolesByName,
+    Dictionary<string, List<DiscordRole>> ManagedRolesByQueue,
+    DiscordRole BindRole,
+    DiscordRole VerifiedRole);
+
+internal sealed record DiscordRoleSyncResult(BsonDocument Snapshot, string? AssignedSoloRoleName);
+
 internal sealed class CSharpRefreshService
 {
     private static readonly string[] SeaPlatforms = ["sg2", "th2", "ph2", "vn2", "tw2"];
+    private static readonly string[] ManagedRankTiers =
+    [
+        "CHALLENGER",
+        "GRANDMASTER",
+        "MASTER",
+        "DIAMOND",
+        "EMERALD",
+        "PLATINUM",
+        "GOLD",
+        "SILVER",
+        "BRONZE",
+        "IRON",
+    ];
+
+    private static readonly (string Key, string Label, string? RoleLabel)[] ManagedRankQueues =
+    [
+        ("solo", "Solo Queue", null),
+        ("tft", "TFT", "TFT"),
+        ("flex", "Ranked Flex", "Flex"),
+    ];
+
+    private static readonly Dictionary<string, int> RankRoleColors = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["CHALLENGER"] = 0xf0c74b,
+        ["GRANDMASTER"] = 0xd14b5a,
+        ["MASTER"] = 0xa970ff,
+        ["DIAMOND"] = 0x4ba3ff,
+        ["EMERALD"] = 0x2ecc71,
+        ["PLATINUM"] = 0x25b7b7,
+        ["GOLD"] = 0xd4af37,
+        ["SILVER"] = 0xaeb6bf,
+        ["BRONZE"] = 0xa97142,
+        ["IRON"] = 0x5d6d7e,
+    };
+
     private readonly Dictionary<string, string> _env;
     private readonly HttpClient _http = new();
     private readonly IMongoCollection<BsonDocument> _players;
     private readonly IMongoCollection<BsonDocument> _rankEntries;
     private readonly IMongoCollection<BsonDocument> _tftPlayerMatches;
+    private readonly IMongoCollection<BsonDocument> _discordLinks;
 
     public CSharpRefreshService(string repoRoot)
     {
@@ -1156,6 +1203,7 @@ internal sealed class CSharpRefreshService
         _players = db.GetCollection<BsonDocument>("players");
         _rankEntries = db.GetCollection<BsonDocument>("rankentries");
         _tftPlayerMatches = db.GetCollection<BsonDocument>("tftplayermatches");
+        _discordLinks = db.GetCollection<BsonDocument>("discordlinks");
     }
 
     public async Task<CronResult> RefreshAsync(RefreshJob job, JobConfig config, CancellationToken cancellationToken)
@@ -1271,18 +1319,21 @@ internal sealed class CSharpRefreshService
             cancellationToken: cancellationToken);
         await InsertRankEntriesAsync(playerId, entries, now, cancellationToken);
         await InsertRankEntriesAsync(playerId, tftLeague, now, cancellationToken);
+        await SyncDiscordGuildRolesForPlayerAsync(playerId, cancellationToken);
     }
 
     private async Task RefreshTftMatchesAsync(BsonDocument player, JobConfig config, CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
         var playerId = player.GetValue("_id").AsObjectId;
+        var gameName = ReadString(player, "gameName") ?? throw new InvalidOperationException("Player missing gameName");
+        var tagLine = ReadString(player, "tagLine") ?? throw new InvalidOperationException("Player missing tagLine");
         var puuid = ReadString(player, "tftPuuid") ?? ReadString(player, "puuid");
         if (string.IsNullOrWhiteSpace(puuid))
         {
             var account = await GetAccountByRiotIdAsync(
-                ReadString(player, "gameName") ?? throw new InvalidOperationException("Player missing gameName"),
-                ReadString(player, "tagLine") ?? throw new InvalidOperationException("Player missing tagLine"),
+                gameName,
+                tagLine,
                 "tft",
                 cancellationToken);
             puuid = account.GetProperty("puuid").GetString();
@@ -1295,6 +1346,22 @@ internal sealed class CSharpRefreshService
 
         var platform = ReadString(player, "platform") ?? "sg2";
         var matchRegion = ReadString(player, "matchRegion") ?? PlatformToMatchRegion(platform);
+        var tftLeague = await FindTftLeagueAsync(puuid, platform, cancellationToken);
+        var updates = new List<UpdateDefinition<BsonDocument>>
+        {
+            Builders<BsonDocument>.Update.Set("tftPuuid", puuid),
+            Builders<BsonDocument>.Update.Set("matchRegion", matchRegion),
+            Builders<BsonDocument>.Update.Set("lastRefreshAt", now),
+            Builders<BsonDocument>.Update.Set("updatedAt", now),
+        };
+        ApplyLeagueSnapshot(updates, tftLeague, "RANKED_TFT", "tft", now);
+        await InsertRankEntriesAsync(playerId, tftLeague, now, cancellationToken);
+        await _players.UpdateOneAsync(
+            Builders<BsonDocument>.Filter.Eq("_id", playerId),
+            Builders<BsonDocument>.Update.Combine(updates),
+            cancellationToken: cancellationToken);
+        await SyncDiscordGuildRolesForPlayerAsync(playerId, cancellationToken);
+
         var ids = await GetStringArrayAsync($"https://{matchRegion}.api.riotgames.com/tft/match/v1/matches/by-puuid/{Uri.EscapeDataString(puuid)}/ids?start=0&count={config.MatchesCount}", "tft", cancellationToken);
         var saved = 0;
         foreach (var matchId in ids)
@@ -1371,6 +1438,307 @@ internal sealed class CSharpRefreshService
             })),
             ["fetchedAt"] = now,
         };
+    }
+
+    private async Task SyncDiscordGuildRolesForPlayerAsync(ObjectId playerId, CancellationToken cancellationToken)
+    {
+        if (!DiscordRoleSyncConfigured())
+        {
+            return;
+        }
+
+        var links = await _discordLinks.Find(
+            Builders<BsonDocument>.Filter.Eq("playerId", playerId) &
+            Builders<BsonDocument>.Filter.Eq("verifiedBinding", true) &
+            Builders<BsonDocument>.Filter.In("verificationSource", new[] { "discord_connections", "legacy_manual" }))
+            .ToListAsync(cancellationToken);
+        if (links.Count == 0)
+        {
+            return;
+        }
+
+        var player = await _players.Find(Builders<BsonDocument>.Filter.Eq("_id", playerId)).FirstOrDefaultAsync(cancellationToken);
+        if (player is null)
+        {
+            return;
+        }
+
+        var context = await EnsureDiscordRoleContextAsync(cancellationToken);
+        foreach (var link in links)
+        {
+            var discordUserId = ReadString(link, "discordUserId");
+            if (string.IsNullOrWhiteSpace(discordUserId))
+            {
+                continue;
+            }
+
+            var result = await SyncDiscordGuildRolesForIdentityAsync(discordUserId, player, context, cancellationToken);
+            var soloTier = result.Snapshot.GetValue("solo", BsonNull.Value);
+            BsonValue soloRoleName = result.AssignedSoloRoleName is null ? BsonNull.Value : result.AssignedSoloRoleName;
+            await _discordLinks.UpdateOneAsync(
+                Builders<BsonDocument>.Filter.Eq("_id", link.GetValue("_id").AsObjectId),
+                Builders<BsonDocument>.Update
+                    .Set("gameName", ReadString(player, "gameName") ?? "")
+                    .Set("tagLine", ReadString(player, "tagLine") ?? "")
+                    .Set("guildRankRoleTier", soloTier)
+                    .Set("guildRankRoleName", soloRoleName)
+                    .Set("guildRankRolesSnapshot", result.Snapshot)
+                    .Set("guildRankRolesSyncedAt", DateTime.UtcNow),
+                cancellationToken: cancellationToken);
+        }
+    }
+
+    private async Task<DiscordRoleSyncResult> SyncDiscordGuildRolesForIdentityAsync(
+        string discordUserId,
+        BsonDocument player,
+        DiscordRoleContext context,
+        CancellationToken cancellationToken)
+    {
+        var member = await DiscordApiAsync(HttpMethod.Get, $"/guilds/{Uri.EscapeDataString(context.GuildId)}/members/{Uri.EscapeDataString(discordUserId)}", null, cancellationToken);
+        var existingRoleIds = new HashSet<string>(
+            member.TryGetProperty("roles", out var roles) && roles.ValueKind == JsonValueKind.Array
+                ? roles.EnumerateArray().Select(role => role.GetString()).Where(role => !string.IsNullOrWhiteSpace(role)).Select(role => role!)
+                : [],
+            StringComparer.Ordinal);
+
+        var snapshot = BuildGuildRankRoleSnapshot(player);
+        var assignedSoloRoleName = default(string);
+
+        foreach (var queue in ManagedRankQueues)
+        {
+            var wantedTier = snapshot.TryGetValue(queue.Key, out var tierValue) && tierValue.IsString ? tierValue.AsString : null;
+            var wantedRoleName = string.IsNullOrWhiteSpace(wantedTier) ? null : ManagedRoleName(queue.RoleLabel, wantedTier);
+            var wantedRole = wantedRoleName is not null && context.RolesByName.TryGetValue(wantedRoleName, out var matchedRole) ? matchedRole : null;
+            if (queue.Key == "solo")
+            {
+                assignedSoloRoleName = wantedRole?.Name;
+            }
+
+            foreach (var role in context.ManagedRolesByQueue[queue.Key])
+            {
+                var shouldHave = wantedRole is not null && role.Id == wantedRole.Id;
+                var hasRole = existingRoleIds.Contains(role.Id);
+                if (shouldHave && !hasRole)
+                {
+                    await AddDiscordRoleAsync(context.GuildId, discordUserId, role.Id, $"Sync RiftBoard {queue.Label} rank role", cancellationToken);
+                    existingRoleIds.Add(role.Id);
+                }
+                else if (!shouldHave && hasRole)
+                {
+                    await RemoveDiscordRoleAsync(context.GuildId, discordUserId, role.Id, $"Remove stale RiftBoard {queue.Label} rank role", cancellationToken);
+                    existingRoleIds.Remove(role.Id);
+                }
+            }
+        }
+
+        if (existingRoleIds.Contains(context.BindRole.Id))
+        {
+            await RemoveDiscordRoleAsync(context.GuildId, discordUserId, context.BindRole.Id, "Remove RiftBoard bind role for verified member", cancellationToken);
+            existingRoleIds.Remove(context.BindRole.Id);
+        }
+
+        if (!existingRoleIds.Contains(context.VerifiedRole.Id))
+        {
+            await AddDiscordRoleAsync(context.GuildId, discordUserId, context.VerifiedRole.Id, "Assign RiftBoard verified role", cancellationToken);
+        }
+
+        return new DiscordRoleSyncResult(snapshot, assignedSoloRoleName);
+    }
+
+    private async Task<DiscordRoleContext> EnsureDiscordRoleContextAsync(CancellationToken cancellationToken)
+    {
+        var guildId = DiscordGuildId();
+        var roles = await ListDiscordRolesAsync(guildId, cancellationToken);
+        var rolesByName = roles.ToDictionary(role => role.Name, StringComparer.Ordinal);
+
+        async Task<DiscordRole> EnsureRoleAsync(string name, int color, string reason)
+        {
+            if (rolesByName.TryGetValue(name, out var existing))
+            {
+                return existing;
+            }
+
+            var created = await CreateDiscordRoleAsync(guildId, name, color, reason, cancellationToken);
+            rolesByName[created.Name] = created;
+            return created;
+        }
+
+        var bindRole = await EnsureRoleAsync(BindRoleName(), BindRoleColor(), "Create RiftBoard bind role");
+        var verifiedRole = await EnsureRoleAsync(VerifiedRoleName(), VerifiedRoleColor(), "Create RiftBoard verified member role");
+
+        foreach (var queue in ManagedRankQueues)
+        {
+            foreach (var tier in ManagedRankTiers)
+            {
+                await EnsureRoleAsync(ManagedRoleName(queue.RoleLabel, tier), RankRoleColors[tier], $"Create RiftBoard {queue.Label} rank role");
+            }
+        }
+
+        return new DiscordRoleContext(
+            guildId,
+            rolesByName,
+            ManagedRankQueues.ToDictionary(
+                queue => queue.Key,
+                queue => ManagedRankTiers
+                    .Select(tier => rolesByName[ManagedRoleName(queue.RoleLabel, tier)])
+                    .ToList(),
+                StringComparer.Ordinal),
+            bindRole,
+            verifiedRole);
+    }
+
+    private async Task<List<DiscordRole>> ListDiscordRolesAsync(string guildId, CancellationToken cancellationToken)
+    {
+        var json = await DiscordApiAsync(HttpMethod.Get, $"/guilds/{Uri.EscapeDataString(guildId)}/roles", null, cancellationToken);
+        return json.ValueKind == JsonValueKind.Array
+            ? json.EnumerateArray()
+                .Select(role => new DiscordRole(GetString(role, "id") ?? "", GetString(role, "name") ?? ""))
+                .Where(role => !string.IsNullOrWhiteSpace(role.Id) && !string.IsNullOrWhiteSpace(role.Name))
+                .ToList()
+            : [];
+    }
+
+    private async Task<DiscordRole> CreateDiscordRoleAsync(string guildId, string name, int color, string reason, CancellationToken cancellationToken)
+    {
+        using var body = new StringContent(JsonSerializer.Serialize(new
+        {
+            name,
+            color,
+            mentionable = false,
+            hoist = false,
+        }), System.Text.Encoding.UTF8, "application/json");
+        var json = await DiscordApiAsync(HttpMethod.Post, $"/guilds/{Uri.EscapeDataString(guildId)}/roles", body, cancellationToken, reason);
+        return new DiscordRole(GetString(json, "id") ?? throw new InvalidOperationException("Discord role response missing id."), GetString(json, "name") ?? name);
+    }
+
+    private async Task AddDiscordRoleAsync(string guildId, string userId, string roleId, string reason, CancellationToken cancellationToken)
+    {
+        await DiscordApiAsync(
+            HttpMethod.Put,
+            $"/guilds/{Uri.EscapeDataString(guildId)}/members/{Uri.EscapeDataString(userId)}/roles/{Uri.EscapeDataString(roleId)}",
+            null,
+            cancellationToken,
+            reason);
+    }
+
+    private async Task RemoveDiscordRoleAsync(string guildId, string userId, string roleId, string reason, CancellationToken cancellationToken)
+    {
+        await DiscordApiAsync(
+            HttpMethod.Delete,
+            $"/guilds/{Uri.EscapeDataString(guildId)}/members/{Uri.EscapeDataString(userId)}/roles/{Uri.EscapeDataString(roleId)}",
+            null,
+            cancellationToken,
+            reason);
+    }
+
+    private async Task<JsonElement> DiscordApiAsync(HttpMethod method, string path, HttpContent? body, CancellationToken cancellationToken, string? reason = null)
+    {
+        using var request = new HttpRequestMessage(method, $"https://discord.com/api/v10{path}");
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bot", DiscordBotToken());
+        if (!string.IsNullOrWhiteSpace(reason))
+        {
+            request.Headers.Add("X-Audit-Log-Reason", Uri.EscapeDataString(reason));
+        }
+        request.Content = body;
+
+        using var response = await _http.SendAsync(request, cancellationToken);
+        var text = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (response.IsSuccessStatusCode)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return JsonDocument.Parse("{}").RootElement.Clone();
+            }
+
+            return JsonDocument.Parse(text).RootElement.Clone();
+        }
+
+        throw new InvalidOperationException($"Discord API {(int)response.StatusCode}: {ParseDiscordError(text, response.ReasonPhrase ?? "Request failed")}");
+    }
+
+    private BsonDocument BuildGuildRankRoleSnapshot(BsonDocument player)
+    {
+        var snapshot = new BsonDocument();
+        foreach (var queue in ManagedRankQueues)
+        {
+            var tier = NormalizeManagedTier(ReadNestedString(player, queue.Key, "tier"));
+            snapshot[queue.Key] = tier is null ? BsonNull.Value : tier;
+        }
+
+        return snapshot;
+    }
+
+    private bool DiscordRoleSyncConfigured()
+    {
+        return !string.IsNullOrWhiteSpace(Env("DISCORD_BOT_TOKEN")) &&
+               !string.IsNullOrWhiteSpace(Env("DISCORD_GUILD_ID"));
+    }
+
+    private string DiscordBotToken() => MustEnv("DISCORD_BOT_TOKEN");
+
+    private string DiscordGuildId() => MustEnv("DISCORD_GUILD_ID");
+
+    private string RankRolePrefix() => Env("DISCORD_RANK_ROLE_PREFIX")?.Trim() ?? "Rank";
+
+    private string BindRoleName() => Env("DISCORD_BIND_ROLE_NAME")?.Trim() is { Length: > 0 } value ? value : "Riftboard: Bind Riot";
+
+    private int BindRoleColor() => HexColor(Env("DISCORD_BIND_ROLE_COLOR"), 0x5865f2);
+
+    private string VerifiedRoleName() => Env("DISCORD_VERIFIED_ROLE_NAME")?.Trim() is { Length: > 0 } value ? value : "Riftboarded";
+
+    private int VerifiedRoleColor() => HexColor(Env("DISCORD_VERIFIED_ROLE_COLOR"), 0x2ecc71);
+
+    private string ManagedRoleName(string? queueRoleLabel, string tier)
+    {
+        var prettyTier = ToTitleCase(tier);
+        var prefix = RankRolePrefix();
+        var queueTier = string.IsNullOrWhiteSpace(queueRoleLabel) ? prettyTier : $"{queueRoleLabel} {prettyTier}";
+        return string.IsNullOrWhiteSpace(prefix) ? queueTier : $"{prefix}: {queueTier}";
+    }
+
+    private static string? NormalizeManagedTier(string? tier)
+    {
+        var normalized = String(tier).ToUpperInvariant();
+        return ManagedRankTiers.Contains(normalized) ? normalized : null;
+    }
+
+    private static string ToTitleCase(string value)
+    {
+        var parts = value.ToLowerInvariant().Split([' ', '_', '-'], StringSplitOptions.RemoveEmptyEntries);
+        return string.Join(" ", parts.Select(part => char.ToUpperInvariant(part[0]) + part[1..]));
+    }
+
+    private static int HexColor(string? raw, int fallback)
+    {
+        var value = (raw ?? "").Trim().TrimStart('#');
+        return int.TryParse(value, System.Globalization.NumberStyles.HexNumber, null, out var color) ? color : fallback;
+    }
+
+    private static string? ReadNestedString(BsonDocument doc, string objectKey, string key)
+    {
+        if (!doc.TryGetValue(objectKey, out var nested) || !nested.IsBsonDocument)
+        {
+            return null;
+        }
+
+        return ReadString(nested.AsBsonDocument, key);
+    }
+
+    private static string String(string? value) => (value ?? "").Trim();
+
+    private static string ParseDiscordError(string text, string fallback)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(text);
+            return doc.RootElement.TryGetProperty("message", out var message)
+                ? message.GetString() ?? fallback
+                : fallback;
+        }
+        catch
+        {
+            return string.IsNullOrWhiteSpace(text) ? fallback : text;
+        }
     }
 
     private async Task<JsonElement> GetAccountByRiotIdAsync(string gameName, string tagLine, string game, CancellationToken cancellationToken)

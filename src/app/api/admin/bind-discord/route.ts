@@ -20,6 +20,18 @@ const BindSchema = z.object({
   syncRoles: z.boolean().optional(),
 });
 
+function normalizeDiscordIdentity(inputUserId: string, inputUsername?: string) {
+  const rawUserId = String(inputUserId ?? "").trim();
+  const snowflake = rawUserId.match(/\b\d{15,22}\b/)?.[0] ?? "";
+  const usernameFromUserId = rawUserId
+    .replace(snowflake, "")
+    .replace(/[<@!>]/g, "")
+    .trim();
+  const username = String(inputUsername ?? "").trim() || usernameFromUserId || null;
+
+  return { discordUserId: snowflake, discordUsername: username };
+}
+
 export async function POST(req: NextRequest) {
   try {
     if (!hasAdminSessionFromRequest(req)) {
@@ -35,28 +47,52 @@ export async function POST(req: NextRequest) {
     if (!riot) {
       return NextResponse.json({ ok: false, error: "Enter Riot ID as GameName#TagLine" }, { status: 400 });
     }
+    const discord = normalizeDiscordIdentity(parsed.data.discordUserId, parsed.data.discordUsername);
+    if (!discord.discordUserId) {
+      return NextResponse.json(
+        { ok: false, error: "Enter a Discord numeric user ID. You can paste '1255434368717951019 thanag36412'." },
+        { status: 400 }
+      );
+    }
 
     await dbConnect();
-    await upsertAndRefreshByRiotId(
-      { gameName: riot.gameName, tagLine: riot.tagLine },
-      { force: true, syncMatches: false, fullMastery: false }
-    );
-
-    const player = await Player.findOne(buildPlayerLookupQuery(riot.gameName, riot.tagLine), {
+    let refreshWarning: string | null = null;
+    let player = await Player.findOne(buildPlayerLookupQuery(riot.gameName, riot.tagLine), {
       _id: 1,
       gameName: 1,
       tagLine: 1,
     }).lean();
+
     if (!player?._id) {
-      return NextResponse.json({ ok: false, error: "Could not resolve Riot player" }, { status: 404 });
+      try {
+        await upsertAndRefreshByRiotId(
+          { gameName: riot.gameName, tagLine: riot.tagLine },
+          { force: true, syncMatches: false, fullMastery: false }
+        );
+      } catch (error) {
+        refreshWarning = error instanceof Error ? error.message : "Could not refresh Riot player before binding.";
+      }
+
+      player = await Player.findOne(buildPlayerLookupQuery(riot.gameName, riot.tagLine), {
+        _id: 1,
+        gameName: 1,
+        tagLine: 1,
+      }).lean();
+    }
+
+    if (!player?._id) {
+      return NextResponse.json(
+        { ok: false, error: refreshWarning ? `Could not resolve Riot player: ${refreshWarning}` : "Could not resolve Riot player" },
+        { status: 404 }
+      );
     }
 
     const now = new Date();
     const link = await DiscordLink.findOneAndUpdate(
-      { discordUserId: parsed.data.discordUserId },
+      { discordUserId: discord.discordUserId },
       {
         $set: {
-          discordUsername: parsed.data.discordUsername || null,
+          discordUsername: discord.discordUsername,
           playerId: player._id,
           gameName: player.gameName,
           tagLine: player.tagLine,
@@ -70,7 +106,7 @@ export async function POST(req: NextRequest) {
           proofConnectionLabel: `${player.gameName}#${player.tagLine}`,
         },
         $setOnInsert: {
-          accessTokenEnc: encryptDiscordSecret(`admin-manual:${parsed.data.discordUserId}:${now.getTime()}`),
+          accessTokenEnc: encryptDiscordSecret(`admin-manual:${discord.discordUserId}:${now.getTime()}`),
           refreshTokenEnc: null,
         },
       },
@@ -93,6 +129,7 @@ export async function POST(req: NextRequest) {
         discordUsername: link.discordUsername ?? null,
         gameName: player.gameName,
         tagLine: player.tagLine,
+        refreshWarning,
         roleSyncError,
       },
     });
