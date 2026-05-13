@@ -374,6 +374,12 @@ function guildPath(guildId?: string) {
   return encodeURIComponent(resolvedGuildId);
 }
 
+function auditLogReason(value?: string) {
+  const reason = String(value ?? "").trim();
+  if (!reason) return null;
+  return encodeURIComponent(reason).slice(0, 512);
+}
+
 export async function listDiscordGuildRoles(guildId?: string) {
   return discordApi<DiscordGuildRole[]>(
     `/guilds/${guildPath(guildId)}/roles`,
@@ -389,7 +395,8 @@ export async function createDiscordGuildRole(input: {
   reason?: string;
 }) {
   const headers = new Headers({ "Content-Type": "application/json" });
-  if (input.reason) headers.set("X-Audit-Log-Reason", input.reason);
+  const reason = auditLogReason(input.reason);
+  if (reason) headers.set("X-Audit-Log-Reason", reason);
 
   return discordApi<DiscordGuildRole>(
     `/guilds/${guildPath(input.guildId)}/roles`,
@@ -442,7 +449,8 @@ export async function addDiscordGuildMemberRole(input: {
   reason?: string;
 }) {
   const headers = new Headers();
-  if (input.reason) headers.set("X-Audit-Log-Reason", input.reason);
+  const reason = auditLogReason(input.reason);
+  if (reason) headers.set("X-Audit-Log-Reason", reason);
 
   return discordApi<unknown>(
     `/guilds/${guildPath(input.guildId)}/members/${encodeURIComponent(String(input.userId).trim())}/roles/${encodeURIComponent(String(input.roleId).trim())}`,
@@ -461,7 +469,8 @@ export async function removeDiscordGuildMemberRole(input: {
   reason?: string;
 }) {
   const headers = new Headers();
-  if (input.reason) headers.set("X-Audit-Log-Reason", input.reason);
+  const reason = auditLogReason(input.reason);
+  if (reason) headers.set("X-Audit-Log-Reason", reason);
 
   return discordApi<unknown>(
     `/guilds/${guildPath(input.guildId)}/members/${encodeURIComponent(String(input.userId).trim())}/roles/${encodeURIComponent(String(input.roleId).trim())}`,
