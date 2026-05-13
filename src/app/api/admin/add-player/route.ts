@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { hasAdminSessionFromRequest, isValidAdminCode } from "@/lib/adminSession";
 import { dbConnect } from "@/lib/mongodb";
-import { buildPlayerLookupQuery, normalizeRiotIdPart, canonicalPlayerPath } from "@/lib/playerIdentity";
+import { buildPlayerLookupQuery, cleanRiotIdPart, normalizeRiotIdPart, canonicalPlayerPath } from "@/lib/playerIdentity";
 import { refreshPlayerById } from "@/lib/refresh";
 import { Player } from "@/models/player";
 
@@ -31,7 +31,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }
 
-    const { gameName, tagLine } = parsed.data;
+    const gameName = cleanRiotIdPart(parsed.data.gameName);
+    const tagLine = cleanRiotIdPart(parsed.data.tagLine);
     const gameNameNorm = normalizeRiotIdPart(gameName);
     const tagLineNorm = normalizeRiotIdPart(tagLine);
 

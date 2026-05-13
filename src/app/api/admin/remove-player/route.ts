@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { hasAdminSessionFromRequest, isValidAdminCode } from "@/lib/adminSession";
 import { dbConnect } from "@/lib/mongodb";
-import { canonicalPlayerPath, normalizeRiotIdPart } from "@/lib/playerIdentity";
+import { canonicalPlayerPath, cleanRiotIdPart, normalizeRiotIdPart } from "@/lib/playerIdentity";
 import { DiscordLink } from "@/models/discordLink";
 import { Player } from "@/models/player";
 import { PlayerMastery } from "@/models/playerMastery";
@@ -35,8 +35,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }
 
-    const gameNameNorm = normalizeRiotIdPart(parsed.data.gameName);
-    const tagLineNorm = normalizeRiotIdPart(parsed.data.tagLine);
+    const gameName = cleanRiotIdPart(parsed.data.gameName);
+    const tagLine = cleanRiotIdPart(parsed.data.tagLine);
+    const gameNameNorm = normalizeRiotIdPart(gameName);
+    const tagLineNorm = normalizeRiotIdPart(tagLine);
 
     await dbConnect();
 
@@ -50,7 +52,7 @@ export async function POST(req: NextRequest) {
     }
 
     const playerId = player._id;
-    const canonicalPath = canonicalPlayerPath(player.gameName ?? parsed.data.gameName, player.tagLine ?? parsed.data.tagLine);
+    const canonicalPath = canonicalPlayerPath(player.gameName ?? gameName, player.tagLine ?? tagLine);
 
     const [playerDelete, matchDelete, rankDelete, masteryDelete, commentDelete, discordDelete] = await Promise.all([
       Player.deleteOne({ _id: playerId }),
@@ -68,8 +70,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      gameName: player.gameName ?? parsed.data.gameName,
-      tagLine: player.tagLine ?? parsed.data.tagLine,
+      gameName: player.gameName ?? gameName,
+      tagLine: player.tagLine ?? tagLine,
       canonicalPath,
       deleted: {
         player: playerDelete.deletedCount ?? 0,

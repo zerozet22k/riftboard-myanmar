@@ -11,8 +11,18 @@ export type RiotIdAliasEntry = {
   observedAt: Date;
 };
 
-function cleanRiotIdPart(value: unknown) {
-  return String(value ?? "").trim();
+export function cleanRiotIdPart(value: unknown) {
+  return String(value ?? "")
+    .normalize("NFKC")
+    .replace(/\p{Cf}/gu, "")
+    .trim();
+}
+
+export function cleanRiotIdText(value: unknown) {
+  return cleanRiotIdPart(value)
+    .replace(/\s*\/\s*/g, "#")
+    .replace(/\s*#\s*/g, "#")
+    .replace(/#+/g, "#");
 }
 
 function coerceObservedAt(value: unknown, fallback: Date) {

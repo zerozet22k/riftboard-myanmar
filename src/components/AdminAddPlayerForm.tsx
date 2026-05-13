@@ -56,6 +56,29 @@ type BoundDiscordLink = {
   roleSyncError: string | null;
 };
 
+function cleanRiotIdPart(value: unknown) {
+  return String(value ?? "")
+    .normalize("NFKC")
+    .replace(/\p{Cf}/gu, "")
+    .trim();
+}
+
+function parseRiotIdInput(value: string) {
+  const raw = cleanRiotIdPart(value)
+    .replace(/\s*\/\s*/g, "#")
+    .replace(/\s*#\s*/g, "#")
+    .replace(/#+/g, "#");
+  const index = raw.lastIndexOf("#");
+  if (index <= 0) return null;
+  const gameName = cleanRiotIdPart(raw.slice(0, index));
+  const tagLine = cleanRiotIdPart(raw.slice(index + 1));
+  return gameName && tagLine ? { gameName, tagLine } : null;
+}
+
+function riotIdLabel(gameName: unknown, tagLine: unknown) {
+  return `${cleanRiotIdPart(gameName)}#${cleanRiotIdPart(tagLine)}`;
+}
+
 export default function AdminAddPlayerForm({ stats }: { stats: AdminStats }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -79,13 +102,13 @@ export default function AdminAddPlayerForm({ stats }: { stats: AdminStats }) {
     event.preventDefault();
     setError(null);
 
-    const parts = riotId.trim().split("#");
-    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    const parsedRiotId = parseRiotIdInput(riotId);
+    if (!parsedRiotId) {
       setError("Enter Riot ID as GameName#TagLine");
       return;
     }
 
-    const [gameName, tagLine] = parts;
+    const { gameName, tagLine } = parsedRiotId;
     setPending(true);
 
     try {
@@ -137,13 +160,13 @@ export default function AdminAddPlayerForm({ stats }: { stats: AdminStats }) {
     event.preventDefault();
     setError(null);
 
-    const parts = removeRiotId.trim().split("#");
-    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    const parsedRiotId = parseRiotIdInput(removeRiotId);
+    if (!parsedRiotId) {
       setError("Enter Riot ID as GameName#TagLine");
       return;
     }
 
-    const [gameName, tagLine] = parts;
+    const { gameName, tagLine } = parsedRiotId;
     setRemoving(true);
 
     try {
@@ -219,7 +242,8 @@ export default function AdminAddPlayerForm({ stats }: { stats: AdminStats }) {
     event.preventDefault();
     setError(null);
 
-    if (!discordUserId.trim() || !discordRiotId.trim()) {
+    const parsedRiotId = parseRiotIdInput(discordRiotId);
+    if (!discordUserId.trim() || !parsedRiotId) {
       setError("Enter Discord user ID and Riot ID");
       return;
     }
@@ -232,7 +256,7 @@ export default function AdminAddPlayerForm({ stats }: { stats: AdminStats }) {
         body: JSON.stringify({
           discordUserId,
           discordUsername,
-          riotId: discordRiotId,
+          riotId: `${parsedRiotId.gameName}#${parsedRiotId.tagLine}`,
           syncRoles: true,
         }),
       });
@@ -357,7 +381,7 @@ export default function AdminAddPlayerForm({ stats }: { stats: AdminStats }) {
             {stats.recentDiscordLinks.length ? stats.recentDiscordLinks.map((link) => (
               <li key={`${link.discordUserId}-${link.gameName}-${link.tagLine}`} className="flex items-center justify-between gap-3 py-2 text-sm">
                 <div className="min-w-0">
-                  <div className="truncate font-medium text-foreground">{link.gameName}#{link.tagLine}</div>
+                  <div className="truncate font-medium text-foreground">{riotIdLabel(link.gameName, link.tagLine)}</div>
                   <div className="truncate text-xs text-neutral-500">{link.discordUsername ?? link.discordUserId}</div>
                 </div>
                 <span className={`rounded px-2 py-1 text-xs ${link.verifiedBinding ? "bg-green-500/10 text-green-600 dark:text-green-400" : "bg-amber-500/10 text-amber-600 dark:text-amber-400"}`}>
@@ -413,7 +437,7 @@ export default function AdminAddPlayerForm({ stats }: { stats: AdminStats }) {
               {boundLinks.map((link, index) => (
                 <li key={`${link.discordUserId}-${index}`} className="rounded border border-neutral-200 px-3 py-2 text-sm dark:border-neutral-800">
                   <div className="font-medium text-foreground">
-                    {link.discordUsername ?? link.discordUserId} {"->"} {link.gameName}#{link.tagLine}
+                    {link.discordUsername ?? link.discordUserId} {"->"} {riotIdLabel(link.gameName, link.tagLine)}
                   </div>
                   <div className={`mt-1 text-xs ${link.roleSyncError ? "text-amber-500" : "text-green-600 dark:text-green-400"}`}>
                     {link.roleSyncError ? `Bound, but role sync failed: ${link.roleSyncError}` : "Bound and server roles synced"}
@@ -442,7 +466,7 @@ export default function AdminAddPlayerForm({ stats }: { stats: AdminStats }) {
                   href={player.canonicalPath}
                   className="truncate text-blue-600 hover:underline dark:text-blue-400"
                 >
-                  {player.gameName}#{player.tagLine}
+                  {riotIdLabel(player.gameName, player.tagLine)}
                 </Link>
                 {player.refreshError ? (
                   <span className="text-right text-xs text-amber-500">{player.refreshError}</span>
@@ -462,7 +486,7 @@ export default function AdminAddPlayerForm({ stats }: { stats: AdminStats }) {
                 className="rounded border border-red-200 px-3 py-2 text-sm dark:border-red-900"
               >
                 <div className="font-medium text-red-700 dark:text-red-300">
-                  Removed {player.gameName}#{player.tagLine}
+                  Removed {riotIdLabel(player.gameName, player.tagLine)}
                 </div>
                 <div className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
                   Deleted: player {player.deleted.player}, matches {player.deleted.matches}, rank {player.deleted.rankEntries}, mastery {player.deleted.masteryRows}, comments {player.deleted.profileComments}, discord links {player.deleted.discordLinks}

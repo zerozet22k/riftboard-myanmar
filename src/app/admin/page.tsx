@@ -4,6 +4,7 @@ import AdminLoginForm from "@/components/AdminLoginForm";
 import { getOptionalAdminSession } from "@/lib/adminSession";
 import { approvedCommunityLeaderboardQuery } from "@/lib/communityLeaderboard";
 import { dbConnect } from "@/lib/mongodb";
+import { cleanRiotIdPart } from "@/lib/playerIdentity";
 import { hasTftApiKey } from "@/lib/riot";
 import { DiscordLink } from "@/models/discordLink";
 import { Player } from "@/models/player";
@@ -47,8 +48,8 @@ export default async function AdminPage() {
         recentDiscordLinks: recentLinks.map((link) => ({
           discordUserId: String(link.discordUserId ?? ""),
           discordUsername: link.discordUsername ?? null,
-          gameName: String(link.gameName ?? ""),
-          tagLine: String(link.tagLine ?? ""),
+          gameName: cleanRiotIdPart(link.gameName),
+          tagLine: cleanRiotIdPart(link.tagLine),
           verifiedBinding: link.verifiedBinding === true,
           lastSyncedAt: link.lastSyncedAt ? new Date(link.lastSyncedAt).toISOString() : null,
         })),

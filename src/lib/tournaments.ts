@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import type { Types } from "mongoose";
+import { cleanRiotIdPart, cleanRiotIdText } from "@/lib/playerIdentity";
 
 export type TournamentFormat = "single_elimination";
 export type TournamentStatus =
@@ -105,32 +106,27 @@ export function slugifyTournamentName(input: string) {
 }
 
 export function parseRiotId(input: string) {
-  const raw = String(input ?? "")
-    .replace(/[\u200B-\u200D\uFEFF]/g, "")
-    .replace(/\s*\/\s*/g, "#")
-    .replace(/\s*#\s*/g, "#")
-    .replace(/#+/g, "#")
-    .trim();
+  const raw = cleanRiotIdText(input);
 
   if (!raw) return null;
 
   if (raw.includes("#")) {
     const idx = raw.lastIndexOf("#");
-    const gameName = raw.slice(0, idx).trim();
-    const tagLine = raw.slice(idx + 1).trim();
+    const gameName = cleanRiotIdPart(raw.slice(0, idx));
+    const tagLine = cleanRiotIdPart(raw.slice(idx + 1));
     return gameName && tagLine ? { gameName, tagLine } : null;
   }
 
   const match = raw.match(/^(.*\S)\s+(\S+)$/);
   if (!match) return null;
   return {
-    gameName: match[1].trim(),
-    tagLine: match[2].trim(),
+    gameName: cleanRiotIdPart(match[1]),
+    tagLine: cleanRiotIdPart(match[2]),
   };
 }
 
 export function normalizeRiotText(value: string) {
-  return String(value ?? "").trim().toLowerCase();
+  return cleanRiotIdPart(value).toLowerCase();
 }
 
 export function makeRosterEntry(input: TournamentRosterEntryInput): TournamentRosterEntry {
