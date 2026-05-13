@@ -14,6 +14,7 @@ import {
   formatNumber,
 } from "@/lib/displayTime";
 import { getOptionalDiscordSession } from "@/lib/discordSession";
+import { analyzeMatchPerformance, matchPerformanceToneClass, type MatchPerformanceBadge } from "@/lib/matchAnalysis";
 import { dbConnect } from "@/lib/mongodb";
 import { buildPlayerLookupQuery, canonicalPlayerPath } from "@/lib/playerIdentity";
 import {
@@ -105,6 +106,16 @@ type MatchDoc = {
 
 type ChampionSummaryEntry = { id?: number; name?: string };
 
+type RecentQueueSummary = {
+  games: number;
+  wins: number;
+  winrate: number | null;
+  avgKda: number | null;
+  mainRoles: Array<{ role: string; games: number; winrate: number | null }>;
+  champions: Array<{ championId: number; games: number; winrate: number | null }>;
+  badges: MatchPerformanceBadge[];
+};
+
 function safeDecode(seg: unknown) {
   try {
     return decodeURIComponent(String(seg ?? ""));
@@ -166,6 +177,93 @@ async function getChampNameMap() {
 function champIconUrl(championId: number | null | undefined) {
   if (championId == null) return null;
   return `${CHAMP_ICON_BASE}/${championId}.png`;
+}
+
+function roleAssetName(role: string) {
+  const normalized = role.toUpperCase();
+  if (normalized === "UTILITY" || normalized === "SUP") return "support";
+  if (normalized === "BOTTOM" || normalized === "BOT") return "bot";
+  if (normalized === "MIDDLE" || normalized === "MID") return "mid";
+  if (normalized === "JUNGLE") return "jungle";
+  return "top";
+}
+
+function roleLabel(role: string) {
+  const normalized = role.toUpperCase();
+  if (normalized === "UTILITY") return "Support";
+  if (normalized === "BOTTOM") return "Bot";
+  if (normalized === "MIDDLE") return "Mid";
+  if (normalized === "JUNGLE") return "Jungle";
+  if (normalized === "TOP") return "Top";
+  return normalized || "Unknown";
+}
+
+function roleIconUrl(role: string) {
+  return `https://raw.communitydragon.org/11.15/plugins/rcp-be-lol-game-data/global/default/assets/ranked/positions/rankposition_gold-${roleAssetName(role)}.png`;
+}
+
+function pct(wins: number, games: number) {
+  if (!games) return null;
+  return Math.round((wins / games) * 100);
+}
+
+function recentQueueSummary(matches: MatchDoc[], queueId: number): RecentQueueSummary | null {
+  const window = matches.filter((match) => match.queueId === queueId).slice(0, 20);
+  if (!window.length) return null;
+
+  const wins = window.filter((match) => match.win === true).length;
+  const roleMap = new Map<string, { games: number; wins: number }>();
+  const champMap = new Map<number, { games: number; wins: number }>();
+  let kdaTotal = 0;
+
+  for (const match of window) {
+    const role = String(match.teamPosition ?? "").toUpperCase();
+    if (role && role !== "NONE" && role !== "INVALID") {
+      const current = roleMap.get(role) ?? { games: 0, wins: 0 };
+      current.games += 1;
+      if (match.win === true) current.wins += 1;
+      roleMap.set(role, current);
+    }
+
+    if (typeof match.championId === "number") {
+      const current = champMap.get(match.championId) ?? { games: 0, wins: 0 };
+      current.games += 1;
+      if (match.win === true) current.wins += 1;
+      champMap.set(match.championId, current);
+    }
+
+    const kills = match.kills ?? 0;
+    const deaths = match.deaths ?? 0;
+    const assists = match.assists ?? 0;
+    kdaTotal += deaths === 0 ? kills + assists : (kills + assists) / Math.max(1, deaths);
+  }
+
+  const badges = analyzeMatchPerformance({
+    gameDuration: Math.round(window.reduce((sum, match) => sum + (match.gameDuration ?? 0), 0) / window.length),
+    teamPosition: [...roleMap.entries()].sort((a, b) => b[1].games - a[1].games)[0]?.[0] ?? null,
+    win: wins / window.length >= 0.5,
+    kills: Math.round(window.reduce((sum, match) => sum + (match.kills ?? 0), 0) / window.length),
+    deaths: Math.round(window.reduce((sum, match) => sum + (match.deaths ?? 0), 0) / window.length),
+    assists: Math.round(window.reduce((sum, match) => sum + (match.assists ?? 0), 0) / window.length),
+    cs: Math.round(window.reduce((sum, match) => sum + (match.cs ?? 0), 0) / window.length),
+    gold: Math.round(window.reduce((sum, match) => sum + (match.gold ?? 0), 0) / window.length),
+  }).slice(0, 2);
+
+  return {
+    games: window.length,
+    wins,
+    winrate: pct(wins, window.length),
+    avgKda: kdaTotal / window.length,
+    mainRoles: [...roleMap.entries()]
+      .map(([role, row]) => ({ role, games: row.games, winrate: pct(row.wins, row.games) }))
+      .sort((left, right) => right.games - left.games || (right.winrate ?? 0) - (left.winrate ?? 0))
+      .slice(0, 2),
+    champions: [...champMap.entries()]
+      .map(([championId, row]) => ({ championId, games: row.games, winrate: pct(row.wins, row.games) }))
+      .sort((left, right) => right.games - left.games || (right.winrate ?? 0) - (left.winrate ?? 0))
+      .slice(0, 4),
+    badges,
+  };
 }
 
 function playerMetaDescription(player: Pick<PlayerView, "gameName" | "tagLine" | "solo" | "flex">) {
@@ -329,7 +427,7 @@ export default async function PlayerProfilePage({
       }
     )
       .sort({ gameCreation: -1, _id: -1 })
-      .limit(10)
+      .limit(40)
       .lean() as Promise<MatchDoc[]>,
     getOptionalDiscordSession(),
     ProfileComment.find(
@@ -347,7 +445,8 @@ export default async function PlayerProfilePage({
       .lean() as Promise<StoredProfileComment[]>,
   ]);
 
-  const initialMatches: MatchRow[] = matchDocs.map((match) => ({
+  const initialMatchDocs = matchDocs.slice(0, 10);
+  const initialMatches: MatchRow[] = initialMatchDocs.map((match) => ({
     _id: String(match._id),
     matchId: String(match.matchId),
     queueId: typeof match.queueId === "number" ? match.queueId : null,
@@ -389,6 +488,8 @@ export default async function PlayerProfilePage({
     rankHistory.filter((entry) => entry.queue === "RANKED_FLEX_SR"),
     flex
   );
+  const soloRecent = recentQueueSummary(matchDocs, 420);
+  const flexRecent = recentQueueSummary(matchDocs, 440);
   // eslint-disable-next-line react-hooks/purity
   const renderedAtMs = Date.now();
 
@@ -399,7 +500,7 @@ export default async function PlayerProfilePage({
     formatDisplayMetaDateTime(isoOrNull(player.flex?.fetchedAt));
   const masteryUpdatedShort = formatDisplayMetaDateTime(player.masterySyncedAt);
   const masteryPath = `${canonicalPath}/mastery`;
-  const initialCursor = cursorFromLast(matchDocs[matchDocs.length - 1]);
+  const initialCursor = cursorFromLast(initialMatchDocs[initialMatchDocs.length - 1]);
   const initialComments: ProfileCommentView[] = commentDocs.map(serializeProfileComment);
   const profileJsonLd = {
     "@context": "https://schema.org",
@@ -512,6 +613,8 @@ export default async function PlayerProfilePage({
               wins={solo.wins ?? null}
               losses={solo.losses ?? null}
               peak={soloPeak}
+              recent={soloRecent}
+              champNames={champNames}
             />
             <RankCard
               title="Ranked Flex"
@@ -521,6 +624,8 @@ export default async function PlayerProfilePage({
               wins={flex.wins ?? null}
               losses={flex.losses ?? null}
               peak={flexPeak}
+              recent={flexRecent}
+              champNames={champNames}
             />
           </aside>
 
@@ -753,6 +858,8 @@ function RankCard({
   wins,
   losses,
   peak,
+  recent,
+  champNames,
 }: {
   title: string;
   tier: string | null;
@@ -761,6 +868,8 @@ function RankCard({
   wins: number | null;
   losses: number | null;
   peak: PeakRankLike | null;
+  recent: RecentQueueSummary | null;
+  champNames: Record<string, string>;
 }) {
   const wr = winrate(wins, losses);
   const wl = wins != null && losses != null ? `${wins}-${losses}` : "--";
@@ -797,6 +906,86 @@ function RankCard({
             </div>
           </div>
         </div>
+      </div>
+
+      <RecentQueueCard summary={recent} champNames={champNames} />
+    </div>
+  );
+}
+
+function RecentQueueCard({
+  summary,
+  champNames,
+}: {
+  summary: RecentQueueSummary | null;
+  champNames: Record<string, string>;
+}) {
+  if (!summary) {
+    return (
+      <div className="mt-3 rounded-[16px] bg-zinc-950/24 px-3 py-2 text-xs text-zinc-500">
+        No recent ranked games stored yet.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 rounded-[16px] bg-zinc-950/24 px-3 py-2">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">Last {summary.games}</div>
+          <div className="mt-0.5 text-lg font-semibold tabular-nums text-zinc-50">
+            {summary.winrate != null ? `${summary.winrate}% WR` : "--"}
+          </div>
+          <div className="mt-0.5 text-xs tabular-nums text-zinc-500">
+            {summary.wins}-{summary.games - summary.wins} / {summary.avgKda != null ? `${summary.avgKda.toFixed(2)} KDA` : "--"}
+          </div>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1">
+          {summary.champions.map((champion) => {
+            const name = champNames[String(champion.championId)] ?? `Champion ${champion.championId}`;
+            const icon = champIconUrl(champion.championId);
+            return (
+              <span
+                key={champion.championId}
+                className="relative inline-flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-950/55"
+                title={`${name}: ${champion.games} games${champion.winrate != null ? `, ${champion.winrate}% WR` : ""}`}
+              >
+                {icon ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={icon} alt={name} className="h-8 w-8 rounded-lg" loading="lazy" />
+                ) : null}
+                <span className="absolute -bottom-1 -right-1 rounded bg-zinc-950/95 px-1 text-[8px] leading-3 text-zinc-300">
+                  {champion.games}
+                </span>
+              </span>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        {summary.mainRoles.map((role) => (
+          <span
+            key={role.role}
+            className="inline-flex items-center gap-1.5 rounded-full bg-zinc-900/46 px-2 py-1 text-[11px] tabular-nums text-zinc-300"
+            title={`${roleLabel(role.role)}: ${role.games} games${role.winrate != null ? `, ${role.winrate}% WR` : ""}`}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={roleIconUrl(role.role)} alt={roleLabel(role.role)} className="h-4 w-4" loading="lazy" />
+            {role.games}
+          </span>
+        ))}
+
+        {summary.badges.map((badge) => (
+          <span
+            key={`${badge.kind}-${badge.label}`}
+            className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] leading-none ${matchPerformanceToneClass(badge.tone)} ${badge.kind === "verdict" ? "font-semibold" : ""}`}
+            title={badge.title}
+          >
+            {badge.label}
+          </span>
+        ))}
       </div>
     </div>
   );

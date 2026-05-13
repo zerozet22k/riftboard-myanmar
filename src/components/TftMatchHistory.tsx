@@ -147,17 +147,41 @@ function playstyleSidePercent(axis: TftPlaystyleSummary["axes"][number]) {
   return Math.round(axis.value >= 50 ? axis.value : 100 - axis.value);
 }
 
-function IconImage({ src, alt, className }: { src: string | null | undefined; alt: string; className: string }) {
-  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+function retryableCommunityDragonUrl(src: string) {
+  if (!/^https:\/\/raw\.communitydragon\.org\//i.test(src) || /[?&]rb_retry=/.test(src)) return null;
+  const separator = src.includes("?") ? "&" : "?";
+  return `${src}${separator}rb_retry=${Date.now()}`;
+}
 
-  if (!src || failedSrc === src) {
+function IconImage({ src, alt, className }: { src: string | null | undefined; alt: string; className: string }) {
+  const [retrySrc, setRetrySrc] = useState<string | null>(null);
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const baseSrc = src ?? null;
+  const currentSrc = retrySrc && baseSrc && retrySrc.startsWith(baseSrc) ? retrySrc : baseSrc;
+
+  if (!currentSrc || failedSrc === baseSrc) {
     return (
       <span className={`${className} inline-flex items-center justify-center bg-zinc-800 text-[10px] font-semibold text-zinc-400`}>
         {alt.slice(0, 1).toUpperCase()}
       </span>
     );
   }
-  return <img src={src} alt={alt} className={className} loading="lazy" onError={() => setFailedSrc(src)} />;
+  return (
+    <img
+      src={currentSrc}
+      alt={alt}
+      className={className}
+      loading="lazy"
+      onError={() => {
+        const retryUrl = currentSrc === baseSrc ? retryableCommunityDragonUrl(currentSrc) : null;
+        if (retryUrl && retryUrl !== retrySrc) {
+          setRetrySrc(retryUrl);
+          return;
+        }
+        setFailedSrc(baseSrc);
+      }}
+    />
+  );
 }
 
 function UnitStars({ tier }: { tier: number | null | undefined }) {
@@ -243,10 +267,7 @@ function SummaryPanel({ matches }: { matches: TftMatchRow[] }) {
                 className="relative inline-flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-950/50"
                 title={unit.displayName ?? unit.name ?? unit.characterId ?? "Unit"}
               >
-                {unit.iconUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={unit.iconUrl} alt={unit.displayName ?? "Unit"} className="h-8 w-8 rounded-lg" loading="lazy" />
-                ) : null}
+                <IconImage src={unit.iconUrl} alt={unit.displayName ?? "Unit"} className="h-8 w-8 rounded-lg object-cover" />
                 {unit.tier ? (
                   <span className="absolute -bottom-1 -right-1 rounded bg-zinc-950/95 px-1 text-[8px] leading-3 text-zinc-300">
                     {unit.tier}

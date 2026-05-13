@@ -33,6 +33,11 @@ type MatchParticipantRaw = {
   kills?: number;
   deaths?: number;
   assists?: number;
+  largestMultiKill?: number;
+  doubleKills?: number;
+  tripleKills?: number;
+  quadraKills?: number;
+  pentaKills?: number;
   goldEarned?: number;
   totalDamageDealtToChampions?: number;
   visionScore?: number;
@@ -101,6 +106,11 @@ type PlayerMatchView = {
   kills?: number | null;
   deaths?: number | null;
   assists?: number | null;
+  largestMultiKill?: number | null;
+  doubleKills?: number | null;
+  tripleKills?: number | null;
+  quadraKills?: number | null;
+  pentaKills?: number | null;
   cs?: number | null;
   gold?: number | null;
   items?: unknown[];
@@ -189,6 +199,11 @@ function participantSummary(participant: MatchParticipantRaw, mePuuidLower: stri
     kills: safeNum(participant.kills),
     deaths: safeNum(participant.deaths),
     assists: safeNum(participant.assists),
+    largestMultiKill: safeNum(participant.largestMultiKill),
+    doubleKills: safeNum(participant.doubleKills),
+    tripleKills: safeNum(participant.tripleKills),
+    quadraKills: safeNum(participant.quadraKills),
+    pentaKills: safeNum(participant.pentaKills),
     cs: Number.isFinite(cs) ? cs : null,
     gold: safeNum(participant.goldEarned),
     damage: safeNum(participant.totalDamageDealtToChampions),
@@ -260,6 +275,11 @@ export async function GET(
         kills: 1,
         deaths: 1,
         assists: 1,
+        largestMultiKill: 1,
+        doubleKills: 1,
+        tripleKills: 1,
+        quadraKills: 1,
+        pentaKills: 1,
         cs: 1,
         gold: 1,
         items: 1,
@@ -325,6 +345,11 @@ export async function GET(
             kills: safeNum(my.kills),
             deaths: safeNum(my.deaths),
             assists: safeNum(my.assists),
+            largestMultiKill: safeNum(my.largestMultiKill),
+            doubleKills: safeNum(my.doubleKills),
+            tripleKills: safeNum(my.tripleKills),
+            quadraKills: safeNum(my.quadraKills),
+            pentaKills: safeNum(my.pentaKills),
             cs: safeNum(my.cs),
             gold: safeNum(my.gold),
             items: Array.isArray(my.items)

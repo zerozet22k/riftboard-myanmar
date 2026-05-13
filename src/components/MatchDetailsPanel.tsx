@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import RankEmblem from "@/components/RankEmblem";
 import { formatNumber } from "@/lib/displayTime";
+import { analyzeMatchPerformance, matchPerformanceToneClass, type MatchPerformanceBadge } from "@/lib/matchAnalysis";
 
 type RankSnapshot = {
   tier?: string | null;
@@ -32,6 +33,11 @@ export type MatchParticipant = {
   kills: number | null;
   deaths: number | null;
   assists: number | null;
+  largestMultiKill?: number | null;
+  doubleKills?: number | null;
+  tripleKills?: number | null;
+  quadraKills?: number | null;
+  pentaKills?: number | null;
   cs: number | null;
   gold: number | null;
   damage?: number | null;
@@ -175,9 +181,10 @@ function damageWidth(value: number | null | undefined, maxValue: number) {
   return `${Math.max(6, Math.round((value / maxValue) * 100))}%`;
 }
 
-function Pill({ children, className = "" }: { children: ReactNode; className?: string }) {
+function Pill({ children, className = "", title }: { children: ReactNode; className?: string; title?: string }) {
   return (
     <span
+      title={title}
       className={
         "inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] leading-none tabular-nums " +
         className
@@ -185,6 +192,22 @@ function Pill({ children, className = "" }: { children: ReactNode; className?: s
     >
       {children}
     </span>
+  );
+}
+
+function PerformanceBadges({ badges }: { badges: MatchPerformanceBadge[] }) {
+  return (
+    <div className="flex min-w-0 flex-wrap gap-1">
+      {badges.map((badge) => (
+        <Pill
+          key={`${badge.kind}-${badge.label}`}
+          className={`${matchPerformanceToneClass(badge.tone)} ${badge.kind === "verdict" ? "font-semibold" : ""}`}
+          title={badge.title}
+        >
+          {badge.label}
+        </Pill>
+      ))}
+    </div>
   );
 }
 
@@ -419,6 +442,7 @@ function MobileParticipantRow({
   const kda = deaths === 0 ? `${kills + assists}.00` : ((kills + assists) / deaths).toFixed(2);
   const csPm = csPerMinute(participant.cs, matchDuration);
   const position = prettyPos(participant.teamPosition);
+  const badges = analyzeMatchPerformance({ ...participant, gameDuration: matchDuration ?? null });
   const rowTone =
     participant.isMe && tone === "blue"
       ? "rounded-xl bg-blue-500/8"
@@ -525,6 +549,10 @@ function MobileParticipantRow({
           value={formatNumber(participant.cs) ?? "--"}
           subvalue={csPm ? `${csPm}/m` : "--"}
         />
+      </div>
+
+      <div className="mt-2">
+        <PerformanceBadges badges={badges} />
       </div>
 
       <div className="mt-2 flex flex-wrap gap-1">
@@ -710,6 +738,7 @@ function TeamTable({
             const damage = participant.damage ?? null;
             const vision = participant.visionScore ?? null;
             const csPm = csPerMinute(participant.cs, matchDuration);
+            const badges = analyzeMatchPerformance({ ...participant, gameDuration: matchDuration ?? null });
             const rowTone =
               participant.isMe && tone === "blue"
                 ? "bg-blue-500/7"
@@ -741,6 +770,9 @@ function TeamTable({
                     {kills}/{deaths}/{assists}
                   </div>
                   <div className="mt-0.5 text-[9px] tabular-nums text-zinc-500">{kda} KDA</div>
+                  <div className="mt-1">
+                    <PerformanceBadges badges={badges} />
+                  </div>
                 </td>
 
                 <td className="border-t border-white/6 px-1.5 py-2">
