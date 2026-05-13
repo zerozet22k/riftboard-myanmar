@@ -3,6 +3,9 @@ import { dbConnect } from "@/lib/mongodb";
 import { buildPlayerLookupQuery } from "@/lib/playerIdentity";
 import { refreshPlayerById } from "@/lib/refresh";
 import { hasTftApiKey } from "@/lib/riot";
+import { syncDiscordGuildRankRoleForStoredLink } from "@/lib/discordGuildRoles";
+import { syncDiscordLinkedRoleForStoredLink } from "@/lib/discordLinkedRoles";
+import { DiscordLink } from "@/models/discordLink";
 import { Player } from "@/models/player";
 
 export const runtime = "nodejs";
@@ -30,6 +33,46 @@ function friendlyRefreshError(error: unknown) {
     return "No TFT player or match history was found for this Riot ID.";
   }
   return message;
+}
+
+async function syncDiscordRolesForPlayer(playerId: string) {
+  const links = await DiscordLink.find(
+    {
+      playerId,
+      verifiedBinding: true,
+      verificationSource: "discord_connections",
+    },
+    { _id: 1 }
+  ).lean();
+
+  let linkedRoleSkipped = 0;
+  let guildRoleSkipped = 0;
+  const errors: string[] = [];
+
+  for (const link of links) {
+    const linkId = String(link._id);
+
+    try {
+      const synced = await syncDiscordLinkedRoleForStoredLink(linkId, { force: true });
+      if (synced.skipped) linkedRoleSkipped++;
+    } catch (error) {
+      errors.push(friendlyRefreshError(error));
+    }
+
+    try {
+      const synced = await syncDiscordGuildRankRoleForStoredLink(linkId, { force: true });
+      if (synced.skipped) guildRoleSkipped++;
+    } catch (error) {
+      errors.push(friendlyRefreshError(error));
+    }
+  }
+
+  return {
+    scanned: links.length,
+    linkedRoleSkipped,
+    guildRoleSkipped,
+    errors,
+  };
 }
 
 export async function POST(req: Request, { params }: { params: Promise<Params> }) {
@@ -66,8 +109,11 @@ export async function POST(req: Request, { params }: { params: Promise<Params> }
       syncTftMatches: body.syncTftMatches !== false,
       matchesCount: Math.max(1, Math.min(50, Number(body.matchesCount ?? 20) || 20)),
     });
+    const discordRoleSync = refreshed?._skipped
+      ? { scanned: 0, linkedRoleSkipped: 0, guildRoleSkipped: 0, errors: [] }
+      : await syncDiscordRolesForPlayer(String(refreshed?._id ?? player._id));
 
-    return NextResponse.json({ ok: true, player: refreshed });
+    return NextResponse.json({ ok: true, player: refreshed, discordRoleSync });
   } catch (error) {
     return NextResponse.json({ ok: false, error: friendlyRefreshError(error) }, { status: 500 });
   }
