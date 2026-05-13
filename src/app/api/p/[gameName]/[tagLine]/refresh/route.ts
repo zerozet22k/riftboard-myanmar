@@ -63,7 +63,7 @@ async function syncDiscordRolesForPlayer(playerId: string) {
     }
 
     try {
-      const synced = await syncDiscordGuildRankRoleForStoredLink(linkId);
+      const synced = await syncDiscordGuildRankRoleForStoredLink(linkId, { force: true });
       if (synced.skipped) guildRoleSkipped++;
     } catch (error) {
       errors.push(errorMessage(error));
