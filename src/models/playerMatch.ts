@@ -18,6 +18,12 @@ export type PlayerMatchDoc = {
   kills?: number;
   deaths?: number;
   assists?: number;
+  largestMultiKill?: number;
+  doubleKills?: number;
+  tripleKills?: number;
+  quadraKills?: number;
+  pentaKills?: number;
+  largestKillingSpree?: number;
 
   cs?: number;
   gold?: number;
@@ -50,6 +56,12 @@ const PlayerMatchSchema = new Schema<PlayerMatchDoc>(
     kills: Number,
     deaths: Number,
     assists: Number,
+    largestMultiKill: Number,
+    doubleKills: Number,
+    tripleKills: Number,
+    quadraKills: Number,
+    pentaKills: Number,
+    largestKillingSpree: Number,
 
     cs: Number,
     gold: Number,

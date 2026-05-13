@@ -248,6 +248,10 @@ export function isRiot429(e: unknown) {
   return e instanceof RiotApiError && e.status === 429;
 }
 
+function isRiot403(e: unknown) {
+  return e instanceof RiotApiError && e.status === 403;
+}
+
 function isMissingPlatformHost(e: unknown) {
   const cause = e instanceof Error ? (e as Error & { cause?: { code?: unknown } }).cause : null;
   return cause?.code === "ENOTFOUND";
@@ -380,7 +384,7 @@ export async function findTftLeagueEntriesByPuuid(puuid: string, preferredPlatfo
   } catch (e) {
     // Some TFT product keys can read TFT League but not Account active-shard.
     // Platform fallback below is enough for SEA players, so active-shard is best-effort.
-    if (!isRiot404(e)) {
+    if (!isRiot404(e) && !isRiot403(e)) {
       console.warn("TFT active-shard lookup failed, falling back to SEA platforms:", e);
     }
   }

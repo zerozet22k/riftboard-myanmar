@@ -18,6 +18,20 @@ function safeDecode(value: unknown) {
   }
 }
 
+function friendlyRefreshError(error: unknown) {
+  const message = error instanceof Error ? error.message : "Refresh failed";
+  if (/Exception decrypting|Bad Request/i.test(message)) {
+    return "Riot could not return TFT match history for this account yet. No recent matches were saved.";
+  }
+  if (/403|Forbidden/i.test(message)) {
+    return "Riot rejected the TFT API key. Update RIOT_TFT_API_KEY or RIOT_API_KEY.";
+  }
+  if (/404|not found/i.test(message)) {
+    return "No TFT player or match history was found for this Riot ID.";
+  }
+  return message;
+}
+
 export async function POST(req: Request, { params }: { params: Promise<Params> }) {
   try {
     const { gameName, tagLine } = await params;
@@ -55,7 +69,6 @@ export async function POST(req: Request, { params }: { params: Promise<Params> }
 
     return NextResponse.json({ ok: true, player: refreshed });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Refresh failed";
-    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: friendlyRefreshError(error) }, { status: 500 });
   }
 }

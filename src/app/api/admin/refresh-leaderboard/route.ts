@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
-    const result = await refreshAllPlayers({
+    const normalResult = await refreshAllPlayers({
       leaderboardOnly: true,
       leaderboardGroup: "burmese",
       leaderboardStatus: "approved",
@@ -31,8 +31,36 @@ export async function POST(req: NextRequest) {
       matchesCount: toInt(body.matchesCount, 20, 1, 100),
       force: toBool(body.force),
       syncMatches: toBool(body.syncMatches),
-      syncTftMatches: toBool(body.syncTftMatches),
+      syncTftMatches: false,
     });
+    const tftResult = toBool(body.syncTftMatches)
+      ? await refreshAllPlayers({
+          leaderboardOnly: true,
+          leaderboardGroup: "burmese",
+          leaderboardStatus: "approved",
+          limit: toInt(body.limit, 15, 1, 200),
+          delayMs: toInt(body.delayMs, 900, 0, 5000),
+          matchesCount: toInt(body.matchesCount, 20, 1, 100),
+          force: toBool(body.force),
+          syncMatches: false,
+          syncTftMatches: true,
+        })
+      : null;
+
+    const result = {
+      ok: normalResult.ok + (tftResult?.ok ?? 0),
+      fail: normalResult.fail + (tftResult?.fail ?? 0),
+      skipped: normalResult.skipped + (tftResult?.skipped ?? 0),
+      scanned: normalResult.scanned + (tftResult?.scanned ?? 0),
+      errors: [
+        ...normalResult.errors.map((error) => ({ ...error, phase: "normal" })),
+        ...(tftResult?.errors.map((error) => ({ ...error, phase: "tft" })) ?? []),
+      ],
+      phases: {
+        normal: normalResult,
+        tft: tftResult,
+      },
+    };
 
     revalidatePath("/");
     revalidatePath("/leaderboard");

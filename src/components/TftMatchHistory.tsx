@@ -72,21 +72,11 @@ function queueName(queueId: number | null) {
   return QUEUE_NAMES[queueId] ?? `Queue ${queueId}`;
 }
 
-function clamp(value: number, min = 0, max = 100) {
-  return Math.max(min, Math.min(max, value));
-}
-
 function placementTone(placement: number | null) {
   if (placement === 1) return "border-amber-300/70 bg-amber-300/[0.06] text-amber-200";
   if (placement != null && placement <= 4) return "border-sky-300/45 bg-sky-400/[0.04] text-sky-200";
   if (placement != null) return "border-zinc-700 bg-zinc-900/26 text-zinc-300";
   return "border-zinc-800 bg-zinc-900/20 text-zinc-400";
-}
-
-function placementBarTone(place: number) {
-  if (place === 1) return "bg-amber-300";
-  if (place <= 4) return "bg-sky-300";
-  return "bg-zinc-500";
 }
 
 function rarityBorder(rarity: number | null | undefined) {
@@ -152,37 +142,9 @@ function MiniStat({ label, value }: { label: string; value: string | number }) {
   );
 }
 
-function badgeTone(tone: TftPlaystyleSummary["badges"][number]["tone"]) {
-  if (tone === "sky") return "border-sky-300/25 bg-sky-300/10 text-sky-100";
-  if (tone === "amber") return "border-amber-300/25 bg-amber-300/10 text-amber-100";
-  if (tone === "rose") return "border-rose-300/25 bg-rose-300/10 text-rose-100";
-  return "border-emerald-300/25 bg-emerald-300/10 text-emerald-100";
-}
-
-function PlaystyleBadges({ playstyle }: { playstyle: TftPlaystyleSummary }) {
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {playstyle.badges.map((badge) => (
-        <span
-          key={`${badge.icon}-${badge.label}`}
-          className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium ${badgeTone(badge.tone)}`}
-          title={badge.label}
-        >
-          <span className="rounded bg-black/20 px-1 py-0.5 font-mono text-[10px] leading-none">{badge.icon}</span>
-          {badge.label}
-        </span>
-      ))}
-    </div>
-  );
-}
-
 function playstyleSidePercent(axis: TftPlaystyleSummary["axes"][number]) {
   if (axis.label === "Balanced") return 50;
   return Math.round(axis.value >= 50 ? axis.value : 100 - axis.value);
-}
-
-function playstyleDisplayLabel(axis: TftPlaystyleSummary["axes"][number]) {
-  return axis.label === "Balanced" ? `${axis.left}/${axis.right}` : axis.label;
 }
 
 function IconImage({ src, alt, className }: { src: string | null | undefined; alt: string; className: string }) {
@@ -231,92 +193,79 @@ function computeSummary(matches: TftMatchRow[]) {
 
 function SummaryPanel({ matches }: { matches: TftMatchRow[] }) {
   const summary = useMemo(() => computeSummary(matches), [matches]);
-  const maxCount = Math.max(1, ...summary.counts);
+  const carryUnits = useMemo(() => {
+    const seen = new Set<string>();
+    return summary.window
+      .flatMap((match) => match.units ?? [])
+      .filter((unit) => unit?.iconUrl || unit?.displayName || unit?.characterId)
+      .sort((left, right) => (right.tier ?? 0) - (left.tier ?? 0) || (right.itemNames?.length ?? 0) - (left.itemNames?.length ?? 0))
+      .filter((unit) => {
+        const key = String(unit.characterId ?? unit.displayName ?? unit.name ?? "");
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, 4);
+  }, [summary.window]);
 
   if (!matches.length) return null;
 
   return (
-    <section className="rounded-lg bg-zinc-900/40 p-4 ring-1 ring-white/8">
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,1fr)]">
-        <div className="min-w-0 rounded-lg bg-zinc-950/24 p-3">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div className="min-w-0">
-              <div className="text-sm font-semibold text-zinc-100">Last 20 Games</div>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {summary.window.map((match, index) => (
-                  <span
-                    key={`${match._id}-placement-chip-${index}`}
-                    className={`inline-flex h-7 w-7 items-center justify-center rounded-md border text-sm font-semibold tabular-nums ${placementTone(match.placement)}`}
-                    title={formatCompactDateTime(match.gameDatetime ?? null) ?? undefined}
-                  >
-                    {match.placement ?? "-"}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid min-w-[280px] grid-cols-3 gap-2">
-              <div className="rounded-md bg-zinc-900/70 px-3 py-2">
-                <div className="text-xl font-semibold tabular-nums text-lime-300">
-                  {summary.avgPlace != null ? summary.avgPlace.toFixed(2) : "--"}
-                </div>
-                <div className="text-[11px] text-zinc-400">Avg Place</div>
-              </div>
-              <div className="rounded-md bg-zinc-900/70 px-3 py-2">
-                <div className="text-xl font-semibold tabular-nums text-lime-300">
-                  {summary.top4Rate != null ? `${Math.round(summary.top4Rate)}%` : "--"}
-                </div>
-                <div className="text-[11px] text-zinc-400">Top 4</div>
-              </div>
-              <div className="rounded-md bg-zinc-900/70 px-3 py-2">
-                <div className="text-xl font-semibold tabular-nums text-lime-300">
-                  {summary.winRate != null ? `${Math.round(summary.winRate)}%` : "--"}
-                </div>
-                <div className="text-[11px] text-zinc-400">Win</div>
-              </div>
-            </div>
+    <section className="rounded-lg bg-zinc-900/28 px-3 py-2.5">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="min-w-[120px]">
+          <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">Last 20</div>
+          <div className="mt-0.5 text-xl font-semibold tabular-nums text-zinc-50">
+            {summary.top4Rate != null ? `${Math.round(summary.top4Rate)}% WR` : "--"}
           </div>
-
-          <div className="mt-4 grid h-24 grid-cols-8 items-end gap-2">
-            {summary.counts.map((count, index) => (
-              <div key={`place-bar-${index}`} className="flex h-full flex-col items-center justify-end gap-1">
-                <div className="text-[11px] tabular-nums text-zinc-400">{count}</div>
-                <div
-                  className={`w-full rounded-t ${placementBarTone(index + 1)}`}
-                  style={{ height: `${Math.max(8, (count / maxCount) * 62)}px`, opacity: count ? 0.86 : 0.22 }}
-                />
-                <div className="text-[11px] text-zinc-500">{index + 1}</div>
-              </div>
-            ))}
+          <div className="mt-1 text-xs tabular-nums text-zinc-500">
+            Avg {summary.avgPlace != null ? summary.avgPlace.toFixed(2) : "--"} / 1st {summary.winRate != null ? `${Math.round(summary.winRate)}%` : "--"}
           </div>
         </div>
 
-        <div className="space-y-4">
-          <div className="rounded-lg bg-zinc-950/24 px-4 py-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-sm font-semibold text-zinc-100">Playstyle</div>
-              <PlaystyleBadges playstyle={summary.playstyle} />
-            </div>
-            <div className="mt-4 grid gap-2 sm:grid-cols-2">
-              {summary.playstyle.axes.map((row) => (
-                <div key={`${row.left}-${row.right}`} className="rounded-md bg-zinc-900/55 px-3 py-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className="rounded bg-black/20 px-1.5 py-1 font-mono text-[10px] font-semibold leading-none text-amber-100">
-                        {row.icon}
-                      </span>
-                      <span className="truncate text-sm font-semibold text-zinc-100">{playstyleDisplayLabel(row)}</span>
-                    </div>
-                    <div className="text-sm font-semibold tabular-nums text-lime-300">
-                      {playstyleSidePercent(row)}%
-                    </div>
-                  </div>
-                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-zinc-800">
-                    <div className="h-full rounded-full bg-amber-200" style={{ width: `${clamp(playstyleSidePercent(row))}%` }} />
-                  </div>
-                </div>
-              ))}
-            </div>
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+          {summary.window.slice(0, 20).map((match, index) => (
+            <span
+              key={`${match._id}-placement-chip-${index}`}
+              className={`inline-flex h-6 w-6 items-center justify-center rounded-md text-xs font-semibold tabular-nums ${placementTone(match.placement)}`}
+              title={formatCompactDateTime(match.gameDatetime ?? null) ?? undefined}
+            >
+              {match.placement ?? "-"}
+            </span>
+          ))}
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
+          <div className="flex items-center gap-1">
+            {carryUnits.map((unit, index) => (
+              <span
+                key={`${unit.characterId ?? unit.displayName ?? "unit"}-${index}`}
+                className="relative inline-flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-950/50"
+                title={unit.displayName ?? unit.name ?? unit.characterId ?? "Unit"}
+              >
+                {unit.iconUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={unit.iconUrl} alt={unit.displayName ?? "Unit"} className="h-8 w-8 rounded-lg" loading="lazy" />
+                ) : null}
+                {unit.tier ? (
+                  <span className="absolute -bottom-1 -right-1 rounded bg-zinc-950/95 px-1 text-[8px] leading-3 text-zinc-300">
+                    {unit.tier}
+                  </span>
+                ) : null}
+              </span>
+            ))}
+          </div>
+
+          <div className="hidden items-center gap-1 sm:flex">
+            {summary.playstyle.axes.slice(0, 2).map((axis) => (
+              <span
+                key={`${axis.left}-${axis.right}`}
+                className="rounded-md border border-amber-300/25 bg-amber-300/10 px-2 py-1 text-[11px] font-medium tabular-nums text-amber-100"
+                title={`${axis.left} / ${axis.right}`}
+              >
+                {axis.icon} {playstyleSidePercent(axis)}%
+              </span>
+            ))}
           </div>
         </div>
       </div>

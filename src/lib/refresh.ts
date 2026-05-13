@@ -153,6 +153,12 @@ function extractPlayerMatchSummary(match: any, puuid: string) {
     kills: typeof me?.kills === "number" ? me.kills : undefined,
     deaths: typeof me?.deaths === "number" ? me.deaths : undefined,
     assists: typeof me?.assists === "number" ? me.assists : undefined,
+    largestMultiKill: typeof me?.largestMultiKill === "number" ? me.largestMultiKill : undefined,
+    doubleKills: typeof me?.doubleKills === "number" ? me.doubleKills : undefined,
+    tripleKills: typeof me?.tripleKills === "number" ? me.tripleKills : undefined,
+    quadraKills: typeof me?.quadraKills === "number" ? me.quadraKills : undefined,
+    pentaKills: typeof me?.pentaKills === "number" ? me.pentaKills : undefined,
+    largestKillingSpree: typeof me?.largestKillingSpree === "number" ? me.largestKillingSpree : undefined,
 
     cs,
     gold: typeof me?.goldEarned === "number" ? me.goldEarned : undefined,
@@ -344,6 +350,12 @@ async function syncRecentMatches(params: { player: any; puuid: string; matchRegi
             kills: summary.kills,
             deaths: summary.deaths,
             assists: summary.assists,
+            largestMultiKill: summary.largestMultiKill,
+            doubleKills: summary.doubleKills,
+            tripleKills: summary.tripleKills,
+            quadraKills: summary.quadraKills,
+            pentaKills: summary.pentaKills,
+            largestKillingSpree: summary.largestKillingSpree,
 
             cs: summary.cs,
             gold: summary.gold,
@@ -725,12 +737,24 @@ export async function refreshAllPlayers(opts?: {
     q["leaderboard.status"] = opts?.leaderboardStatus ?? "approved";
   }
 
-  const players = await Player.find(q, { _id: 1, gameName: 1, tagLine: 1, lastRefreshAt: 1 })
-    .sort({ lastRefreshAt: 1, updatedAt: 1 })
+  const playerSort: [string, 1][] =
+    opts?.syncTftMatches === true
+      ? [["tftMatchSync.lastSyncAt", 1], ["lastRefreshAt", 1], ["updatedAt", 1]]
+      : [["lastRefreshAt", 1], ["updatedAt", 1]];
+
+  const players = await Player.find(q, {
+    _id: 1,
+    gameName: 1,
+    tagLine: 1,
+    lastRefreshAt: 1,
+    tftMatchSync: 1,
+  })
+    .sort(playerSort)
     .limit(limit)
     .lean();
 
   const errors: { playerId: string; name?: string; error: string }[] = [];
+  const playersSummary: { playerId: string; name?: string; status: "ok" | "skipped" | "failed" }[] = [];
   let ok = 0;
   let fail = 0;
   let skipped = 0;
@@ -748,10 +772,20 @@ export async function refreshAllPlayers(opts?: {
 
       if (out?._skipped) {
         skipped++;
+        playersSummary.push({
+          playerId: String(p._id),
+          name: `${p.gameName}#${p.tagLine}`,
+          status: "skipped",
+        });
         continue;
       }
 
       ok++;
+      playersSummary.push({
+        playerId: String(p._id),
+        name: `${p.gameName}#${p.tagLine}`,
+        status: "ok",
+      });
       if (delayMs) await sleep(delayMs);
     } catch (e) {
       if (isRateLimit(e)) await sleep(rateLimitWaitMs(e, 3000));
@@ -761,10 +795,15 @@ export async function refreshAllPlayers(opts?: {
         name: `${p.gameName}#${p.tagLine}`,
         error: errToString(e),
       });
+      playersSummary.push({
+        playerId: String(p._id),
+        name: `${p.gameName}#${p.tagLine}`,
+        status: "failed",
+      });
     }
   }
 
-  return { ok, fail, skipped, errors, scanned: players.length };
+  return { ok, fail, skipped, errors, players: playersSummary, scanned: players.length };
 }
 
 export async function upsertAndRefreshByRiotId(

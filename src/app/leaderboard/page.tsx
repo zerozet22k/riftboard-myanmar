@@ -11,6 +11,7 @@ import {
 } from "@/lib/seo";
 import { approvedCommunityLeaderboardQuery } from "@/lib/communityLeaderboard";
 import { Player } from "@/models/player";
+import { PlayerMatch } from "@/models/playerMatch";
 import { RankEntry } from "@/models/rankEntry";
 import AutoUIRefresh from "@/components/AutoUIRefresh";
 import LeaderboardTable, { type LeaderboardRow } from "@/components/LeaderboardTable";
@@ -93,6 +94,25 @@ type RankHistoryRow = {
   lp?: number | null;
 };
 
+type RecentMatchRow = {
+  playerId: Types.ObjectId;
+  queueId?: number | null;
+  gameCreation?: number | null;
+  championId?: number | null;
+  teamPosition?: string | null;
+  win?: boolean | null;
+};
+
+type RecentMatchGroup = {
+  _id: {
+    playerId: Types.ObjectId;
+    queueId: number;
+  };
+  matches?: RecentMatchRow[];
+};
+
+type QueueRecentSummary = NonNullable<LeaderboardRow["recentSolo"]>;
+
 function rankKey(tier?: string | null, div?: string | null, lp?: number | null) {
   const t = tier ? TIER_ORDER[String(tier).toUpperCase()] : undefined;
   if (t === undefined) return -1;
@@ -149,6 +169,53 @@ function fallbackPeak(current: {
     : null;
 }
 
+function laneLabel(lane?: string | null) {
+  const normalized = String(lane ?? "").trim().toUpperCase();
+  if (normalized === "TOP") return "Top";
+  if (normalized === "JUNGLE") return "Jungle";
+  if (normalized === "MIDDLE") return "Mid";
+  if (normalized === "BOTTOM") return "Bot";
+  if (normalized === "UTILITY") return "Support";
+  return null;
+}
+
+function summarizeRecentQueue(matches: RecentMatchRow[]): QueueRecentSummary | null {
+  if (!matches.length) return null;
+
+  const wins = matches.filter((match) => match.win === true).length;
+  const lanes = new Map<string, number>();
+  const champs = new Map<number, { championId: number; games: number; wins: number }>();
+
+  for (const match of matches) {
+    const lane = laneLabel(match.teamPosition);
+    if (lane) lanes.set(lane, (lanes.get(lane) ?? 0) + 1);
+
+    if (typeof match.championId === "number") {
+      const current = champs.get(match.championId) ?? { championId: match.championId, games: 0, wins: 0 };
+      current.games += 1;
+      if (match.win === true) current.wins += 1;
+      champs.set(match.championId, current);
+    }
+  }
+
+  return {
+    games: matches.length,
+    winrate: Math.round((wins / matches.length) * 100),
+    lanes: [...lanes.entries()]
+      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+      .slice(0, 2)
+      .map(([name, games]) => ({ name, games, percent: Math.round((games / matches.length) * 100) })),
+    mains: [...champs.values()]
+      .sort((left, right) => right.games - left.games || right.wins - left.wins || left.championId - right.championId)
+      .slice(0, 3)
+      .map((champion) => ({
+        championId: champion.championId,
+        games: champion.games,
+        winrate: Math.round((champion.wins / champion.games) * 100),
+      })),
+  };
+}
+
 export default async function LeaderboardPage() {
   await dbConnect();
 
@@ -184,6 +251,37 @@ export default async function LeaderboardPage() {
       lp: 1,
     }
   ).lean<RankHistoryRow[]>();
+
+  const recentMatchGroups = await PlayerMatch.aggregate<RecentMatchGroup>([
+    { $match: { playerId: { $in: playerIds }, queueId: { $in: [420, 440] } } },
+    { $sort: { playerId: 1, queueId: 1, gameCreation: -1, _id: -1 } },
+    {
+      $group: {
+        _id: { playerId: "$playerId", queueId: "$queueId" },
+        matches: {
+          $push: {
+            playerId: "$playerId",
+            queueId: "$queueId",
+            gameCreation: "$gameCreation",
+            championId: "$championId",
+            teamPosition: "$teamPosition",
+            win: "$win",
+          },
+        },
+      },
+    },
+    { $project: { matches: { $slice: ["$matches", 20] } } },
+  ]);
+
+  const recentMap = new Map<string, { solo: QueueRecentSummary | null; flex: QueueRecentSummary | null }>();
+  for (const group of recentMatchGroups) {
+    const playerId = String(group._id.playerId);
+    const current = recentMap.get(playerId) ?? { solo: null, flex: null };
+    const summary = summarizeRecentQueue(group.matches ?? []);
+    if (group._id.queueId === 420) current.solo = summary;
+    if (group._id.queueId === 440) current.flex = summary;
+    recentMap.set(playerId, current);
+  }
 
   const peakMap = new Map<
     string,
@@ -264,6 +362,8 @@ export default async function LeaderboardPage() {
       peakFlexLp: flexPeak?.lp ?? null,
 
       mains: topMains(p),
+      recentSolo: recentMap.get(String(p._id))?.solo ?? null,
+      recentFlex: recentMap.get(String(p._id))?.flex ?? null,
     };
   });
 

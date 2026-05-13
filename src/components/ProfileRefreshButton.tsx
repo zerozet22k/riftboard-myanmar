@@ -51,7 +51,13 @@ export default function ProfileRefreshButton({
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) {
         const message = String(j?.error ?? `Refresh failed (${res.status})`);
-        if (/403|Forbidden/i.test(message) && mode === "tft") {
+        if (/Exception decrypting|Bad Request/i.test(message)) {
+          setErr(
+            mode === "tft"
+              ? "No TFT match history was available from Riot for this account."
+              : "No match history was available from Riot for this account."
+          );
+        } else if (/403|Forbidden/i.test(message) && mode === "tft") {
           setErr("TFT match sync failed: Riot rejected the API key. Update RIOT_TFT_API_KEY or RIOT_API_KEY.");
         } else if (/Missing RIOT_TFT_API_KEY|Missing env/i.test(message) && mode === "tft") {
           setErr("TFT match sync failed: add RIOT_TFT_API_KEY or RIOT_API_KEY.");

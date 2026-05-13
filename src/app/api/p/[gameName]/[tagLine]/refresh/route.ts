@@ -29,7 +29,13 @@ function toInt(v: unknown, def: number) {
 }
 
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Error";
+  const message = error instanceof Error ? error.message : "Error";
+  if (/Exception decrypting|Bad Request/i.test(message)) {
+    return "Riot could not return match history for this account yet. No recent matches were saved.";
+  }
+  if (/403|Forbidden/i.test(message)) return "Riot rejected the API key. Update RIOT_API_KEY.";
+  if (/404|not found/i.test(message)) return "No player or match history was found for this Riot ID.";
+  return message;
 }
 
 async function syncDiscordRolesForPlayer(playerId: string) {

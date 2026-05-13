@@ -1,5 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { unstable_cache } from "next/cache";
+import { Types } from "mongoose";
 import { dbConnect } from "@/lib/mongodb";
 import { formatNumber, formatRelativeTime } from "@/lib/displayTime";
 import { hasTftApiKey } from "@/lib/riot";
@@ -13,6 +15,7 @@ import { approvedCommunityLeaderboardQuery } from "@/lib/communityLeaderboard";
 import { analyzeTftPlaystyle, type TftPlaystyleSummary } from "@/lib/tftPlaystyle";
 import { Player } from "@/models/player";
 import { TftPlayerMatch } from "@/models/tftPlayerMatch";
+import { LeaderboardPager, LeaderboardSearchBar } from "@/components/LeaderboardControls";
 import ProfileAvatar from "@/components/ProfileAvatar";
 import RankEmblem from "@/components/RankEmblem";
 
@@ -111,6 +114,45 @@ type TftRecentMatch = {
   }>;
 };
 
+type TftRecentMatchGroup = {
+  _id: string;
+  matches?: TftRecentMatch[];
+};
+
+const getRecentMatchesForLeaderboardPage = unstable_cache(
+  async (rawPlayerIds: string[]) => {
+    await dbConnect();
+    const playerIds = rawPlayerIds
+      .map((id) => (Types.ObjectId.isValid(id) ? new Types.ObjectId(id) : null))
+      .filter((id): id is Types.ObjectId => id != null);
+
+    if (!playerIds.length) return [] as Array<[string, TftRecentMatch[]]>;
+
+    const recentGroups = await TftPlayerMatch.aggregate<TftRecentMatchGroup>([
+      { $match: { playerId: { $in: playerIds } } },
+      { $sort: { playerId: 1, gameDatetime: -1, _id: -1 } },
+      {
+        $group: {
+          _id: "$playerId",
+          matches: {
+            $push: {
+              level: "$level",
+              goldLeft: "$goldLeft",
+              totalDamageToPlayers: "$totalDamageToPlayers",
+              units: "$units",
+            },
+          },
+        },
+      },
+      { $project: { _id: { $toString: "$_id" }, matches: { $slice: ["$matches", 20] } } },
+    ]);
+
+    return recentGroups.map((group) => [group._id, group.matches ?? []] as [string, TftRecentMatch[]]);
+  },
+  ["tft-leaderboard-recent-matches-v2"],
+  { revalidate: 300 }
+);
+
 function rankKey(tier?: string | null, div?: string | null, lp?: number | null) {
   const t = tier ? TIER_ORDER[String(tier).toUpperCase()] : undefined;
   if (t === undefined) return -1;
@@ -154,8 +196,17 @@ function parsePage(value: unknown) {
   return Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1;
 }
 
-function pageHref(page: number) {
-  return page <= 1 ? "/tft" : `/tft?page=${page}`;
+function parseSearch(value: unknown) {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return String(raw ?? "").trim();
+}
+
+function pageHref(page: number, query = "") {
+  const params = new URLSearchParams();
+  if (page > 1) params.set("page", String(page));
+  if (query.trim()) params.set("q", query.trim());
+  const suffix = params.toString();
+  return suffix ? `/tft?${suffix}` : "/tft";
 }
 
 function badgeTone(tone: TftPlaystyleSummary["badges"][number]["tone"]) {
@@ -208,11 +259,13 @@ function PlaystylePills({ playstyle }: { playstyle: TftPlaystyleSummary | null }
 export default async function TftPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ page?: string | string[] }>;
+  searchParams?: Promise<{ page?: string | string[]; q?: string | string[] }>;
 }) {
   await dbConnect();
   const sp = searchParams ? await searchParams : {};
   const requestedPage = parsePage(sp.page);
+  const query = parseSearch(sp.q);
+  const normalizedQuery = query.toLowerCase();
 
   const players = await Player.find(
     approvedCommunityLeaderboardQuery(),
@@ -255,28 +308,21 @@ export default async function TftPage({
 
   rows.sort((left, right) => right.key - left.key || left.name.localeCompare(right.name));
 
-  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const filteredRows = normalizedQuery
+    ? rows.filter(
+        (row) =>
+          row.name.toLowerCase().includes(normalizedQuery) ||
+          row.platform.toLowerCase().includes(normalizedQuery) ||
+          prettyRank(row.tier, row.div).toLowerCase().includes(normalizedQuery)
+      )
+    : rows;
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const currentPage = Math.min(requestedPage, totalPages);
   const startIndex = (currentPage - 1) * PAGE_SIZE;
-  const visibleRows = rows.slice(startIndex, startIndex + PAGE_SIZE);
+  const visibleRows = filteredRows.slice(startIndex, startIndex + PAGE_SIZE);
 
-  const playerIds = visibleRows.map((row) => row.id);
-  const recentMatches = await TftPlayerMatch.find(
-    { playerId: { $in: playerIds } },
-    { playerId: 1, level: 1, goldLeft: 1, totalDamageToPlayers: 1, units: 1, gameDatetime: 1 }
-  )
-    .sort({ gameDatetime: -1, _id: -1 })
-    .lean<TftRecentMatch[]>();
-  const recentByPlayer = new Map<string, TftRecentMatch[]>();
-  for (const match of recentMatches) {
-    const playerId = String(match.playerId ?? "");
-    if (!playerId) continue;
-    const bucket = recentByPlayer.get(playerId) ?? [];
-    if (bucket.length < 20) {
-      bucket.push(match);
-      recentByPlayer.set(playerId, bucket);
-    }
-  }
+  const recentByPlayer = new Map(await getRecentMatchesForLeaderboardPage(visibleRows.map((row) => row.id)));
 
   const pagedRows = visibleRows.map((row) => ({
     ...row,
@@ -344,6 +390,23 @@ export default async function TftPage({
 
         {pagedRows.length ? (
           <>
+            <LeaderboardSearchBar
+              action="/tft"
+              defaultValue={query}
+              helper="Search TFT players by Riot ID, server, or rank."
+              clearHref={query ? "/tft" : undefined}
+            />
+
+            <LeaderboardPager
+              start={filteredRows.length ? startIndex + 1 : 0}
+              end={startIndex + pagedRows.length}
+              total={filteredRows.length}
+              page={currentPage}
+              pages={totalPages}
+              previousHref={pageHref(currentPage - 1, query)}
+              nextHref={pageHref(currentPage + 1, query)}
+            />
+
             <div className="space-y-3 xl:hidden">
               {pagedRows.map((row, index) => (
                 <article key={row.id} className="rounded-[24px] bg-zinc-900/22 p-4 ring-1 ring-white/5">
@@ -468,49 +531,32 @@ export default async function TftPage({
               </table>
             </div>
 
-            <nav className="flex flex-col gap-3 rounded-[20px] bg-zinc-900/22 p-3 text-sm text-zinc-400 ring-1 ring-white/5 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                Showing <span className="text-zinc-100">{startIndex + 1}</span>
-                {" - "}
-                <span className="text-zinc-100">{startIndex + pagedRows.length}</span>
-                {" of "}
-                <span className="text-zinc-100">{rows.length}</span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {currentPage > 1 ? (
-                  <Link
-                    href={pageHref(currentPage - 1)}
-                    className="rounded-lg border border-zinc-700 bg-zinc-950/35 px-3 py-2 text-zinc-100 transition hover:bg-white/5"
-                  >
-                    Previous
-                  </Link>
-                ) : (
-                  <span className="rounded-lg border border-zinc-800 bg-zinc-950/20 px-3 py-2 text-zinc-600">Previous</span>
-                )}
-                <span className="px-2 text-xs text-zinc-500">
-                  Page <span className="text-zinc-200">{currentPage}</span> / {totalPages}
-                </span>
-                {currentPage < totalPages ? (
-                  <Link
-                    href={pageHref(currentPage + 1)}
-                    className="rounded-lg border border-zinc-700 bg-zinc-950/35 px-3 py-2 text-zinc-100 transition hover:bg-white/5"
-                  >
-                    Next
-                  </Link>
-                ) : (
-                  <span className="rounded-lg border border-zinc-800 bg-zinc-950/20 px-3 py-2 text-zinc-600">Next</span>
-                )}
-              </div>
-            </nav>
+            <LeaderboardPager
+              start={filteredRows.length ? startIndex + 1 : 0}
+              end={startIndex + pagedRows.length}
+              total={filteredRows.length}
+              page={currentPage}
+              pages={totalPages}
+              previousHref={pageHref(currentPage - 1, query)}
+              nextHref={pageHref(currentPage + 1, query)}
+            />
           </>
         ) : (
           <section className="rounded-[26px] bg-zinc-900/22 p-6 ring-1 ring-white/5">
-            <h2 className="text-lg font-semibold text-zinc-50">No TFT players yet</h2>
+            <h2 className="text-lg font-semibold text-zinc-50">{query ? "No TFT players found" : "No TFT players yet"}</h2>
             <p className="mt-2 max-w-2xl text-sm text-zinc-400">
-              The page is live, but RiftBoard has not saved any approved Myanmar players yet.
-              Once tracked players refresh, TFT entries will appear here.
+              {query
+                ? "Try a different Riot ID, server, or rank search."
+                : "The page is live, but RiftBoard has not saved any approved Myanmar players yet. Once tracked players refresh, TFT entries will appear here."}
             </p>
+            {query ? (
+              <Link
+                href="/tft"
+                className="mt-4 inline-flex rounded-xl border border-zinc-700 bg-zinc-950/35 px-3 py-2 text-sm font-medium text-zinc-100 transition hover:bg-white/5"
+              >
+                Clear search
+              </Link>
+            ) : null}
           </section>
         )}
       </div>

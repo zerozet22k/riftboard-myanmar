@@ -1,12 +1,24 @@
 {
   "localAppUrl": "http://127.0.0.1:43117",
-  "limit": 15,
-  "delayMs": 900,
-  "intervalSec": 60,
-  "cooldownMs": null,
-  "force": false,
-  "syncMatches": true,
-  "syncTftMatches": true,
-  "matchesCount": 20,
-  "startupTimeoutSec": 120
+  "rankJob": {
+    "enabled": true,
+    "limit": 15,
+    "delayMs": 900,
+    "intervalSec": 60,
+    "cooldownMs": null,
+    "force": false,
+    "syncMatches": true,
+    "matchesCount": 20
+  },
+  "tftJob": {
+    "enabled": true,
+    "limit": 15,
+    "delayMs": 900,
+    "intervalSec": 60,
+    "cooldownMs": null,
+    "force": false,
+    "syncTftMatches": true,
+    "matchesCount": 20
+  },
+  "startupTimeoutSec": 900
 }

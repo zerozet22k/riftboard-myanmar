@@ -91,6 +91,12 @@ type MatchDoc = {
   kills?: number | null;
   deaths?: number | null;
   assists?: number | null;
+  largestMultiKill?: number | null;
+  doubleKills?: number | null;
+  tripleKills?: number | null;
+  quadraKills?: number | null;
+  pentaKills?: number | null;
+  largestKillingSpree?: number | null;
   cs?: number | null;
   gold?: number | null;
   items?: unknown[];
@@ -310,6 +316,12 @@ export default async function PlayerProfilePage({
         kills: 1,
         deaths: 1,
         assists: 1,
+        largestMultiKill: 1,
+        doubleKills: 1,
+        tripleKills: 1,
+        quadraKills: 1,
+        pentaKills: 1,
+        largestKillingSpree: 1,
         cs: 1,
         gold: 1,
         items: 1,
@@ -351,6 +363,12 @@ export default async function PlayerProfilePage({
     kills: typeof match.kills === "number" ? match.kills : null,
     deaths: typeof match.deaths === "number" ? match.deaths : null,
     assists: typeof match.assists === "number" ? match.assists : null,
+    largestMultiKill: typeof match.largestMultiKill === "number" ? match.largestMultiKill : null,
+    doubleKills: typeof match.doubleKills === "number" ? match.doubleKills : null,
+    tripleKills: typeof match.tripleKills === "number" ? match.tripleKills : null,
+    quadraKills: typeof match.quadraKills === "number" ? match.quadraKills : null,
+    pentaKills: typeof match.pentaKills === "number" ? match.pentaKills : null,
+    largestKillingSpree: typeof match.largestKillingSpree === "number" ? match.largestKillingSpree : null,
     cs: typeof match.cs === "number" ? match.cs : null,
     gold: typeof match.gold === "number" ? match.gold : null,
     items: Array.isArray(match.items)
@@ -749,9 +767,12 @@ function RankCard({
   const currentLine = rankLine(tier, division, lp);
   const peakLine = peak ? rankLine(peak.tier ?? null, peak.division ?? null, peak.lp ?? null) : null;
   const peakSeen = peakSeenLabel(peak);
+  const peakTitle = peakLine
+    ? `Peak rank: ${peakLine}${peakSeen ? `, recorded ${peakSeen}` : ""}`
+    : "Peak rank: not enough history yet";
 
   return (
-    <div className="overflow-hidden rounded-[20px] bg-zinc-900/18 p-4 ring-1 ring-white/5">
+    <div className="overflow-hidden rounded-[20px] bg-zinc-900/18 p-4 ring-1 ring-white/5" title={peakTitle}>
       <div className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">{title}</div>
 
       <div className="mt-3 flex items-start gap-3">
@@ -773,27 +794,6 @@ function RankCard({
             <div>
               <span className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Win rate</span>
               <div className="mt-1 tabular-nums text-zinc-100">{wr != null ? `${wr}%` : "--"}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-3 border-t border-white/8 pt-3">
-        <div className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">Peak rank</div>
-        <div className="mt-2 flex items-center gap-2.5">
-          <div className="rounded-xl bg-zinc-900/40 p-1.5 ring-1 ring-white/5">
-            <RankEmblem
-              tier={peak?.tier ?? null}
-              className="h-8 w-8 shrink-0"
-              alt={peak?.tier ? `${peak.tier} peak emblem` : "Peak rank emblem"}
-            />
-          </div>
-          <div className="min-w-0">
-            <div className="text-sm font-semibold text-zinc-100">
-              {peakLine ?? "Not enough history yet"}
-            </div>
-            <div className="mt-1 text-xs text-zinc-500">
-              {peakSeen ? `Recorded ${peakSeen}` : "Saved from your profile history"}
             </div>
           </div>
         </div>

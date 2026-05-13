@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { LeaderboardPager, LeaderboardSearchBar } from "@/components/LeaderboardControls";
 import ProfileAvatar from "@/components/ProfileAvatar";
 import RankEmblem from "@/components/RankEmblem";
 import { formatNumber, formatRelativeTime } from "@/lib/displayTime";
@@ -42,6 +43,25 @@ type Main = {
   points: number | null;
 };
 
+type RecentMain = {
+  championId: number;
+  games: number;
+  winrate: number;
+};
+
+type RecentLane = {
+  name: string;
+  games: number;
+  percent: number;
+};
+
+type RecentQueueSummary = {
+  games: number;
+  winrate: number;
+  lanes: RecentLane[];
+  mains: RecentMain[];
+};
+
 export type LeaderboardRow = {
   id: string;
   href?: string;
@@ -73,6 +93,8 @@ export type LeaderboardRow = {
   peakFlexDiv?: string | null;
   peakFlexLp?: number | null;
   mains?: Main[];
+  recentSolo?: RecentQueueSummary | null;
+  recentFlex?: RecentQueueSummary | null;
 };
 
 type PreparedRow = LeaderboardRow & {
@@ -253,17 +275,111 @@ function MainsStrip({
           <span
             key={`${main.championId ?? "unknown"}-${index}`}
             title={fullPoints ? `${championName}: ${fullPoints} pts` : championName}
-            className="inline-flex items-center gap-2 rounded-full bg-zinc-950/50 px-3 py-1.5 text-xs text-zinc-200 ring-1 ring-white/5"
+            className="relative inline-flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-950/50 text-xs text-zinc-200 ring-1 ring-white/5"
           >
             {icon ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={icon} alt={championName} className="h-5 w-5 rounded-full" loading="lazy" />
+              <img src={icon} alt={championName} className="h-8 w-8 rounded-lg" loading="lazy" />
             ) : null}
-            <span className="max-w-[140px] truncate">{championName}</span>
-            {shortPoints ? <span className="tabular-nums text-zinc-400">{shortPoints}</span> : null}
+            {shortPoints ? (
+              <span className="absolute -bottom-1 -right-1 rounded bg-zinc-950/95 px-1 text-[9px] leading-3 text-zinc-300 ring-1 ring-white/10">
+                {shortPoints}
+              </span>
+            ) : null}
           </span>
         );
       })}
+    </div>
+  );
+}
+
+function LaneIcon({ lane }: { lane: string }) {
+  const normalized = lane.toLowerCase();
+  const assetName =
+    normalized === "support"
+      ? "support"
+      : normalized === "bot"
+        ? "bot"
+        : normalized === "mid"
+          ? "mid"
+          : normalized === "jungle"
+            ? "jungle"
+            : "top";
+  const title = `${lane} lane`;
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={`https://raw.communitydragon.org/11.15/plugins/rcp-be-lol-game-data/global/default/assets/ranked/positions/rankposition_gold-${assetName}.png`}
+      alt={title}
+      title={title}
+      className="h-4 w-4"
+      loading="lazy"
+    />
+  );
+}
+
+function RecentQueueStrip({
+  summary,
+  champNames,
+}: {
+  summary?: RecentQueueSummary | null;
+  champNames: Record<string, string>;
+}) {
+  if (!summary || summary.games === 0) {
+    return (
+      <div className="mt-1.5 text-xs text-zinc-500">
+        No recent games saved
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
+      <div className="shrink-0">
+        <div className="text-[10px] uppercase tracking-wide text-zinc-500">L{summary.games}</div>
+        <div className="text-sm font-semibold tabular-nums text-zinc-100">{summary.winrate}%</div>
+      </div>
+
+      <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
+        {summary.mains.length ? (
+          <div className="flex min-w-0 items-center gap-1">
+            {summary.mains.map((main) => {
+              const championName = champNames[String(main.championId)] ?? `Champion ${main.championId}`;
+              return (
+                <span
+                  key={main.championId}
+                  title={`${championName}: ${main.games} games, ${main.winrate}% WR`}
+                  className="relative inline-flex h-6 w-6 items-center justify-center rounded-md bg-zinc-950/55 text-[11px] text-zinc-300"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={champIconUrl(main.championId) ?? ""} alt={championName} className="h-6 w-6 rounded-md" loading="lazy" />
+                  <span className="absolute -bottom-1 -right-1 rounded bg-zinc-950/95 px-1 text-[8px] leading-3 text-zinc-300">
+                    {main.games}
+                  </span>
+                </span>
+              );
+            })}
+          </div>
+        ) : null}
+
+        {summary.lanes.length ? (
+          <div className="flex shrink-0 items-center gap-1">
+            {summary.lanes.map((lane) => (
+              <span
+                key={lane.name}
+                className="relative inline-flex h-6 w-6 items-center justify-center rounded-md bg-zinc-950/55"
+                title={`${lane.name}: ${lane.games} games, ${lane.percent}% of recent queue games`}
+              >
+                <LaneIcon lane={lane.name} />
+                <span className="absolute -bottom-1 -right-1 rounded bg-zinc-950/95 px-1 text-[8px] leading-3 text-zinc-300">
+                  {lane.percent}
+                </span>
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -280,6 +396,8 @@ function QueueCell({
   peakLp,
   labelRanked,
   labelUnranked,
+  recent,
+  champNames,
 }: {
   tier: string | null;
   div: string | null;
@@ -292,13 +410,19 @@ function QueueCell({
   peakLp: number | null;
   labelRanked: string;
   labelUnranked: string;
+  recent?: RecentQueueSummary | null;
+  champNames: Record<string, string>;
 }) {
   const currentRanked = !!tier;
   const peakRanked = !!peakTier;
+  const peakText = peakRanked
+    ? `Peak: ${prettyRank(peakTier, peakDiv)}${peakLp != null ? ` ${formatNumber(peakLp)} LP` : ""}`
+    : "Peak: no peak saved yet";
 
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-start gap-3 rounded-xl bg-zinc-950/24 px-3 py-2.5">
+    <div title={peakText}>
+      <div className="rounded-xl bg-zinc-950/24 px-3 py-2.5">
+        <div className="flex items-start gap-3">
         <div className="rounded-xl bg-zinc-950/55 p-1.5 ring-1 ring-white/5">
             <RankEmblem
               tier={tier}
@@ -325,30 +449,9 @@ function QueueCell({
             {currentRanked ? labelRanked : labelUnranked}
           </div>
         </div>
-      </div>
 
-      <div className="flex items-start gap-3 border-t border-white/6 pt-2">
-        <div className="rounded-xl bg-zinc-950/40 p-1.5 ring-1 ring-white/5">
-            <RankEmblem
-              tier={peakTier}
-              className="h-7 w-7 shrink-0"
-              alt={peakTier ? `${peakTier} peak emblem` : "Peak emblem"}
-            />
         </div>
-
-        <div className="min-w-0 flex-1">
-          <div className="text-[11px] uppercase tracking-wide text-zinc-500">Peak</div>
-          <div className="mt-1 flex flex-wrap items-center gap-2">
-            <span className={"text-sm font-medium " + (peakRanked ? "text-zinc-100" : "text-zinc-500")}>
-              {peakRanked ? prettyRank(peakTier, peakDiv) : "No peak saved"}
-            </span>
-            {peakRanked && peakLp != null ? (
-              <Pill className="border-zinc-700 bg-zinc-900/80 text-zinc-300">
-                {formatNumber(peakLp)} LP
-              </Pill>
-            ) : null}
-          </div>
-        </div>
+        <RecentQueueStrip summary={recent} champNames={champNames} />
       </div>
     </div>
   );
@@ -453,44 +556,39 @@ export default function LeaderboardTable({
 
   const startShown = total === 0 ? 0 : (safePage - 1) * pageSize + 1;
   const endShown = Math.min(total, (safePage - 1) * pageSize + slice.length);
+  const goPrevious = () => setPage((current) => Math.max(1, current - 1));
+  const goNext = () => setPage((current) => Math.min(pages, current + 1));
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div className="flex flex-col gap-2">
-          <div className="text-sm text-zinc-400">
+      <LeaderboardSearchBar
+        value={query}
+        onChange={(nextQuery) => {
+          setPage(1);
+          setQuery(nextQuery);
+        }}
+        helper={
+          <>
             Showing <span className="text-zinc-200">{startShown}</span>-<span className="text-zinc-200">{endShown}</span> of{" "}
             <span className="text-zinc-200">{total}</span>
-          </div>
+          </>
+        }
+      >
+        <select
+          className="w-full rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm sm:w-auto"
+          value={rankFilter}
+          onChange={(event) => {
+            setPage(1);
+            setRankFilter(event.target.value as RankFilter);
+          }}
+        >
+          <option value="all">All</option>
+          <option value="anyRanked">Any ranked</option>
+          <option value="soloRanked">Solo ranked</option>
+          <option value="flexRanked">Flex ranked</option>
+        </select>
 
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <input
-              value={query}
-              onChange={(event) => {
-                setPage(1);
-                setQuery(event.target.value);
-              }}
-              placeholder="Search name#tag..."
-              className="w-full rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-zinc-600 sm:w-72"
-            />
-
-            <select
-              className="w-full rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm sm:w-auto"
-              value={rankFilter}
-              onChange={(event) => {
-                setPage(1);
-                setRankFilter(event.target.value as RankFilter);
-              }}
-            >
-              <option value="all">All</option>
-              <option value="anyRanked">Any ranked</option>
-              <option value="soloRanked">Solo ranked</option>
-              <option value="flexRanked">Flex ranked</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm text-zinc-400">Rows</span>
           <select
             className="rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm"
@@ -511,7 +609,7 @@ export default function LeaderboardTable({
             <button
               type="button"
               className="rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm disabled:opacity-40"
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
+              onClick={goPrevious}
               disabled={safePage === 1}
             >
               Prev
@@ -524,14 +622,14 @@ export default function LeaderboardTable({
             <button
               type="button"
               className="rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm disabled:opacity-40"
-              onClick={() => setPage((current) => Math.min(pages, current + 1))}
+              onClick={goNext}
               disabled={safePage === pages}
             >
               Next
             </button>
           </div>
         </div>
-      </div>
+      </LeaderboardSearchBar>
 
       <div className="space-y-3 xl:hidden">
         {slice.map((row, index) => {
@@ -577,6 +675,8 @@ export default function LeaderboardTable({
                   peakLp={row.peakLp ?? null}
                   labelRanked="Ranked Solo"
                   labelUnranked="No solo rank"
+                  recent={row.recentSolo ?? null}
+                  champNames={champNames}
                 />
 
                 <QueueCell
@@ -591,6 +691,8 @@ export default function LeaderboardTable({
                   peakLp={row.peakFlexLp ?? null}
                   labelRanked="Ranked Flex"
                   labelUnranked="No flex rank"
+                  recent={row.recentFlex ?? null}
+                  champNames={champNames}
                 />
               </div>
             </article>
@@ -667,6 +769,8 @@ export default function LeaderboardTable({
                       peakLp={row.peakLp ?? null}
                       labelRanked="Ranked Solo"
                       labelUnranked="No solo rank"
+                      recent={row.recentSolo ?? null}
+                      champNames={champNames}
                     />
                   </td>
 
@@ -683,6 +787,8 @@ export default function LeaderboardTable({
                       peakLp={row.peakFlexLp ?? null}
                       labelRanked="Ranked Flex"
                       labelUnranked="No flex rank"
+                      recent={row.recentFlex ?? null}
+                      champNames={champNames}
                     />
                   </td>
                 </tr>
@@ -699,6 +805,16 @@ export default function LeaderboardTable({
           </tbody>
         </table>
       </div>
+
+      <LeaderboardPager
+        start={startShown}
+        end={endShown}
+        total={total}
+        page={safePage}
+        pages={pages}
+        onPrevious={goPrevious}
+        onNext={goNext}
+      />
     </div>
   );
 }
