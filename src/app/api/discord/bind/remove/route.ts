@@ -24,10 +24,17 @@ export async function POST(req: NextRequest) {
 
   try {
     await dbConnect();
-    await DiscordLink.deleteOne({ discordUserId: session.discordUserId });
+    await DiscordLink.deleteOne({ _id: session.linkId, discordUserId: session.discordUserId });
+    const nextPrimary = await DiscordLink.findOne({ discordUserId: session.discordUserId })
+      .sort({ updatedAt: -1, _id: -1 });
+    if (nextPrimary?._id) {
+      await DiscordLink.updateOne({ _id: nextPrimary._id }, { $set: { isPrimary: true } });
+    }
 
     const response = redirectLinkedRoles(req, "unlinked", "discord-link-removed");
-    clearDiscordSessionCookie(response);
+    if (!nextPrimary?._id) {
+      clearDiscordSessionCookie(response);
+    }
     return response;
   } catch (error) {
     return redirectLinkedRoles(

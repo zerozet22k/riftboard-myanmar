@@ -17,6 +17,11 @@ import { parseRiotId } from "@/lib/tournaments";
 import { DiscordLink, type DiscordLinkDoc } from "@/models/discordLink";
 import { Player } from "@/models/player";
 import { syncDiscordGuildRankRoleForStoredLink } from "@/lib/discordGuildRoles";
+import {
+  ensureDiscordLinkMultiAccountIndexes,
+  findPrimaryDiscordLink,
+  setPrimaryDiscordLink,
+} from "@/lib/discordLinkStore";
 
 type PlayerProjection = {
   _id: unknown;
@@ -208,7 +213,7 @@ export async function verifyDiscordGuildMembershipForLink(linkInput: DiscordLink
 export async function loadStoredDiscordIdentity(discordUserId: string) {
   await dbConnect();
 
-  const link = await DiscordLink.findOne({ discordUserId: String(discordUserId).trim() });
+  const link = await findPrimaryDiscordLink(discordUserId);
   if (!link?._id) throw new Error("No Discord link found. Connect Discord first.");
   if (!isVerifiedDiscordLink(link)) {
     throw new Error("Reconnect Discord to verify your Riot account again.");
@@ -237,13 +242,19 @@ export async function saveVerifiedDiscordLinkFromCandidate(input: {
   const player = await resolvePlayerForDiscordLink(input.candidate.riotId);
   const guildId = String(getDiscordGuildId() ?? "").trim();
   const now = new Date();
+  await ensureDiscordLinkMultiAccountIndexes();
+  await DiscordLink.deleteMany({
+    playerId: player._id,
+    discordUserId: { $ne: input.discordUser.id },
+  } as Record<string, unknown>);
 
   const saved = await DiscordLink.findOneAndUpdate(
-    { discordUserId: input.discordUser.id },
+    { discordUserId: input.discordUser.id, playerId: player._id } as Record<string, unknown>,
     {
       $set: {
         discordUsername: input.discordUser.global_name || input.discordUser.username,
         playerId: player._id,
+        isPrimary: true,
         gameName: player.gameName,
         tagLine: player.tagLine,
         accessTokenEnc: encryptDiscordSecret(input.token.access_token),
@@ -264,8 +275,10 @@ export async function saveVerifiedDiscordLinkFromCandidate(input: {
     },
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
+  const savedLink = toDiscordLinkDocument(saved);
+  await setPrimaryDiscordLink(input.discordUser.id, savedLink._id);
 
-  return { link: saved, player };
+  return { link: savedLink, player };
 }
 
 export async function syncDiscordLinkedRoleForStoredLink(

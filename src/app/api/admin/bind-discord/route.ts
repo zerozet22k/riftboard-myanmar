@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { hasAdminSessionFromRequest } from "@/lib/adminSession";
 import { encryptDiscordSecret } from "@/lib/discord";
+import { ensureDiscordLinkMultiAccountIndexes, setPrimaryDiscordLink } from "@/lib/discordLinkStore";
 import { syncDiscordGuildRankRoleForStoredLink } from "@/lib/discordGuildRoles";
 import { dbConnect } from "@/lib/mongodb";
 import { buildPlayerLookupQuery } from "@/lib/playerIdentity";
@@ -88,12 +89,18 @@ export async function POST(req: NextRequest) {
     }
 
     const now = new Date();
+    await ensureDiscordLinkMultiAccountIndexes();
+    await DiscordLink.deleteMany({
+      playerId: player._id,
+      discordUserId: { $ne: discord.discordUserId },
+    });
     const link = await DiscordLink.findOneAndUpdate(
-      { discordUserId: discord.discordUserId },
+      { discordUserId: discord.discordUserId, playerId: player._id },
       {
         $set: {
           discordUsername: discord.discordUsername,
           playerId: player._id,
+          isPrimary: true,
           gameName: player.gameName,
           tagLine: player.tagLine,
           tokenType: "Manual",
@@ -112,6 +119,7 @@ export async function POST(req: NextRequest) {
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
+    await setPrimaryDiscordLink(discord.discordUserId, link._id);
 
     let roleSyncError: string | null = null;
     if (parsed.data.syncRoles !== false) {

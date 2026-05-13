@@ -4,6 +4,7 @@ export type DiscordLinkDoc = {
   discordUserId: string;
   discordUsername?: string | null;
   playerId: mongoose.Types.ObjectId;
+  isPrimary?: boolean;
   gameName: string;
   tagLine: string;
   accessTokenEnc: string;
@@ -29,9 +30,10 @@ export type DiscordLinkDoc = {
 
 const DiscordLinkSchema = new Schema<DiscordLinkDoc>(
   {
-    discordUserId: { type: String, required: true, trim: true, unique: true, index: true },
+    discordUserId: { type: String, required: true, trim: true, index: true },
     discordUsername: { type: String, trim: true, default: null },
     playerId: { type: Schema.Types.ObjectId, ref: "Player", required: true, index: true },
+    isPrimary: { type: Boolean, default: false, index: true },
     gameName: { type: String, required: true, trim: true },
     tagLine: { type: String, required: true, trim: true },
     accessTokenEnc: { type: String, required: true, trim: true },
@@ -61,6 +63,8 @@ const DiscordLinkSchema = new Schema<DiscordLinkDoc>(
   { timestamps: true }
 );
 
+DiscordLinkSchema.index({ discordUserId: 1, isPrimary: -1, updatedAt: -1 });
+DiscordLinkSchema.index({ discordUserId: 1, playerId: 1 }, { unique: true });
 DiscordLinkSchema.index({ playerId: 1, updatedAt: -1 });
 
 export const DiscordLink =

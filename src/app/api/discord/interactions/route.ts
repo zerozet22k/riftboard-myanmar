@@ -14,7 +14,7 @@ import {
 import {
   syncAllDiscordGuildRankRoles,
 } from "@/lib/discordGuildRoles";
-import { DiscordLink } from "@/models/discordLink";
+import { findPrimaryDiscordLink } from "@/lib/discordLinkStore";
 import { Player } from "@/models/player";
 import { canonicalPlayerPath } from "@/lib/playerIdentity";
 
@@ -291,7 +291,7 @@ export async function POST(req: NextRequest) {
   }
 
   await dbConnect();
-  const link = await DiscordLink.findOne({ discordUserId: userId }).lean();
+  const link = await findPrimaryDiscordLink(userId);
 
   if (!link?._id) {
     return messageResponse(

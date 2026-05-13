@@ -139,16 +139,15 @@ export async function grantStoredCommunityAccessForDiscordUser(discordUserId: st
   if (!isCommunityCodeRequired()) return true;
 
   await dbConnect();
-  const updated = await DiscordLink.findOneAndUpdate(
+  const updated = await DiscordLink.updateMany(
     { discordUserId: String(discordUserId).trim() },
     {
       $set: {
         communityAccessCodeHash: communityCodeHash(),
         communityAccessGrantedAt: new Date(),
       },
-    },
-    { new: true, projection: { _id: 1 } }
-  ).lean<{ _id?: unknown } | null>();
+    }
+  );
 
-  return !!updated?._id;
+  return updated.modifiedCount > 0 || updated.matchedCount > 0;
 }
