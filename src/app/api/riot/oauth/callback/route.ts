@@ -28,7 +28,7 @@ import {
   readRsoOAuthStateCookieValue,
   setRsoSessionCookie,
 } from "@/lib/riotAuth";
-import { getAccountByPuuid } from "@/lib/riot";
+import { getRsoAccountMe } from "@/lib/riot";
 import { Player } from "@/models/player";
 
 export const runtime = "nodejs";
@@ -76,13 +76,12 @@ export async function GET(req: NextRequest) {
     const userInfo = await fetchRsoUserInfo(token.access_token);
     if (!userInfo.sub) throw new Error("RSO returned no PUUID");
 
-    const puuid = userInfo.sub;
-
     /* ---- resolve Riot ID ---- */
-    const account = await getAccountByPuuid(puuid);
+    const account = await getRsoAccountMe(token.access_token);
     if (!account?.gameName || !account?.tagLine) {
-      throw new Error("Could not resolve Riot ID from PUUID");
+      throw new Error("Could not resolve Riot ID from RSO");
     }
+    const puuid = account.puuid || userInfo.sub;
 
     /* ---- find or create player ---- */
     await dbConnect();

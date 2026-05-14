@@ -336,6 +336,33 @@ export async function getAccountByPuuid(puuid: string) {
   throw new RiotApiError(404, "Riot account not found for puuid");
 }
 
+export async function getRsoAccountMe(accessToken: string) {
+  const candidates = new Set<(typeof ACCOUNT_REGIONS)[number]>();
+  candidates.add(ACCOUNT_REGION());
+  for (const region of ACCOUNT_REGIONS) candidates.add(region);
+
+  for (const region of candidates) {
+    const url = `https://${region}.api.riotgames.com/riot/account/v1/accounts/me`;
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+      cache: "no-store",
+    });
+
+    if (res.ok) return (await res.json()) as RiotAccount;
+
+    const text = await res.text().catch(() => "");
+    const msg = parseRiotErrorMessage(text || res.statusText);
+    if (res.status === 404 || res.status === 403) continue;
+
+    throw new RiotApiError(res.status, msg, { url, retryAfterMs: retryAfterMsFromHeaders(res) });
+  }
+
+  throw new RiotApiError(404, "RSO Riot account not found");
+}
+
 export async function getActiveShardByPuuid(game: "lol" | "tft", puuid: string) {
   for (const region of ACCOUNT_REGIONS) {
     const url =
