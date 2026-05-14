@@ -44,6 +44,29 @@ export type ActiveShard = {
   activeShard: string;
 };
 
+export type SpectatorParticipant = {
+  puuid?: string;
+  summonerId?: string;
+  riotId?: string;
+  summonerName?: string;
+  teamId: number;
+  championId: number;
+  spell1Id?: number;
+  spell2Id?: number;
+  bot?: boolean;
+};
+
+export type ActiveGame = {
+  gameId: number;
+  gameType: string;
+  gameStartTime: number;
+  mapId: number;
+  gameLength: number;
+  gameMode: string;
+  gameQueueConfigId?: number;
+  participants: SpectatorParticipant[];
+};
+
 export type TournamentCodeParams = {
   mapType?: string;
   pickType?: string;
@@ -394,6 +417,35 @@ export async function getLeagueEntriesByPuuid(platform: string, puuid: string) {
     puuid
   )}`;
   return riotFetch<LeagueEntry[]>(url);
+}
+
+export async function getActiveGameByPuuid(platform: string, puuid: string) {
+  const host = platform.toLowerCase();
+  const url = `https://${host}.api.riotgames.com/lol/spectator/v5/active-games/by-summoner/${encodeURIComponent(
+    puuid
+  )}`;
+  return riotFetch<ActiveGame>(url);
+}
+
+export async function findActiveGameByPuuid(puuid: string, preferredPlatform?: string | null) {
+  const candidates = new Set<string>();
+  const preferred = String(preferredPlatform ?? "").trim().toLowerCase();
+  if (preferred && preferred !== "auto") candidates.add(preferred);
+  for (const platform of ["sg2", "th2", "ph2", "vn2", "tw2"]) candidates.add(platform);
+
+  for (const platform of candidates) {
+    try {
+      return {
+        platform,
+        game: await getActiveGameByPuuid(platform, puuid),
+      };
+    } catch (e) {
+      if (isRiot404(e) || isRiotDecryptingBadRequest(e) || isMissingPlatformHost(e)) continue;
+      throw e;
+    }
+  }
+
+  return null;
 }
 
 export async function getTftLeagueEntriesByPuuid(platform: string, puuid: string) {
