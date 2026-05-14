@@ -65,6 +65,9 @@ export type DiscordRiotCandidate = {
   connectionLabel: string;
 };
 
+const TRUSTED_VERIFICATION_SOURCES = ["discord_connections", "riot_rso", "legacy_manual"] as const;
+const LINKED_ROLE_VERIFICATION_SOURCES = ["discord_connections", "riot_rso"] as const;
+
 const RIOT_CONNECTION_TYPE_PATTERN = /(riot|league)/i;
 const RECENT_GUILD_VERIFICATION_MS = 10 * 60 * 1000;
 
@@ -281,6 +284,58 @@ export async function saveVerifiedDiscordLinkFromCandidate(input: {
   return { link: savedLink, player };
 }
 
+export async function saveVerifiedDiscordLinkFromRso(input: {
+  discordUserId: string;
+  discordUsername: string | null;
+  accessToken: string;
+  refreshToken?: string | null;
+  tokenType: string;
+  scopes: string[];
+  expiresAt?: Date | null;
+  player: {
+    _id: unknown;
+    gameName: string;
+    tagLine: string;
+  };
+}) {
+  const guildId = String(getDiscordGuildId() ?? "").trim();
+  const now = new Date();
+  await ensureDiscordLinkMultiAccountIndexes();
+  await DiscordLink.deleteMany({
+    playerId: input.player._id,
+    discordUserId: { $ne: input.discordUserId },
+  } as Record<string, unknown>);
+
+  const saved = await DiscordLink.findOneAndUpdate(
+    { discordUserId: input.discordUserId, playerId: input.player._id } as Record<string, unknown>,
+    {
+      $set: {
+        discordUsername: input.discordUsername,
+        playerId: input.player._id,
+        isPrimary: true,
+        gameName: input.player.gameName,
+        tagLine: input.player.tagLine,
+        accessTokenEnc: encryptDiscordSecret(input.accessToken),
+        refreshTokenEnc: input.refreshToken ? encryptDiscordSecret(input.refreshToken) : null,
+        tokenType: input.tokenType,
+        scopes: input.scopes,
+        expiresAt: input.expiresAt ?? null,
+        verifiedBinding: true,
+        verificationSource: "riot_rso",
+        lastVerifiedAt: now,
+        lastVerifiedGuildId: guildId || null,
+        proofConnectionType: "riot_rso",
+        proofConnectionLabel: `${input.player.gameName}#${input.player.tagLine}`,
+      },
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+  const savedLink = toDiscordLinkDocument(saved);
+  await setPrimaryDiscordLink(input.discordUserId, savedLink._id);
+
+  return { link: savedLink, player: input.player };
+}
+
 export async function syncDiscordLinkedRoleForStoredLink(
   linkId: string,
   opts?: SyncDiscordLinkedRoleOptions
@@ -288,7 +343,10 @@ export async function syncDiscordLinkedRoleForStoredLink(
   await dbConnect();
   const link = await DiscordLink.findById(linkId);
   if (!link?._id) throw new Error("Discord link not found.");
-  if (!link.verifiedBinding || link.verificationSource !== "discord_connections") {
+  if (
+    !link.verifiedBinding ||
+    !LINKED_ROLE_VERIFICATION_SOURCES.includes(link.verificationSource as "discord_connections" | "riot_rso")
+  ) {
     throw new Error("Reconnect Discord before syncing linked roles.");
   }
 
@@ -348,7 +406,10 @@ export async function refreshStoredDiscordProfile(
   let guildRoleError: string | null = null;
   let linkedRoleSkipped = false;
   let guildRoleSkipped = false;
-  if (opts?.syncLinkedRole !== false && link.verificationSource === "discord_connections") {
+  if (
+    opts?.syncLinkedRole !== false &&
+    LINKED_ROLE_VERIFICATION_SOURCES.includes(link.verificationSource as "discord_connections" | "riot_rso")
+  ) {
     try {
       const synced = await syncDiscordLinkedRoleForStoredLink(String(link._id));
       linkedRoleSkipped = synced.skipped;
@@ -385,6 +446,6 @@ export function isVerifiedDiscordLink(
 ) {
   return (
     !!link?.verifiedBinding &&
-    (link.verificationSource === "discord_connections" || link.verificationSource === "legacy_manual")
+    TRUSTED_VERIFICATION_SOURCES.includes(link.verificationSource as (typeof TRUSTED_VERIFICATION_SOURCES)[number])
   );
 }

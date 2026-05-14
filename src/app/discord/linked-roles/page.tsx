@@ -68,8 +68,8 @@ function messageText(status?: string, message?: string, riotId?: string) {
                 ? "That community code was not accepted. Check it and try again."
             : message === "confirm-riot-ownership"
               ? "Confirm that this Riot account is yours before finishing the link."
-            : message === "no-riot-connection"
-              ? "Discord did not return a Riot account connection. Add your Riot account to Discord first, then try again."
+          : message === "no-riot-connection"
+              ? "Discord did not return a Riot account connection. Sign in with Riot below to verify the account directly."
               : message === "missing-discord-session"
                 ? "Your Discord session expired. Connect Discord again."
             : message === "guild-membership-required"
@@ -140,8 +140,8 @@ export default async function DiscordLinkedRolesPage({
             </h1>
             <p className="mt-3 max-w-3xl text-sm text-zinc-400">
               {communityCodeRequired
-                ? "Connect the Riot account already linked to your Discord profile first. If this Discord account has never been approved for the Myanmar community before, Riftboard will ask for the private code once and then remember it for both the protected Discord invite and Burma-only account actions."
-                : "Join the community Discord, then connect the Riot account Discord already exposes on your profile. Joining the server alone does not finish the bind because Discord still needs one quick OAuth approval. Manual Riot ID entry is disabled for protected community features."}
+                ? "Connect Discord first, then verify your Riot account with Riot Sign On. If this Discord account has never been approved for the Myanmar community before, Riftboard will ask for the private code once and then remember it for both the protected Discord invite and Burma-only account actions."
+                : "Join the community Discord, connect Discord, then verify your Riot account with Riot Sign On. If Discord already exposes a verified Riot connection, Riftboard can still use it; otherwise Riot Sign On finishes the bind cleanly."}
             </p>
           </div>
         </header>
@@ -201,8 +201,8 @@ export default async function DiscordLinkedRolesPage({
               {viewer
                 ? "Riftboard will use this Discord-linked Riot account for leaderboard refreshes, linked roles, and tournament actions."
                 : communityCodeRequired
-                  ? "Connect Discord first. If this Discord account has never unlocked community access before, Riftboard will ask for the private code right after linking."
-                  : "Open the community Discord first if you need the invite, then connect the Riot account already attached to your Discord profile. Joining the server is required, but the OAuth bind is still what confirms ownership."}
+                  ? "Connect Discord first. If Discord cannot provide a Riot account connection, Riftboard will ask you to sign in with Riot next."
+                  : "Open the community Discord first if you need the invite, then connect Discord and verify your Riot account. Riot Sign On is used when Discord does not expose a Riot account connection."}
             </p>
 
             {!viewer && communityUnlocked && communityDiscordUrl ? (
@@ -311,13 +311,32 @@ export default async function DiscordLinkedRolesPage({
           <section className="rounded-[28px] bg-zinc-900/25 p-5 ring-1 ring-white/5 sm:p-6">
             <div className="text-xl font-semibold text-zinc-50">Verify your Riot account</div>
             <p className="mt-2 text-sm text-zinc-400">
-              Discord returned Riot-style connection data for{" "}
+              Discord is connected for{" "}
               <span className="text-zinc-200">{pending.discordUsername ?? pending.discordUserId}</span>.
-              Pick the one Riftboard should trust before linking.
+              {pending.candidates.length
+                ? " Pick the Riot account Riftboard should trust, or sign in with Riot to verify directly."
+                : " Sign in with Riot to verify the account directly."}
             </p>
 
-            <div className="mt-5 grid gap-3">
-              {pending.candidates.map((candidate) => (
+            <div className="mt-5 rounded-[22px] bg-zinc-950/55 p-4 ring-1 ring-white/6">
+              <div className="text-sm font-semibold text-zinc-100">Recommended</div>
+              <p className="mt-1 text-sm text-zinc-400">
+                Riot Sign On confirms the Riot account from Riot directly and keeps the Discord bind verified.
+              </p>
+              <form action="/api/riot/oauth/start" method="GET" className="mt-4">
+                <input type="hidden" name="returnTo" value="/discord/linked-roles" />
+                <button
+                  type="submit"
+                  className="rounded-2xl bg-emerald-500/90 px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-emerald-400"
+                >
+                  Sign in with Riot
+                </button>
+              </form>
+            </div>
+
+            {pending.candidates.length ? (
+              <div className="mt-5 grid gap-3">
+                {pending.candidates.map((candidate) => (
                 <form
                   key={candidate.id}
                   action="/api/discord/bind/confirm"
@@ -350,8 +369,9 @@ export default async function DiscordLinkedRolesPage({
                     <span>I confirm this Riot account belongs to this Discord profile.</span>
                   </label>
                 </form>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : null}
           </section>
         ) : null}
 

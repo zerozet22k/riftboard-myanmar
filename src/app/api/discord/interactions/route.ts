@@ -244,7 +244,7 @@ async function listLinkedAccountsForDiscordUser(discordUserId: string) {
   return DiscordLink.find({
     discordUserId: String(discordUserId).trim(),
     verifiedBinding: true,
-    verificationSource: { $in: ["discord_connections", "legacy_manual"] },
+    verificationSource: { $in: ["discord_connections", "riot_rso", "legacy_manual"] },
   }).sort({ isPrimary: -1, updatedAt: -1, _id: -1 });
 }
 

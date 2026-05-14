@@ -218,7 +218,7 @@ export function readPendingDiscordBindCookieValue(token: string | undefined | nu
   const payload = unsealPayload<PendingDiscordBindPayload>(token);
   if (!payload?.discordUserId || payload.v !== 1) return null;
   if (Date.now() - payload.createdAt > SHORT_STATE_MAX_AGE * 1000) return null;
-  if (!Array.isArray(payload.candidates) || !payload.candidates.length) return null;
+  if (!Array.isArray(payload.candidates)) return null;
   return payload;
 }
 

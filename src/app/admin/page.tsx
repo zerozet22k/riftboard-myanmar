@@ -31,7 +31,16 @@ export default async function AdminPage() {
     TftPlayerMatch.distinct("playerId").then((ids) => ids.length),
     DiscordLink.find(
       {},
-      { discordUserId: 1, discordUsername: 1, gameName: 1, tagLine: 1, verifiedBinding: 1, lastSyncedAt: 1, updatedAt: 1 }
+      {
+        discordUserId: 1,
+        discordUsername: 1,
+        gameName: 1,
+        tagLine: 1,
+        verifiedBinding: 1,
+        verificationSource: 1,
+        lastSyncedAt: 1,
+        updatedAt: 1,
+      }
     )
       .sort({ updatedAt: -1 })
       .limit(8)
@@ -51,6 +60,7 @@ export default async function AdminPage() {
           gameName: cleanRiotIdPart(link.gameName),
           tagLine: cleanRiotIdPart(link.tagLine),
           verifiedBinding: link.verifiedBinding === true,
+          verificationSource: String(link.verificationSource ?? "") || null,
           lastSyncedAt: link.lastSyncedAt ? new Date(link.lastSyncedAt).toISOString() : null,
         })),
       }}

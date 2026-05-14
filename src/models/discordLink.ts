@@ -13,7 +13,7 @@ export type DiscordLinkDoc = {
   scopes: string[];
   expiresAt?: Date | null;
   verifiedBinding?: boolean;
-  verificationSource?: "legacy_manual" | "discord_connections" | null;
+  verificationSource?: "legacy_manual" | "discord_connections" | "riot_rso" | null;
   lastVerifiedAt?: Date | null;
   lastVerifiedGuildId?: string | null;
   proofConnectionType?: string | null;
@@ -44,7 +44,7 @@ const DiscordLinkSchema = new Schema<DiscordLinkDoc>(
     verifiedBinding: { type: Boolean, default: false },
     verificationSource: {
       type: String,
-      enum: ["legacy_manual", "discord_connections", null],
+      enum: ["legacy_manual", "discord_connections", "riot_rso", null],
       default: "legacy_manual",
     },
     lastVerifiedAt: { type: Date, default: null },

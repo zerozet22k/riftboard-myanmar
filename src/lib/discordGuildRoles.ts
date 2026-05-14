@@ -65,7 +65,9 @@ type SyncAllDiscordGuildRankRolesOptions = {
 function canSyncGuildRankRoles(link: { verifiedBinding?: boolean | null; verificationSource?: string | null }) {
   return (
     link.verifiedBinding === true &&
-    (link.verificationSource === "discord_connections" || link.verificationSource === "legacy_manual")
+    (link.verificationSource === "discord_connections" ||
+      link.verificationSource === "riot_rso" ||
+      link.verificationSource === "legacy_manual")
   );
 }
 
@@ -439,7 +441,7 @@ export async function syncAllDiscordGuildRankRoles(opts?: SyncAllDiscordGuildRan
   const links = await DiscordLink.find(
     {
       verifiedBinding: true,
-      verificationSource: { $in: ["discord_connections", "legacy_manual"] },
+      verificationSource: { $in: ["discord_connections", "riot_rso", "legacy_manual"] },
     },
     {
       discordUserId: 1,

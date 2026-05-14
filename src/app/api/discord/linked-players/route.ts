@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
     const links = await DiscordLink.find(
       {
         verifiedBinding: true,
-        verificationSource: { $in: ["discord_connections", "legacy_manual"] },
+        verificationSource: { $in: ["discord_connections", "riot_rso", "legacy_manual"] },
         $or: [
           { discordUsername: rx },
           { gameName: rx },

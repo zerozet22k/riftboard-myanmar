@@ -35,6 +35,7 @@ type AdminStats = {
     gameName: string;
     tagLine: string;
     verifiedBinding: boolean;
+    verificationSource: string | null;
     lastSyncedAt: string | null;
   }>;
 };
@@ -77,6 +78,14 @@ function parseRiotIdInput(value: string) {
 
 function riotIdLabel(gameName: unknown, tagLine: unknown) {
   return `${cleanRiotIdPart(gameName)}#${cleanRiotIdPart(tagLine)}`;
+}
+
+function verificationLabel(source: string | null, verified: boolean) {
+  if (!verified) return "unverified";
+  if (source === "riot_rso") return "RSO";
+  if (source === "discord_connections") return "Discord";
+  if (source === "legacy_manual") return "Admin";
+  return "verified";
 }
 
 export default function AdminAddPlayerForm({ stats }: { stats: AdminStats }) {
@@ -385,7 +394,7 @@ export default function AdminAddPlayerForm({ stats }: { stats: AdminStats }) {
                   <div className="truncate text-xs text-neutral-500">{link.discordUsername ?? link.discordUserId}</div>
                 </div>
                 <span className={`rounded px-2 py-1 text-xs ${link.verifiedBinding ? "bg-green-500/10 text-green-600 dark:text-green-400" : "bg-amber-500/10 text-amber-600 dark:text-amber-400"}`}>
-                  {link.verifiedBinding ? "verified" : "legacy"}
+                  {verificationLabel(link.verificationSource, link.verifiedBinding)}
                 </span>
               </li>
             )) : (

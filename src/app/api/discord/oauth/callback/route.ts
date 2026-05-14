@@ -93,9 +93,26 @@ export async function GET(req: NextRequest) {
 
     const candidates = extractRiotCandidatesFromDiscordConnections(connections);
     if (!candidates.length) {
-      const response = redirectWithStatus(req, "error", "no-riot-connection");
+      const response = redirectWithStatus(req, "choose", "connect-riot-rso");
+      setPendingDiscordBindCookie(
+        response,
+        makePendingDiscordBindPayload({
+          discordUserId: discordUser.id,
+          discordUsername: discordUser.global_name || discordUser.username,
+          accessToken: token.access_token,
+          refreshToken: token.refresh_token ?? null,
+          tokenType: token.token_type,
+          scopes: String(token.scope ?? "")
+            .trim()
+            .split(/\s+/)
+            .filter(Boolean),
+          expiresAt: new Date(Date.now() + Math.max(0, token.expires_in - 60) * 1000),
+          candidates: [],
+          returnTo: storedState.returnTo,
+        }),
+        req.nextUrl.protocol === "https:"
+      );
       clearDiscordOAuthStateCookie(response);
-      clearPendingDiscordBindCookie(response);
       return response;
     }
 
