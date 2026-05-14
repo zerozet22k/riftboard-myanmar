@@ -13,7 +13,6 @@ import {
 } from "@/lib/discordSession";
 import {
   getCommunityDiscordUrl,
-  isCommunityCodeRequired,
 } from "@/lib/runtimeConfig";
 import { dbConnect } from "@/lib/mongodb";
 import { DiscordLink } from "@/models/discordLink";
@@ -74,6 +73,12 @@ function messageText(status?: string, message?: string, riotId?: string) {
               ? "Discord did not return a Riot account connection. Sign in with Riot below to verify the account directly."
               : message === "missing-discord-session"
                 ? "Your Discord session expired. Connect Discord again."
+                : message === "missing-rso-state"
+                  ? "The Riot sign-in flow expired or started without the needed state. Try Add Riot account again."
+                  : message === "invalid-rso-state"
+                    ? "Riot sign-in state did not match. Try Add Riot account again."
+                    : message?.startsWith("Missing env: RSO_CLIENT_SECRET")
+                      ? "Riot Sign On is not fully configured yet. Add RSO_CLIENT_SECRET in Vercel, then redeploy."
             : message === "guild-membership-required"
                 ? "You must join the configured Discord server before binding your Riot account."
                 : message === "invalid-riot-candidate"
@@ -115,7 +120,6 @@ export default async function DiscordLinkedRolesPage({
     cookies(),
     getOptionalDiscordSession(),
   ]);
-  const communityCodeRequired = isCommunityCodeRequired();
   const browserUnlocked = hasCommunityAccessCookieValue(store.get("community_access")?.value);
   const storedUnlocked = viewer?.discordUserId
     ? await hasStoredCommunityAccessForDiscordUser(viewer.discordUserId)
@@ -151,14 +155,7 @@ export default async function DiscordLinkedRolesPage({
           <Link href="/" className="text-sm text-zinc-400 transition hover:text-zinc-200">
             Back to leaderboard
           </Link>
-          <div className="mt-4">
-            <div className="text-[11px] uppercase tracking-[0.24em] text-zinc-500">Account hub</div>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-zinc-50">Discord + Riot accounts</h1>
-            <p className="mt-3 max-w-3xl text-sm text-zinc-400">
-              Connect Discord once, then add one or more Riot accounts with Riot Sign On.
-              {communityCodeRequired ? " The private code is only needed for first-time community access." : ""}
-            </p>
-          </div>
+          <h1 className="mt-4 text-3xl font-semibold tracking-tight text-zinc-50">Account hub</h1>
         </header>
 
         {notice ? <Notice tone={notice.tone} text={notice.text} /> : null}
@@ -167,11 +164,6 @@ export default async function DiscordLinkedRolesPage({
           <div className="text-xl font-semibold text-zinc-50">
             {viewer ? "Connected" : "Connect Discord"}
           </div>
-          <p className="mt-2 text-sm text-zinc-400">
-            {viewer
-              ? "Manage your linked Riot accounts. The primary account is used for quick commands and role sync."
-              : "Start with Discord. If Discord does not expose a Riot account, Riot Sign On will verify it directly."}
-          </p>
 
             {!viewer && communityUnlocked && communityDiscordUrl ? (
               <div className="mt-5">
@@ -262,7 +254,6 @@ export default async function DiscordLinkedRolesPage({
                       value={nextReturnTo !== "/discord/linked-roles" ? nextReturnTo : "/discord/linked-roles"}
                     />
                     <div className="text-sm font-semibold text-zinc-100">Community code</div>
-                    <p className="mt-1 text-sm text-zinc-400">Enter it once to unlock protected community actions.</p>
                     <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                       <input
                         name="code"
@@ -284,9 +275,6 @@ export default async function DiscordLinkedRolesPage({
 
                 <div className="rounded-[24px] bg-zinc-950/55 p-4 ring-1 ring-white/6">
                   <div className="text-sm font-semibold text-zinc-100">Refresh primary profile</div>
-                  <p className="mt-1 text-sm text-zinc-400">
-                    Pull fresh rank and match data for {viewer.gameName}#{viewer.tagLine}.
-                  </p>
                   <div className="mt-4">
                     <SubmitForm
                       codeRequired={false}
@@ -340,19 +328,9 @@ export default async function DiscordLinkedRolesPage({
         {pending ? (
           <section className="rounded-[28px] bg-zinc-900/25 p-5 ring-1 ring-white/5 sm:p-6">
             <div className="text-xl font-semibold text-zinc-50">Verify your Riot account</div>
-            <p className="mt-2 text-sm text-zinc-400">
-              Discord is connected for{" "}
-              <span className="text-zinc-200">{pending.discordUsername ?? pending.discordUserId}</span>.
-              {pending.candidates.length
-                ? " Pick the Riot account Riftboard should trust, or sign in with Riot to verify directly."
-                : " Sign in with Riot to verify the account directly."}
-            </p>
 
             <div className="mt-5 rounded-[22px] bg-zinc-950/55 p-4 ring-1 ring-white/6">
-              <div className="text-sm font-semibold text-zinc-100">Recommended</div>
-              <p className="mt-1 text-sm text-zinc-400">
-                Riot Sign On confirms the Riot account from Riot directly and keeps the Discord bind verified.
-              </p>
+              <div className="text-sm font-semibold text-zinc-100">Riot Sign On</div>
               <form action="/api/riot/oauth/start" method="GET" className="mt-4">
                 <input type="hidden" name="returnTo" value="/discord/linked-roles" />
                 <button

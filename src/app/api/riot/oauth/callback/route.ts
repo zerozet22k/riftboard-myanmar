@@ -34,6 +34,14 @@ import { Player } from "@/models/player";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+function redirectOAuthError(req: NextRequest, returnTo: string | undefined | null, error: string) {
+  const safeReturnTo = normalizeReturnTo(returnTo);
+  const target = new URL(safeReturnTo === "/" ? "/discord/linked-roles" : safeReturnTo, req.url);
+  target.searchParams.set("status", "error");
+  target.searchParams.set("message", error);
+  return NextResponse.redirect(target);
+}
+
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
   const stateParam = req.nextUrl.searchParams.get("state");
@@ -48,18 +56,14 @@ export async function GET(req: NextRequest) {
 
   /* ---- error from Riot or missing params ---- */
   if (errorParam || !code || !stateParam || !savedState) {
-    const target = new URL("/", req.url);
-    target.searchParams.set("rso_error", errorParam || "missing_params");
-    const response = NextResponse.redirect(target);
+    const response = redirectOAuthError(req, savedState?.returnTo, errorParam || "missing-rso-state");
     clearRsoOAuthStateCookie(response);
     return response;
   }
 
   /* ---- state mismatch => CSRF ---- */
   if (stateParam !== savedState.state) {
-    const target = new URL("/", req.url);
-    target.searchParams.set("rso_error", "state_mismatch");
-    const response = NextResponse.redirect(target);
+    const response = redirectOAuthError(req, savedState.returnTo, "invalid-rso-state");
     clearRsoOAuthStateCookie(response);
     return response;
   }
@@ -235,12 +239,11 @@ export async function GET(req: NextRequest) {
     return response;
   } catch (error) {
     console.error("RSO callback error:", error);
-    const target = new URL("/", req.url);
-    target.searchParams.set(
-      "rso_error",
-      error instanceof Error ? error.message : "callback_failed"
+    const response = redirectOAuthError(
+      req,
+      savedState?.returnTo,
+      error instanceof Error ? error.message : "rso-callback-failed"
     );
-    const response = NextResponse.redirect(target);
     clearRsoOAuthStateCookie(response);
     return response;
   }

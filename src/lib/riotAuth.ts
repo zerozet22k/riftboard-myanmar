@@ -6,6 +6,7 @@ import { getAppBaseUrl } from "@/lib/runtimeConfig";
 const RSO_AUTHORIZE_URL = "https://auth.riotgames.com/authorize";
 const RSO_TOKEN_URL = "https://auth.riotgames.com/token";
 const RSO_USERINFO_URL = "https://auth.riotgames.com/userinfo";
+const DEFAULT_RSO_CLIENT_ID = "9a39070a-4e68-4c8e-8a60-e1aaabfb4cc8";
 
 const RSO_SESSION_COOKIE = "rso_session";
 const RSO_OAUTH_STATE_COOKIE = "rso_oauth_state";
@@ -34,7 +35,7 @@ export function getRsoClientId() {
   return firstNonEmpty([
     process.env.RSO_CLIENT_ID,
     process.env.RIOT_RSO_CLIENT_ID,
-  ]) || mustEnv("RSO_CLIENT_ID");
+  ]) || DEFAULT_RSO_CLIENT_ID;
 }
 
 function getRsoClientSecret() {
