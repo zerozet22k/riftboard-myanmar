@@ -110,7 +110,7 @@ function baseCookieOptions(secure: boolean, maxAge: number) {
 /*  RSO OAuth URL                                                     */
 /* ------------------------------------------------------------------ */
 
-export function makeRsoOAuthUrl(state: string) {
+export function makeRsoOAuthUrl(state: string, opts?: { promptLogin?: boolean }) {
   const query = new URLSearchParams({
     client_id: getRsoClientId(),
     response_type: "code",
@@ -118,6 +118,7 @@ export function makeRsoOAuthUrl(state: string) {
     scope: "openid",
     state,
   });
+  if (opts?.promptLogin) query.set("prompt", "login");
   return `${RSO_AUTHORIZE_URL}?${query.toString()}`;
 }
 

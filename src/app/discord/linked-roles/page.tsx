@@ -195,6 +195,17 @@ export default async function DiscordLinkedRolesPage({
                         Add Riot account
                       </button>
                     </form>
+                    <form action="/api/riot/oauth/start" method="GET">
+                      <input type="hidden" name="returnTo" value="/discord/linked-roles" />
+                      <input type="hidden" name="bindDiscord" value="1" />
+                      <input type="hidden" name="switch" value="1" />
+                      <button
+                        type="submit"
+                        className="rounded-2xl border border-emerald-300/25 px-5 py-3 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-400/10"
+                      >
+                        Switch Riot account
+                      </button>
+                    </form>
                     <form action="/api/discord/oauth/start" method="GET">
                       <input type="hidden" name="returnTo" value="/discord/linked-roles" />
                       <button
@@ -314,12 +325,22 @@ export default async function DiscordLinkedRolesPage({
               <div className="text-sm font-semibold text-zinc-100">Riot Sign On</div>
               <form action="/api/riot/oauth/start" method="GET" className="mt-4">
                 <input type="hidden" name="returnTo" value="/discord/linked-roles" />
-                <button
-                  type="submit"
-                  className="rounded-2xl bg-emerald-500/90 px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-emerald-400"
-                >
-                  Sign in with Riot
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="submit"
+                    className="rounded-2xl bg-emerald-500/90 px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-emerald-400"
+                  >
+                    Sign in with Riot
+                  </button>
+                  <button
+                    type="submit"
+                    name="switch"
+                    value="1"
+                    className="rounded-2xl border border-emerald-300/25 px-4 py-2.5 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-400/10"
+                  >
+                    Switch Riot account
+                  </button>
+                </div>
               </form>
             </div>
 
