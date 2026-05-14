@@ -192,6 +192,7 @@ type RsoOAuthStatePayload = {
   v: 1;
   state: string;
   returnTo: string;
+  bindDiscordAccount?: boolean;
   createdAt: number;
 };
 
@@ -212,6 +213,7 @@ export function setRsoOAuthStateCookie(
       v: 1,
       state: payload.state,
       returnTo: normalizeReturnTo(payload.returnTo),
+      bindDiscordAccount: payload.bindDiscordAccount === true,
       createdAt: Date.now(),
     }),
     baseCookieOptions(secure, SHORT_STATE_MAX_AGE)

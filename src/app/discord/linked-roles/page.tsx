@@ -15,6 +15,8 @@ import {
   getCommunityDiscordUrl,
   isCommunityCodeRequired,
 } from "@/lib/runtimeConfig";
+import { dbConnect } from "@/lib/mongodb";
+import { DiscordLink } from "@/models/discordLink";
 
 export const metadata: Metadata = {
   title: "Discord Access",
@@ -123,6 +125,24 @@ export default async function DiscordLinkedRolesPage({
   const pending = readPendingDiscordBindCookieValue(store.get("discord_pending_bind")?.value);
   const notice = messageText(status, message, riotId);
   const nextReturnTo = normalizeReturnTo(returnTo);
+  const linkedAccounts = viewer
+    ? await (async () => {
+        await dbConnect();
+        const links = await DiscordLink.find(
+          { discordUserId: viewer.discordUserId, verifiedBinding: true },
+          { gameName: 1, tagLine: 1, verificationSource: 1, isPrimary: 1, updatedAt: 1 }
+        )
+          .sort({ isPrimary: -1, updatedAt: -1 })
+          .lean();
+
+        return links.map((link) => ({
+          gameName: String(link.gameName ?? ""),
+          tagLine: String(link.tagLine ?? ""),
+          verificationSource: String(link.verificationSource ?? ""),
+          isPrimary: link.isPrimary === true,
+        }));
+      })()
+    : [];
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
@@ -132,78 +152,26 @@ export default async function DiscordLinkedRolesPage({
             Back to leaderboard
           </Link>
           <div className="mt-4">
-            <div className="text-[11px] uppercase tracking-[0.24em] text-zinc-500">Join community</div>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-zinc-50">
-              {communityCodeRequired
-                ? "Connect Discord for Burma-only access"
-                : "Connect Discord and your Riot account"}
-            </h1>
+            <div className="text-[11px] uppercase tracking-[0.24em] text-zinc-500">Account hub</div>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-zinc-50">Discord + Riot accounts</h1>
             <p className="mt-3 max-w-3xl text-sm text-zinc-400">
-              {communityCodeRequired
-                ? "Connect Discord first, then verify your Riot account with Riot Sign On. If this Discord account has never been approved for the Myanmar community before, Riftboard will ask for the private code once and then remember it for both the protected Discord invite and Burma-only account actions."
-                : "Join the community Discord, connect Discord, then verify your Riot account with Riot Sign On. If Discord already exposes a verified Riot connection, Riftboard can still use it; otherwise Riot Sign On finishes the bind cleanly."}
+              Connect Discord once, then add one or more Riot accounts with Riot Sign On.
+              {communityCodeRequired ? " The private code is only needed for first-time community access." : ""}
             </p>
           </div>
         </header>
 
         {notice ? <Notice tone={notice.tone} text={notice.text} /> : null}
 
-        {viewer && !communityUnlocked ? (
-          <section className="rounded-[28px] bg-zinc-900/25 p-5 ring-1 ring-white/5 sm:p-6">
-            <div className="text-xl font-semibold text-zinc-50">Finish community access</div>
-            <p className="mt-2 text-sm text-zinc-400">
-              Your Discord account is linked. Enter the private community code once and Riftboard
-              will remember it for this Discord account as well as this browser.
-            </p>
-
-            <div className="mt-5 rounded-[24px] bg-zinc-950/55 p-4 ring-1 ring-white/6">
-              <div className="text-sm text-zinc-400">Discord</div>
-              <div className="mt-1 text-lg font-semibold text-zinc-100">
-                {viewer.discordUsername ?? viewer.discordUserId}
-              </div>
-              <div className="mt-4 text-sm text-zinc-400">Riot account</div>
-              <div className="mt-1 text-lg font-semibold text-zinc-100">
-                {viewer.gameName}#{viewer.tagLine}
-              </div>
-            </div>
-
-            <form action="/api/community/access" method="POST" className="mt-5 space-y-3">
-              <input
-                type="hidden"
-                name="returnTo"
-                value={nextReturnTo !== "/discord/linked-roles" ? nextReturnTo : "/discord/linked-roles"}
-              />
-              <label className="block space-y-1.5 text-sm">
-                <div className="text-zinc-400">Private community code</div>
-                <input
-                  name="code"
-                  type="password"
-                  placeholder="Enter code"
-                  autoComplete="off"
-                  required
-                  className="w-full rounded-2xl bg-zinc-950/55 px-4 py-3 text-zinc-100 outline-none ring-1 ring-white/8 focus:ring-white/15"
-                />
-              </label>
-              <button
-                type="submit"
-                className="rounded-2xl bg-emerald-500/90 px-5 py-3 text-sm font-semibold text-black transition hover:bg-emerald-400"
-              >
-                Unlock access
-              </button>
-            </form>
-          </section>
-        ) : (
-          <section className="rounded-[28px] bg-zinc-900/25 p-5 ring-1 ring-white/5 sm:p-6">
-            <div className="text-xl font-semibold text-zinc-50">
-              {viewer ? "Verified Riot account" : "Connect Discord"}
-            </div>
-            <p className="mt-2 text-sm text-zinc-400">
-              {viewer
-                ? "Riftboard will use this Discord-linked Riot account for leaderboard refreshes, linked roles, and tournament actions."
-                : communityCodeRequired
-                  ? "Connect Discord first. If Discord cannot provide a Riot account connection, Riftboard will ask you to sign in with Riot next."
-                  : "Open the community Discord first if you need the invite, then connect Discord and verify your Riot account. Riot Sign On is used when Discord does not expose a Riot account connection."}
-            </p>
+        <section className="rounded-[28px] bg-zinc-900/25 p-5 ring-1 ring-white/5 sm:p-6">
+          <div className="text-xl font-semibold text-zinc-50">
+            {viewer ? "Connected" : "Connect Discord"}
+          </div>
+          <p className="mt-2 text-sm text-zinc-400">
+            {viewer
+              ? "Manage your linked Riot accounts. The primary account is used for quick commands and role sync."
+              : "Start with Discord. If Discord does not expose a Riot account, Riot Sign On will verify it directly."}
+          </p>
 
             {!viewer && communityUnlocked && communityDiscordUrl ? (
               <div className="mt-5">
@@ -219,50 +187,105 @@ export default async function DiscordLinkedRolesPage({
             ) : null}
 
             {viewer ? (
-              <div className="mt-5 rounded-[24px] bg-zinc-950/55 p-4 ring-1 ring-white/6">
-                <div className="text-sm text-zinc-400">Discord</div>
-                <div className="mt-1 text-lg font-semibold text-zinc-100">
-                  {viewer.discordUsername ?? viewer.discordUserId}
-                </div>
-                <div className="mt-4 text-sm text-zinc-400">Riot account</div>
-                <div className="mt-1 text-lg font-semibold text-zinc-100">
-                  {viewer.gameName}#{viewer.tagLine}
-                </div>
-                <div className="mt-5 flex flex-wrap gap-3">
-                  <form action="/api/discord/oauth/start" method="GET">
-                    <input type="hidden" name="returnTo" value="/discord/linked-roles" />
-                    <button
-                      type="submit"
-                      className="rounded-2xl bg-emerald-500/90 px-5 py-3 text-sm font-semibold text-black transition hover:bg-emerald-400"
-                    >
-                      Relink Discord
-                    </button>
-                  </form>
-                  <form action="/api/discord/bind/remove" method="POST">
-                    <button
-                      type="submit"
-                      className="rounded-2xl border border-red-300/20 px-5 py-3 text-sm text-red-200 transition hover:bg-red-500/10"
-                    >
-                      Remove linked account
-                    </button>
-                  </form>
-                  {communityDiscordUrl ? (
-                    <Link
-                      href={communityDiscordUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="rounded-2xl border border-white/10 px-5 py-3 text-sm text-zinc-200 transition hover:bg-white/5"
-                    >
-                      Open Discord invite
-                    </Link>
-                  ) : null}
+              <div className="mt-5 space-y-4">
+                <div className="rounded-[24px] bg-zinc-950/55 p-4 ring-1 ring-white/6">
+                  <div className="text-sm text-zinc-400">Discord</div>
+                  <div className="mt-1 text-lg font-semibold text-zinc-100">
+                    {viewer.discordUsername ?? viewer.discordUserId}
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <form action="/api/riot/oauth/start" method="GET">
+                      <input type="hidden" name="returnTo" value="/discord/linked-roles" />
+                      <input type="hidden" name="bindDiscord" value="1" />
+                      <button
+                        type="submit"
+                        className="rounded-2xl bg-emerald-500/90 px-5 py-3 text-sm font-semibold text-black transition hover:bg-emerald-400"
+                      >
+                        Add Riot account
+                      </button>
+                    </form>
+                    <form action="/api/discord/oauth/start" method="GET">
+                      <input type="hidden" name="returnTo" value="/discord/linked-roles" />
+                      <button
+                        type="submit"
+                        className="rounded-2xl border border-white/10 px-5 py-3 text-sm text-zinc-200 transition hover:bg-white/5"
+                      >
+                        Reconnect Discord
+                      </button>
+                    </form>
+                    {communityDiscordUrl ? (
+                      <Link
+                        href={communityDiscordUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-2xl border border-white/10 px-5 py-3 text-sm text-zinc-200 transition hover:bg-white/5"
+                      >
+                        Discord invite
+                      </Link>
+                    ) : null}
+                  </div>
                 </div>
 
-                <div className="mt-6">
-                  <div className="text-sm font-semibold text-zinc-100">Refresh profile</div>
+                <div className="rounded-[24px] bg-zinc-950/55 p-4 ring-1 ring-white/6">
+                  <div className="text-sm font-semibold text-zinc-100">Linked Riot accounts</div>
+                  <div className="mt-3 grid gap-2">
+                    {linkedAccounts.map((account) => (
+                      <div
+                        key={`${account.gameName}#${account.tagLine}`}
+                        className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-zinc-900/65 px-3 py-2"
+                      >
+                        <div>
+                          <div className="font-semibold text-zinc-100">{account.gameName}#{account.tagLine}</div>
+                          <div className="mt-0.5 text-xs text-zinc-500">
+                            {account.verificationSource === "riot_rso"
+                              ? "Riot Sign On"
+                              : account.verificationSource === "discord_connections"
+                                ? "Discord connection"
+                                : "Admin bind"}
+                          </div>
+                        </div>
+                        {account.isPrimary ? (
+                          <span className="rounded-full bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-200">
+                            Primary
+                          </span>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {viewer && !communityUnlocked ? (
+                  <form action="/api/community/access" method="POST" className="rounded-[24px] bg-zinc-950/55 p-4 ring-1 ring-amber-300/15">
+                    <input
+                      type="hidden"
+                      name="returnTo"
+                      value={nextReturnTo !== "/discord/linked-roles" ? nextReturnTo : "/discord/linked-roles"}
+                    />
+                    <div className="text-sm font-semibold text-zinc-100">Community code</div>
+                    <p className="mt-1 text-sm text-zinc-400">Enter it once to unlock protected community actions.</p>
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                      <input
+                        name="code"
+                        type="password"
+                        placeholder="Private code"
+                        autoComplete="off"
+                        required
+                        className="min-w-0 flex-1 rounded-2xl bg-zinc-900/70 px-4 py-3 text-zinc-100 outline-none ring-1 ring-white/8 focus:ring-white/15"
+                      />
+                      <button
+                        type="submit"
+                        className="rounded-2xl bg-emerald-500/90 px-5 py-3 text-sm font-semibold text-black transition hover:bg-emerald-400"
+                      >
+                        Unlock
+                      </button>
+                    </div>
+                  </form>
+                ) : null}
+
+                <div className="rounded-[24px] bg-zinc-950/55 p-4 ring-1 ring-white/6">
+                  <div className="text-sm font-semibold text-zinc-100">Refresh primary profile</div>
                   <p className="mt-1 text-sm text-zinc-400">
-                    Refresh this linked Riot account here. No extra community-code step needed on
-                    this browser.
+                    Pull fresh rank and match data for {viewer.gameName}#{viewer.tagLine}.
                   </p>
                   <div className="mt-4">
                     <SubmitForm
@@ -280,6 +303,14 @@ export default async function DiscordLinkedRolesPage({
                     />
                   </div>
                 </div>
+                <form action="/api/discord/bind/remove" method="POST">
+                  <button
+                    type="submit"
+                    className="rounded-2xl border border-red-300/20 px-5 py-3 text-sm text-red-200 transition hover:bg-red-500/10"
+                  >
+                    Remove primary linked account
+                  </button>
+                </form>
               </div>
             ) : (
               <div className="mt-5 flex flex-wrap gap-3">
@@ -304,8 +335,7 @@ export default async function DiscordLinkedRolesPage({
                 ) : null}
               </div>
             )}
-          </section>
-        )}
+        </section>
 
         {pending ? (
           <section className="rounded-[28px] bg-zinc-900/25 p-5 ring-1 ring-white/5 sm:p-6">
