@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import type { Metadata } from "next";
-import SubmitForm from "@/components/SubmitForm";
 import {
   hasCommunityAccessCookieValue,
   hasStoredCommunityAccessForDiscordUser,
@@ -273,24 +272,6 @@ export default async function DiscordLinkedRolesPage({
                   </form>
                 ) : null}
 
-                <div className="rounded-[24px] bg-zinc-950/55 p-4 ring-1 ring-white/6">
-                  <div className="text-sm font-semibold text-zinc-100">Refresh primary profile</div>
-                  <div className="mt-4">
-                    <SubmitForm
-                      codeRequired={false}
-                      viewer={{
-                        discordUsername: viewer.discordUsername,
-                        gameName: viewer.gameName,
-                        tagLine: viewer.tagLine,
-                      }}
-                      returnTo="/discord/linked-roles"
-                      showBindingCard={false}
-                      showReconnectLink={false}
-                      submitLabel="Refresh profile"
-                      variant="inline"
-                    />
-                  </div>
-                </div>
                 <form action="/api/discord/bind/remove" method="POST">
                   <button
                     type="submit"

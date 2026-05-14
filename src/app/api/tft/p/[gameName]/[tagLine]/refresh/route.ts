@@ -40,7 +40,7 @@ async function syncDiscordRolesForPlayer(playerId: string) {
     {
       playerId,
       verifiedBinding: true,
-      verificationSource: "discord_connections",
+      verificationSource: { $in: ["discord_connections", "riot_rso"] },
     },
     { _id: 1 }
   ).lean();

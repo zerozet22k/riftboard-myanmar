@@ -252,6 +252,11 @@ function isRiot403(e: unknown) {
   return e instanceof RiotApiError && e.status === 403;
 }
 
+export function isRiotDecryptingBadRequest(e: unknown) {
+  const message = e instanceof Error ? e.message : String(e ?? "");
+  return /decrypt/i.test(message) && /400|Bad Request/i.test(message);
+}
+
 function isMissingPlatformHost(e: unknown) {
   const cause = e instanceof Error ? (e as Error & { cause?: { code?: unknown } }).cause : null;
   return cause?.code === "ENOTFOUND";
@@ -400,7 +405,7 @@ export async function findTftLeagueEntriesByPuuid(puuid: string, preferredPlatfo
         entries: await getTftLeagueEntriesByPuuid(platform, puuid),
       };
     } catch (e) {
-      if (isRiot404(e) || isMissingPlatformHost(e)) continue;
+      if (isRiot404(e) || isRiotDecryptingBadRequest(e) || isMissingPlatformHost(e)) continue;
       throw e;
     }
   }

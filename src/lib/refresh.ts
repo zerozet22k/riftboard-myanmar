@@ -23,6 +23,7 @@ import {
   platformToMatchRegion,
   isRiot404,
   isRiot429,
+  isRiotDecryptingBadRequest,
 } from "@/lib/riot";
 import { normalizeRiotIdPart, syncCanonicalRiotId } from "@/lib/playerIdentity";
 import { mergePlayers } from "@/lib/playerMerge";
@@ -67,11 +68,6 @@ function isRateLimit(e: unknown) {
 function rateLimitWaitMs(e: unknown, fallbackMs = 2000) {
   const ra = (e as any)?.retryAfterMs;
   return typeof ra === "number" && ra > 0 ? ra : fallbackMs;
-}
-
-function isRiotDecryptingBadRequest(e: unknown) {
-  const message = errToString(e);
-  return /decrypt/i.test(message) && /400|Bad Request/i.test(message);
 }
 
 function normalize(s: string) {
@@ -628,16 +624,7 @@ export async function refreshPlayerById(
         if (!tftPuuid) throw e;
       }
 
-      let foundTftLeague;
-      try {
-        foundTftLeague = await findTftLeagueEntriesByPuuid(tftPuuid, platform);
-      } catch (e) {
-        if (!isRiotDecryptingBadRequest(e)) throw e;
-        const tftAccount = await getPuuidByRiotId(player.gameName, player.tagLine, "tft");
-        tftPuuid = tftAccount.puuid;
-        player.tftPuuid = tftPuuid;
-        foundTftLeague = await findTftLeagueEntriesByPuuid(tftPuuid, platform);
-      }
+      const foundTftLeague = await findTftLeagueEntriesByPuuid(tftPuuid, platform);
       const { entries: tftEntries } = foundTftLeague;
       const tft = tftEntries.find((entry) => entry.queueType === TFT);
 
@@ -731,12 +718,23 @@ export async function refreshPlayerById(
   if (syncTftMatches) {
     const tftPuuid = String(player.tftPuuid ?? puuid ?? "").trim();
     if (tftPuuid) {
-      await syncRecentTftMatches({
-        player,
-        puuid: tftPuuid,
-        matchRegion,
-        count: Math.max(1, Math.min(MAX_MATCH_SYNC_COUNT, Number(opts?.matchesCount ?? 10) || 10)),
-      });
+      try {
+        await syncRecentTftMatches({
+          player,
+          puuid: tftPuuid,
+          matchRegion,
+          count: Math.max(1, Math.min(MAX_MATCH_SYNC_COUNT, Number(opts?.matchesCount ?? 10) || 10)),
+        });
+      } catch (e) {
+        if (!isRiotDecryptingBadRequest(e) && !isRiot404(e)) throw e;
+        console.warn("TFT match sync skipped because Riot rejected this TFT puuid:", errToString(e));
+        player.tftMatchSync = {
+          ...(player.tftMatchSync?.toObject ? player.tftMatchSync.toObject() : player.tftMatchSync ?? {}),
+          lastError: "Riot could not return TFT match history for this account yet.",
+          lastAttemptAt: now,
+        };
+        await player.save();
+      }
     }
   }
 
