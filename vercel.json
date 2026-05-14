@@ -3,10 +3,6 @@
     {
       "path": "/api/cron/leaderboard",
       "schedule": "15 0 * * *"
-    },
-    {
-      "path": "/api/cron/live-games",
-      "schedule": "*/10 * * * *"
     }
   ]
 }

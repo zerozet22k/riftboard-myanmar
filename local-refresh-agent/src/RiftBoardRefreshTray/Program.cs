@@ -39,10 +39,13 @@ internal sealed class TrayContext : ApplicationContext
     private string _current = "Idle";
     private string _rankStatus = "Not run yet";
     private string _tftStatus = "Not run yet";
+    private string _liveStatus = "Not run yet";
     private string _rankLast = "None yet";
     private string _tftLast = "None yet";
+    private string _liveLast = "None yet";
     private string _rankNext = "Pending";
     private string _tftNext = "Pending";
+    private string _liveNext = "Pending";
     private string _lastError = "None";
 
     public TrayContext()
@@ -66,10 +69,13 @@ internal sealed class TrayContext : ApplicationContext
             UpdateCurrent,
             UpdateRankStatus,
             UpdateTftStatus,
+            UpdateLiveStatus,
             UpdateRankLast,
             UpdateTftLast,
+            UpdateLiveLast,
             UpdateRankNext,
             UpdateTftNext,
+            UpdateLiveNext,
             UpdateLastError);
 
         _notifyIcon = new NotifyIcon
@@ -146,6 +152,12 @@ internal sealed class TrayContext : ApplicationContext
         PushStatusToSettingsForm();
     });
 
+    private void UpdateLiveStatus(string status) => PostUi(() =>
+    {
+        _liveStatus = status;
+        PushStatusToSettingsForm();
+    });
+
     private void UpdateRankLast(string value) => PostUi(() =>
     {
         _rankLast = value;
@@ -155,6 +167,12 @@ internal sealed class TrayContext : ApplicationContext
     private void UpdateTftLast(string value) => PostUi(() =>
     {
         _tftLast = value;
+        PushStatusToSettingsForm();
+    });
+
+    private void UpdateLiveLast(string value) => PostUi(() =>
+    {
+        _liveLast = value;
         PushStatusToSettingsForm();
     });
 
@@ -168,6 +186,13 @@ internal sealed class TrayContext : ApplicationContext
     private void UpdateTftNext(DateTimeOffset? value) => PostUi(() =>
     {
         _tftNext = value?.ToString("hh:mm tt") ?? "Pending";
+        SyncTrayPresentation();
+        PushStatusToSettingsForm();
+    });
+
+    private void UpdateLiveNext(DateTimeOffset? value) => PostUi(() =>
+    {
+        _liveNext = value?.ToString("hh:mm tt") ?? "Pending";
         SyncTrayPresentation();
         PushStatusToSettingsForm();
     });
@@ -198,7 +223,7 @@ internal sealed class TrayContext : ApplicationContext
             return $"RiftBoard Refresh - {_current}";
         }
 
-        return $"RiftBoard Refresh - Rank {_rankNext}, TFT {_tftNext}";
+        return $"RiftBoard Refresh - Rank {_rankNext}, TFT {_tftNext}, Live {_liveNext}";
     }
 
     private static string ToTitleCase(string value)
@@ -265,10 +290,13 @@ internal sealed class TrayContext : ApplicationContext
             Current = TrimForMenu(_current),
             RankStatus = TrimForMenu(_rankStatus),
             TftStatus = TrimForMenu(_tftStatus),
+            LiveStatus = TrimForMenu(_liveStatus),
             RankLast = TrimForMenu(_rankLast),
             TftLast = TrimForMenu(_tftLast),
+            LiveLast = TrimForMenu(_liveLast),
             RankNext = _rankNext,
             TftNext = _tftNext,
+            LiveNext = _liveNext,
             Error = TrimForMenu(_lastError),
         });
     }
@@ -342,6 +370,9 @@ internal sealed class SettingsForm : Form
     private readonly Label _tftStatusLabel;
     private readonly Label _tftLastLabel;
     private readonly Label _tftNextLabel;
+    private readonly Label _liveStatusLabel;
+    private readonly Label _liveLastLabel;
+    private readonly Label _liveNextLabel;
     private readonly Label _errorLabel;
     private readonly CheckBox _rankEnabledBox;
     private readonly CheckBox _rankMatchesBox;
@@ -354,8 +385,14 @@ internal sealed class SettingsForm : Form
     private readonly NumericUpDown _tftLimitBox;
     private readonly NumericUpDown _tftDelayBox;
     private readonly NumericUpDown _tftMatchesCountBox;
+    private readonly CheckBox _liveEnabledBox;
+    private readonly NumericUpDown _liveIntervalBox;
+    private readonly NumericUpDown _liveLimitBox;
+    private readonly NumericUpDown _liveDelayBox;
+    private readonly NumericUpDown _liveMatchesCountBox;
     private readonly Label _rankHintLabel;
     private readonly Label _tftHintLabel;
+    private readonly Label _liveHintLabel;
     private readonly Button _saveButton;
     private readonly Button _startButton;
     private readonly Button _stopButton;
@@ -379,7 +416,7 @@ internal sealed class SettingsForm : Form
         MaximizeBox = false;
         MinimizeBox = false;
         ShowInTaskbar = false;
-        ClientSize = new Size(900, 680);
+        ClientSize = new Size(1120, 720);
 
         FormClosing += (_, e) =>
         {
@@ -426,19 +463,22 @@ internal sealed class SettingsForm : Form
         root.Controls.Add(header, 0, 0);
 
         var runBox = new GroupBox { Dock = DockStyle.Top, AutoSize = true, Text = "Run", Padding = new Padding(12, 14, 12, 12), Margin = new Padding(0, 0, 0, 10) };
-        var runGrid = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 3 };
-        runGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 34));
-        runGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33));
-        runGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33));
+        var runGrid = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 4 };
+        runGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
+        runGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
+        runGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
+        runGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
         _currentLabel = AddMetric(runGrid, "Current");
         _rankNextLabel = AddMetric(runGrid, "Rank next");
         _tftNextLabel = AddMetric(runGrid, "TFT next");
+        _liveNextLabel = AddMetric(runGrid, "Live next");
         runBox.Controls.Add(runGrid);
         root.Controls.Add(runBox, 0, 1);
 
-        var jobsGrid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2 };
-        jobsGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        jobsGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        var jobsGrid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3 };
+        jobsGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33));
+        jobsGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 34));
+        jobsGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33));
 
         var rankJob = CreateJobPanel("Rank / LoL", "Direct Riot API + MongoDB", new Padding(0, 0, 8, 0));
         _rankStatusLabel = rankJob.Status;
@@ -454,7 +494,7 @@ internal sealed class SettingsForm : Form
         rankJob.Settings.SetColumnSpan(_rankMatchesBox, 2);
         jobsGrid.Controls.Add(rankJob.Panel, 0, 0);
 
-        var tftJob = CreateJobPanel("TFT Matches", "Direct Riot API + MongoDB", new Padding(8, 0, 0, 0));
+        var tftJob = CreateJobPanel("TFT Matches", "Direct Riot API + MongoDB", new Padding(4, 0, 4, 0));
         _tftStatusLabel = tftJob.Status;
         _tftLastLabel = tftJob.Last;
         _tftEnabledBox = tftJob.Enabled;
@@ -464,12 +504,25 @@ internal sealed class SettingsForm : Form
         _tftMatchesCountBox = tftJob.Matches;
         _tftHintLabel = tftJob.Hint;
         jobsGrid.Controls.Add(tftJob.Panel, 1, 0);
+
+        var liveJob = CreateJobPanel("Live Games", "Spectator API + Discord channel", new Padding(8, 0, 0, 0));
+        _liveStatusLabel = liveJob.Status;
+        _liveLastLabel = liveJob.Last;
+        _liveEnabledBox = liveJob.Enabled;
+        _liveIntervalBox = liveJob.Interval;
+        _liveLimitBox = liveJob.Limit;
+        _liveDelayBox = liveJob.Delay;
+        _liveMatchesCountBox = liveJob.Matches;
+        _liveMatchesCountBox.Enabled = false;
+        _liveHintLabel = liveJob.Hint;
+        jobsGrid.Controls.Add(liveJob.Panel, 2, 0);
         root.Controls.Add(jobsGrid, 0, 2);
 
         foreach (var control in new Control[]
         {
             _rankEnabledBox, _rankMatchesBox, _rankIntervalBox, _rankLimitBox, _rankDelayBox, _rankMatchesCountBox,
             _tftEnabledBox, _tftIntervalBox, _tftLimitBox, _tftDelayBox, _tftMatchesCountBox,
+            _liveEnabledBox, _liveIntervalBox, _liveLimitBox, _liveDelayBox,
         })
         {
             if (control is NumericUpDown numeric)
@@ -524,6 +577,8 @@ internal sealed class SettingsForm : Form
         rankLogButton.Click += (_, _) => ShowLogDialog(Path.Combine(_baseDirectory, "rank.log"), "Rank / LoL Log");
         var tftLogButton = new Button { AutoSize = true, Text = "TFT Log" };
         tftLogButton.Click += (_, _) => ShowLogDialog(Path.Combine(_baseDirectory, "tft.log"), "TFT Log");
+        var liveLogButton = new Button { AutoSize = true, Text = "Live Log" };
+        liveLogButton.Click += (_, _) => ShowLogDialog(Path.Combine(_baseDirectory, "live.log"), "Live Games Log");
 
         buttonBar.Controls.Add(closeButton);
         buttonBar.Controls.Add(_saveButton);
@@ -533,6 +588,7 @@ internal sealed class SettingsForm : Form
         buttonBar.Controls.Add(openLogsButton);
         buttonBar.Controls.Add(rankLogButton);
         buttonBar.Controls.Add(tftLogButton);
+        buttonBar.Controls.Add(liveLogButton);
         root.Controls.Add(buttonBar, 0, 4);
 
         Controls.Add(root);
@@ -544,6 +600,7 @@ internal sealed class SettingsForm : Form
         SetJobConfig(_config.RankJob, _rankEnabledBox, _rankIntervalBox, _rankLimitBox, _rankDelayBox, _rankMatchesCountBox);
         _rankMatchesBox.Checked = _config.RankJob.SyncMatches;
         SetJobConfig(_config.TftJob, _tftEnabledBox, _tftIntervalBox, _tftLimitBox, _tftDelayBox, _tftMatchesCountBox);
+        SetJobConfig(_config.LiveJob, _liveEnabledBox, _liveIntervalBox, _liveLimitBox, _liveDelayBox, _liveMatchesCountBox);
         UpdateGuidance();
     }
 
@@ -557,6 +614,9 @@ internal sealed class SettingsForm : Form
         _tftStatusLabel.Text = status.TftStatus;
         _tftLastLabel.Text = status.TftLast;
         _tftNextLabel.Text = status.TftNext;
+        _liveStatusLabel.Text = status.LiveStatus;
+        _liveLastLabel.Text = status.LiveLast;
+        _liveNextLabel.Text = status.LiveNext;
         _errorLabel.Text = status.Error;
 
         var running = !string.Equals(status.State, "Stopped", StringComparison.OrdinalIgnoreCase);
@@ -584,6 +644,12 @@ internal sealed class SettingsForm : Form
             {
                 SyncMatches = false,
                 SyncTftMatches = true,
+            },
+            LiveJob = BuildJobConfig(_liveEnabledBox, _liveIntervalBox, _liveLimitBox, _liveDelayBox, _liveMatchesCountBox) with
+            {
+                SyncMatches = false,
+                SyncTftMatches = false,
+                MatchesCount = 1,
             },
         };
 
@@ -613,6 +679,7 @@ internal sealed class SettingsForm : Form
     {
         UpdateJobGuidance(BuildJobConfig(_rankEnabledBox, _rankIntervalBox, _rankLimitBox, _rankDelayBox, _rankMatchesCountBox), _rankHintLabel, _rankMatchesBox.Checked ? "LoL matches" : "rank only");
         UpdateJobGuidance(BuildJobConfig(_tftEnabledBox, _tftIntervalBox, _tftLimitBox, _tftDelayBox, _tftMatchesCountBox), _tftHintLabel, "TFT matches");
+        UpdateJobGuidance(BuildJobConfig(_liveEnabledBox, _liveIntervalBox, _liveLimitBox, _liveDelayBox, _liveMatchesCountBox), _liveHintLabel, "live checks");
     }
 
     private static void SetJobConfig(JobConfig config, CheckBox enabled, NumericUpDown interval, NumericUpDown limit, NumericUpDown delay, NumericUpDown matches)
@@ -815,23 +882,29 @@ internal sealed class RefreshLoop
     private readonly string _repoRoot;
     private readonly AgentLogger _rankLogger;
     private readonly AgentLogger _tftLogger;
+    private readonly AgentLogger _liveLogger;
     private readonly AgentLogger _agentLogger;
     private readonly Action<string, string, ToolTipIcon> _notify;
     private readonly Action<string> _updateState;
     private readonly Action<string> _updateCurrent;
     private readonly Action<string> _updateRankStatus;
     private readonly Action<string> _updateTftStatus;
+    private readonly Action<string> _updateLiveStatus;
     private readonly Action<string> _updateRankLast;
     private readonly Action<string> _updateTftLast;
+    private readonly Action<string> _updateLiveLast;
     private readonly Action<DateTimeOffset?> _updateRankNext;
     private readonly Action<DateTimeOffset?> _updateTftNext;
+    private readonly Action<DateTimeOffset?> _updateLiveNext;
     private readonly Action<string> _updateLastError;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private CancellationTokenSource? _cts;
     private Task? _rankTask;
     private Task? _tftTask;
+    private Task? _liveTask;
     private bool _lastRankFailed;
     private bool _lastTftFailed;
+    private bool _lastLiveFailed;
 
     public RefreshLoop(
         string baseDirectory,
@@ -840,26 +913,33 @@ internal sealed class RefreshLoop
         Action<string> updateCurrent,
         Action<string> updateRankStatus,
         Action<string> updateTftStatus,
+        Action<string> updateLiveStatus,
         Action<string> updateRankLast,
         Action<string> updateTftLast,
+        Action<string> updateLiveLast,
         Action<DateTimeOffset?> updateRankNext,
         Action<DateTimeOffset?> updateTftNext,
+        Action<DateTimeOffset?> updateLiveNext,
         Action<string> updateLastError)
     {
         _baseDirectory = baseDirectory;
         _repoRoot = ResolveRepoRoot(baseDirectory);
         _rankLogger = new AgentLogger(Path.Combine(_baseDirectory, "rank.log"));
         _tftLogger = new AgentLogger(Path.Combine(_baseDirectory, "tft.log"));
+        _liveLogger = new AgentLogger(Path.Combine(_baseDirectory, "live.log"));
         _agentLogger = new AgentLogger(Path.Combine(_baseDirectory, "app.log"));
         _notify = notify;
         _updateState = updateState;
         _updateCurrent = updateCurrent;
         _updateRankStatus = updateRankStatus;
         _updateTftStatus = updateTftStatus;
+        _updateLiveStatus = updateLiveStatus;
         _updateRankLast = updateRankLast;
         _updateTftLast = updateTftLast;
+        _updateLiveLast = updateLiveLast;
         _updateRankNext = updateRankNext;
         _updateTftNext = updateTftNext;
+        _updateLiveNext = updateLiveNext;
         _updateLastError = updateLastError;
     }
 
@@ -878,6 +958,7 @@ internal sealed class RefreshLoop
             _cts = new CancellationTokenSource();
             _rankTask = RunJobAsync(RefreshJob.Rank, _cts.Token);
             _tftTask = RunJobAsync(RefreshJob.Tft, _cts.Token);
+            _liveTask = RunJobAsync(RefreshJob.Live, _cts.Token);
             _updateState("running");
             _updateCurrent("Idle");
             _agentLogger.Info("Refresh jobs started.");
@@ -892,6 +973,7 @@ internal sealed class RefreshLoop
     {
         Task? rankTask;
         Task? tftTask;
+        Task? liveTask;
 
         await _gate.WaitAsync();
         try
@@ -904,13 +986,16 @@ internal sealed class RefreshLoop
             _cts.Cancel();
             rankTask = _rankTask;
             tftTask = _tftTask;
+            liveTask = _liveTask;
             _cts = null;
             _rankTask = null;
             _tftTask = null;
+            _liveTask = null;
             _updateState("stopped");
             _updateCurrent("Stopped");
             _updateRankNext(null);
             _updateTftNext(null);
+            _updateLiveNext(null);
             _agentLogger.Info("Refresh jobs stopping.");
         }
         finally
@@ -927,6 +1012,11 @@ internal sealed class RefreshLoop
         {
             try { await tftTask; } catch (OperationCanceledException) { }
         }
+
+        if (liveTask is not null)
+        {
+            try { await liveTask; } catch (OperationCanceledException) { }
+        }
     }
 
     private async Task RunJobAsync(RefreshJob job, CancellationToken cancellationToken)
@@ -934,11 +1024,11 @@ internal sealed class RefreshLoop
         while (!cancellationToken.IsCancellationRequested)
         {
             var config = await AgentConfig.LoadAsync(Path.Combine(_baseDirectory, "config.json"), cancellationToken);
-            var jobConfig = job == RefreshJob.Rank ? config.RankJob : config.TftJob;
-            var updateStatus = job == RefreshJob.Rank ? _updateRankStatus : _updateTftStatus;
-            var updateLast = job == RefreshJob.Rank ? _updateRankLast : _updateTftLast;
-            var updateNext = job == RefreshJob.Rank ? _updateRankNext : _updateTftNext;
-            var logger = job == RefreshJob.Rank ? _rankLogger : _tftLogger;
+            var jobConfig = JobConfigFor(config, job);
+            var updateStatus = StatusUpdater(job);
+            var updateLast = LastUpdater(job);
+            var updateNext = NextUpdater(job);
+            var logger = LoggerFor(job);
 
             if (!jobConfig.Enabled)
             {
@@ -1000,16 +1090,26 @@ internal sealed class RefreshLoop
             return;
         }
 
-        if (failed && !_lastTftFailed)
+        if (job == RefreshJob.Tft)
         {
-            _notify("RiftBoard TFT Failed", TrimForNotification(message), ToolTipIcon.Error);
+            if (failed && !_lastTftFailed)
+            {
+                _notify("RiftBoard TFT Failed", TrimForNotification(message), ToolTipIcon.Error);
+            }
+            _lastTftFailed = failed;
+            return;
         }
-        _lastTftFailed = failed;
+
+        if (failed && !_lastLiveFailed)
+        {
+            _notify("RiftBoard Live Games Failed", TrimForNotification(message), ToolTipIcon.Error);
+        }
+        _lastLiveFailed = failed;
     }
 
     private async Task<TickOutcome> RunTickJobAsync(RefreshJob job, AgentConfig config, JobConfig jobConfig, CancellationToken cancellationToken)
     {
-        _updateCurrent(job == RefreshJob.Rank ? "Rank / LoL" : "TFT Matches");
+        _updateCurrent(JobLabel(job));
         var result = await new CSharpRefreshService(_repoRoot).RefreshAsync(job, jobConfig, cancellationToken);
 
         return new TickOutcome(
@@ -1018,13 +1118,58 @@ internal sealed class RefreshLoop
             result.Skipped,
             result.Scanned,
             BuildCronPlayerSummary(result.Players),
-            PrefixError(job == RefreshJob.Rank ? "Rank/LoL" : "TFT", BuildCronErrorSummary(result.Errors)));
+            PrefixError(JobLabel(job), BuildCronErrorSummary(result.Errors)));
     }
 
     private static string JobLabel(RefreshJob job)
     {
-        return job == RefreshJob.Rank ? "Rank / LoL" : "TFT Matches";
+        return job switch
+        {
+            RefreshJob.Rank => "Rank / LoL",
+            RefreshJob.Tft => "TFT Matches",
+            _ => "Live Games",
+        };
     }
+
+    private JobConfig JobConfigFor(AgentConfig config, RefreshJob job) =>
+        job switch
+        {
+            RefreshJob.Rank => config.RankJob,
+            RefreshJob.Tft => config.TftJob,
+            _ => config.LiveJob,
+        };
+
+    private Action<string> StatusUpdater(RefreshJob job) =>
+        job switch
+        {
+            RefreshJob.Rank => _updateRankStatus,
+            RefreshJob.Tft => _updateTftStatus,
+            _ => _updateLiveStatus,
+        };
+
+    private Action<string> LastUpdater(RefreshJob job) =>
+        job switch
+        {
+            RefreshJob.Rank => _updateRankLast,
+            RefreshJob.Tft => _updateTftLast,
+            _ => _updateLiveLast,
+        };
+
+    private Action<DateTimeOffset?> NextUpdater(RefreshJob job) =>
+        job switch
+        {
+            RefreshJob.Rank => _updateRankNext,
+            RefreshJob.Tft => _updateTftNext,
+            _ => _updateLiveNext,
+        };
+
+    private AgentLogger LoggerFor(RefreshJob job) =>
+        job switch
+        {
+            RefreshJob.Rank => _rankLogger,
+            RefreshJob.Tft => _tftLogger,
+            _ => _liveLogger,
+        };
 
     private static string FormatPhaseStatus(TickOutcome outcome)
     {
@@ -1133,6 +1278,7 @@ internal enum RefreshJob
 {
     Rank,
     Tft,
+    Live,
 }
 
 internal sealed record DiscordRole(string Id, string Name);
@@ -1190,6 +1336,7 @@ internal sealed class CSharpRefreshService
     private readonly IMongoCollection<BsonDocument> _rankEntries;
     private readonly IMongoCollection<BsonDocument> _tftPlayerMatches;
     private readonly IMongoCollection<BsonDocument> _discordLinks;
+    private readonly IMongoCollection<BsonDocument> _liveGamePosts;
 
     public CSharpRefreshService(string repoRoot)
     {
@@ -1204,10 +1351,16 @@ internal sealed class CSharpRefreshService
         _rankEntries = db.GetCollection<BsonDocument>("rankentries");
         _tftPlayerMatches = db.GetCollection<BsonDocument>("tftplayermatches");
         _discordLinks = db.GetCollection<BsonDocument>("discordlinks");
+        _liveGamePosts = db.GetCollection<BsonDocument>("livegameposts");
     }
 
     public async Task<CronResult> RefreshAsync(RefreshJob job, JobConfig config, CancellationToken cancellationToken)
     {
+        if (job == RefreshJob.Live)
+        {
+            return await PublishLiveGamesAsync(config, cancellationToken);
+        }
+
         var result = new CronResult();
         var filter = Builders<BsonDocument>.Filter.Eq("leaderboard.group", "burmese") &
                      Builders<BsonDocument>.Filter.Eq("leaderboard.status", "approved");
@@ -1249,6 +1402,128 @@ internal sealed class CSharpRefreshService
                 {
                     await Task.Delay(RetryAfterMs(ex) ?? 3000, cancellationToken);
                 }
+            }
+        }
+
+        return result;
+    }
+
+    private async Task<CronResult> PublishLiveGamesAsync(JobConfig config, CancellationToken cancellationToken)
+    {
+        var result = new CronResult();
+        if (!LiveGameDiscordConfigured())
+        {
+            throw new InvalidOperationException("Missing DISCORD_BOT_TOKEN or DISCORD_LIVE_GAMES_CHANNEL_ID.");
+        }
+
+        var now = DateTime.UtcNow;
+        var filter = Builders<BsonDocument>.Filter.Eq("leaderboard.group", "burmese") &
+                     Builders<BsonDocument>.Filter.Eq("leaderboard.status", "approved") &
+                     Builders<BsonDocument>.Filter.Ne("track.lol", false) &
+                     Builders<BsonDocument>.Filter.Type("puuid", BsonType.String);
+        var players = await _players.Find(filter)
+            .Sort(Builders<BsonDocument>.Sort.Descending("lastRefreshAt").Descending("updatedAt"))
+            .Limit(config.Limit)
+            .ToListAsync(cancellationToken);
+
+        result.Scanned = players.Count;
+        var liveGames = new Dictionary<string, (string Platform, JsonElement Game, List<BsonDocument> Players)>(StringComparer.Ordinal);
+
+        foreach (var player in players)
+        {
+            var id = player.GetValue("_id").AsObjectId;
+            var name = $"{ReadString(player, "gameName")}#{ReadString(player, "tagLine")}";
+            var puuid = ReadString(player, "puuid");
+            if (string.IsNullOrWhiteSpace(puuid))
+            {
+                result.Skipped++;
+                result.Players.Add(new CronPlayer { PlayerId = id.ToString(), Name = name, Status = "skipped" });
+                continue;
+            }
+
+            try
+            {
+                var found = await FindActiveGameAsync(puuid, ReadString(player, "platform"), cancellationToken);
+                if (found is null)
+                {
+                    result.Skipped++;
+                    result.Players.Add(new CronPlayer { PlayerId = id.ToString(), Name = name, Status = "skipped" });
+                }
+                else
+                {
+                    var key = $"{found.Value.Platform}:{GetLong(found.Value.Game, "gameId")}";
+                    if (!liveGames.TryGetValue(key, out var group))
+                    {
+                        group = (found.Value.Platform, found.Value.Game, []);
+                        liveGames[key] = group;
+                    }
+
+                    if (group.Players.All(p => p.GetValue("_id").AsObjectId != id))
+                    {
+                        group.Players.Add(player);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Fail++;
+                result.Errors.Add(new CronError { PlayerId = id.ToString(), Name = name, Error = ex.Message });
+                result.Players.Add(new CronPlayer { PlayerId = id.ToString(), Name = name, Status = "failed" });
+            }
+
+            if (config.DelayMs > 0)
+            {
+                await Task.Delay(config.DelayMs, cancellationToken);
+            }
+        }
+
+        foreach (var group in liveGames.Values)
+        {
+            var gameId = GetLong(group.Game, "gameId") ?? 0;
+            if (gameId <= 0) continue;
+
+            var existing = await _liveGamePosts.Find(
+                Builders<BsonDocument>.Filter.Eq("channelId", LiveGamesChannelId()) &
+                Builders<BsonDocument>.Filter.Eq("platform", group.Platform) &
+                Builders<BsonDocument>.Filter.Eq("gameId", gameId))
+                .FirstOrDefaultAsync(cancellationToken);
+            var riotIds = group.Players.Select(PlayerRiotId).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().ToList();
+            if (existing is not null)
+            {
+                result.Skipped++;
+                await _liveGamePosts.UpdateOneAsync(
+                    Builders<BsonDocument>.Filter.Eq("_id", existing.GetValue("_id").AsObjectId),
+                    Builders<BsonDocument>.Update
+                        .Set("lastSeenAt", now)
+                        .Set("riotIds", new BsonArray(riotIds)),
+                    cancellationToken: cancellationToken);
+                continue;
+            }
+
+            try
+            {
+                var message = await SendDiscordChannelMessageAsync(LiveGamesChannelId(), BuildLiveGameMessage(group.Platform, group.Game, group.Players), cancellationToken);
+                var messageId = GetString(message, "id");
+                await _liveGamePosts.InsertOneAsync(new BsonDocument
+                {
+                    ["channelId"] = LiveGamesChannelId(),
+                    ["platform"] = group.Platform,
+                    ["gameId"] = gameId,
+                    ["playerIds"] = new BsonArray(group.Players.Select(p => p.GetValue("_id").AsObjectId)),
+                    ["riotIds"] = new BsonArray(riotIds),
+                    ["messageId"] = messageId is null ? BsonNull.Value : messageId,
+                    ["postedAt"] = now,
+                    ["lastSeenAt"] = now,
+                    ["createdAt"] = now,
+                    ["updatedAt"] = now,
+                }, cancellationToken: cancellationToken);
+                result.Ok++;
+                result.Players.Add(new CronPlayer { Name = string.Join(", ", riotIds.Take(3)), Status = "ok" });
+            }
+            catch (Exception ex)
+            {
+                result.Fail++;
+                result.Errors.Add(new CronError { Name = $"{group.Platform}:{gameId}", Error = ex.Message });
             }
         }
 
@@ -1460,6 +1735,85 @@ internal sealed class CSharpRefreshService
             })),
             ["fetchedAt"] = now,
         };
+    }
+
+    private string BuildLiveGameMessage(string platform, JsonElement game, IReadOnlyList<BsonDocument> trackedPlayers)
+    {
+        var gameId = GetLong(game, "gameId") ?? 0;
+        var queueId = GetInt(game, "gameQueueConfigId");
+        var length = GetInt(game, "gameLength") ?? 0;
+        var startTime = GetLong(game, "gameStartTime");
+        var started = startTime is { } unixMs ? $"<t:{unixMs / 1000}:R>" : "now";
+        var participants = GetArray(game, "participants");
+
+        string ChampionLine(JsonElement participant)
+        {
+            var riotId = GetString(participant, "riotId") ?? GetString(participant, "summonerName") ?? "Unknown";
+            var championId = GetInt(participant, "championId");
+            return championId is null ? riotId : $"{riotId} - champion {championId}";
+        }
+
+        var trackedLines = trackedPlayers
+            .Select(player =>
+            {
+                var puuid = ReadString(player, "puuid");
+                var participant = participants.FirstOrDefault(p => string.Equals(GetString(p, "puuid"), puuid, StringComparison.OrdinalIgnoreCase));
+                var championId = participant.ValueKind == JsonValueKind.Undefined ? null : GetInt(participant, "championId");
+                var profileUrl = $"{AppBaseUrl()}{PlayerPath(player)}";
+                return championId is null
+                    ? $"• [{PlayerRiotId(player)}]({profileUrl})"
+                    : $"• [{PlayerRiotId(player)}]({profileUrl}) - champion {championId}";
+            })
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .Take(8)
+            .ToList();
+
+        var blue = participants.Where(p => GetInt(p, "teamId") == 100).Take(5).Select(ChampionLine).ToList();
+        var red = participants.Where(p => GetInt(p, "teamId") == 200).Take(5).Select(ChampionLine).ToList();
+
+        return string.Join("\n", new[]
+        {
+            $"**Live now: {QueueName(queueId)} on {platform.ToUpperInvariant()}**",
+            $"Game {gameId} - {FormatGameLength(length)} - started {started}",
+            "",
+            string.Join("\n", trackedLines),
+            "",
+            blue.Count > 0 ? $"Blue: {string.Join(", ", blue)}" : "",
+            red.Count > 0 ? $"Red: {string.Join(", ", red)}" : "",
+        }.Where(line => line.Length > 0));
+    }
+
+    private static string QueueName(int? queueId) => queueId switch
+    {
+        420 => "Ranked Solo/Duo",
+        440 => "Ranked Flex",
+        400 => "Draft Pick",
+        430 => "Blind Pick",
+        450 => "ARAM",
+        1700 => "Arena",
+        0 or null => "Custom",
+        _ => $"Queue {queueId}",
+    };
+
+    private static string FormatGameLength(int seconds)
+    {
+        var safe = Math.Max(0, seconds);
+        return $"{safe / 60}:{safe % 60:00}";
+    }
+
+    private static string PlayerRiotId(BsonDocument player)
+    {
+        return $"{ReadString(player, "gameName")}#{ReadString(player, "tagLine")}";
+    }
+
+    private static string PlayerPath(BsonDocument player)
+    {
+        return $"/p/{Uri.EscapeDataString(ReadString(player, "gameName") ?? "")}/{Uri.EscapeDataString(ReadString(player, "tagLine") ?? "")}";
+    }
+
+    private string AppBaseUrl()
+    {
+        return (Env("NEXT_PUBLIC_APP_URL") ?? Env("APP_BASE_URL") ?? "https://rift-board-myanmar.vercel.app").TrimEnd('/');
     }
 
     private async Task SyncDiscordGuildRolesForPlayerAsync(ObjectId playerId, CancellationToken cancellationToken)
@@ -1678,6 +2032,20 @@ internal sealed class CSharpRefreshService
         throw new InvalidOperationException($"Discord API {(int)response.StatusCode}: {ParseDiscordError(text, response.ReasonPhrase ?? "Request failed")}");
     }
 
+    private async Task<JsonElement> SendDiscordChannelMessageAsync(string channelId, string content, CancellationToken cancellationToken)
+    {
+        using var body = new StringContent(JsonSerializer.Serialize(new
+        {
+            content,
+            allowed_mentions = new { parse = Array.Empty<string>() },
+        }), System.Text.Encoding.UTF8, "application/json");
+        return await DiscordApiAsync(
+            HttpMethod.Post,
+            $"/channels/{Uri.EscapeDataString(channelId)}/messages",
+            body,
+            cancellationToken);
+    }
+
     private BsonDocument BuildGuildRankRoleSnapshot(BsonDocument player)
     {
         var snapshot = new BsonDocument();
@@ -1696,9 +2064,19 @@ internal sealed class CSharpRefreshService
                !string.IsNullOrWhiteSpace(Env("DISCORD_GUILD_ID"));
     }
 
+    private bool LiveGameDiscordConfigured()
+    {
+        return !string.IsNullOrWhiteSpace(Env("DISCORD_BOT_TOKEN")) &&
+               !string.IsNullOrWhiteSpace(LiveGamesChannelId());
+    }
+
     private string DiscordBotToken() => MustEnv("DISCORD_BOT_TOKEN");
 
     private string DiscordGuildId() => MustEnv("DISCORD_GUILD_ID");
+
+    private string LiveGamesChannelId() => Env("DISCORD_LIVE_GAMES_CHANNEL_ID")?.Trim() is { Length: > 0 } value
+        ? value
+        : "1504353915091681360";
 
     private string RankRolePrefix() => Env("DISCORD_RANK_ROLE_PREFIX")?.Trim() ?? "Rank";
 
@@ -1813,6 +2191,33 @@ internal sealed class CSharpRefreshService
         }
 
         return JsonDocument.Parse("[]").RootElement.Clone();
+    }
+
+    private async Task<(string Platform, JsonElement Game)?> FindActiveGameAsync(string puuid, string? preferredPlatform, CancellationToken cancellationToken)
+    {
+        var platforms = new List<string>();
+        if (!string.IsNullOrWhiteSpace(preferredPlatform) && preferredPlatform != "auto")
+        {
+            platforms.Add(preferredPlatform);
+        }
+        platforms.AddRange(SeaPlatforms.Where(p => !platforms.Contains(p)));
+
+        foreach (var platform in platforms)
+        {
+            try
+            {
+                var game = await RiotGetJsonAsync($"https://{platform}.api.riotgames.com/lol/spectator/v5/active-games/by-summoner/{Uri.EscapeDataString(puuid)}", "lol", cancellationToken);
+                return (platform, game);
+            }
+            catch (RiotApiException ex) when (ex.Status == 404 || IsDecryptingBadRequest(ex))
+            {
+            }
+            catch (HttpRequestException)
+            {
+            }
+        }
+
+        return null;
     }
 
     private async Task<JsonElement> RiotGetJsonAsync(string url, string game, CancellationToken cancellationToken)
@@ -2062,10 +2467,13 @@ internal sealed record TrayStatus
     public string Current { get; init; } = "Idle";
     public string RankStatus { get; init; } = "Not run yet";
     public string TftStatus { get; init; } = "Not run yet";
+    public string LiveStatus { get; init; } = "Not run yet";
     public string RankLast { get; init; } = "None yet";
     public string TftLast { get; init; } = "None yet";
+    public string LiveLast { get; init; } = "None yet";
     public string RankNext { get; init; } = "Pending";
     public string TftNext { get; init; } = "Pending";
+    public string LiveNext { get; init; } = "Pending";
     public string Error { get; init; } = "None";
 }
 
@@ -2125,6 +2533,7 @@ internal sealed class AgentConfig
     public string LocalAppUrl { get; init; } = "http://127.0.0.1:43117";
     public JobConfig RankJob { get; init; } = new() { SyncMatches = true, SyncTftMatches = false };
     public JobConfig TftJob { get; init; } = new() { SyncMatches = false, SyncTftMatches = true };
+    public JobConfig LiveJob { get; init; } = new() { IntervalSec = 600, Limit = 80, DelayMs = 350, SyncMatches = false, SyncTftMatches = false, MatchesCount = 1 };
     public int StartupTimeoutSec { get; init; } = 120;
 
     public AgentConfig Normalize()
@@ -2134,6 +2543,7 @@ internal sealed class AgentConfig
             LocalAppUrl = NormalizeLocalAppUrl(LocalAppUrl),
             RankJob = RankJob.Normalize() with { SyncTftMatches = false },
             TftJob = TftJob.Normalize() with { SyncMatches = false, SyncTftMatches = true },
+            LiveJob = LiveJob.Normalize() with { SyncMatches = false, SyncTftMatches = false, MatchesCount = 1 },
             StartupTimeoutSec = Math.Max(10, Math.Min(1800, StartupTimeoutSec)),
         };
     }
