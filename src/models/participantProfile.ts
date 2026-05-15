@@ -10,6 +10,9 @@ export type ParticipantProfileDoc = {
   summonerLevel?: number;
   solo?: RankSnapshot;
   flex?: RankSnapshot;
+  source?: "match-history" | "live-game" | "manual";
+  origin?: "myanmar" | "foreigner" | "unknown";
+  riftboardPlayer?: boolean;
   lastSeenAt?: Date;
   lastRankFetchAt?: Date;
 };
@@ -36,6 +39,9 @@ const ParticipantProfileSchema = new Schema<ParticipantProfileDoc>(
     summonerLevel: Number,
     solo: { type: RankSnapshotSchema, default: () => ({}) },
     flex: { type: RankSnapshotSchema, default: () => ({}) },
+    source: { type: String, enum: ["match-history", "live-game", "manual"], default: "match-history" },
+    origin: { type: String, enum: ["myanmar", "foreigner", "unknown"], default: "unknown" },
+    riftboardPlayer: { type: Boolean, default: false },
     lastSeenAt: Date,
     lastRankFetchAt: Date,
   },
@@ -45,6 +51,7 @@ const ParticipantProfileSchema = new Schema<ParticipantProfileDoc>(
 ParticipantProfileSchema.index({ lastSeenAt: -1 });
 ParticipantProfileSchema.index({ lastRankFetchAt: -1 });
 ParticipantProfileSchema.index({ gameName: 1, tagLine: 1 });
+ParticipantProfileSchema.index({ source: 1, origin: 1, riftboardPlayer: 1 });
 
 export const ParticipantProfile =
   (mongoose.models.ParticipantProfile as mongoose.Model<ParticipantProfileDoc>) ??

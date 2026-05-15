@@ -253,7 +253,8 @@ internal sealed class TrayContext : ApplicationContext
                 _baseDirectory,
                 SaveSettingsAsync,
                 StartLoopAsync,
-                StopLoopAsync);
+                StopLoopAsync,
+                SendTestLivePostAsync);
         }
 
         PushConfigToSettingsForm(AgentConfig.LoadOrCreate(_configPath));
@@ -275,6 +276,12 @@ internal sealed class TrayContext : ApplicationContext
         PushConfigToSettingsForm(normalized);
         PushStatusToSettingsForm();
         ShowNotification("RiftBoard Refresh", "Settings saved. Changes apply on the next job cycle.", ToolTipIcon.Info);
+    }
+
+    private async Task SendTestLivePostAsync()
+    {
+        await new CSharpRefreshService(ResolveRepoRoot(_baseDirectory)).SendTestLivePostAsync(CancellationToken.None);
+        ShowNotification("RiftBoard Refresh", "Test live post sent.", ToolTipIcon.Info);
     }
 
     private void PushConfigToSettingsForm(AgentConfig config)
@@ -313,6 +320,24 @@ internal sealed class TrayContext : ApplicationContext
         _notifyIcon.Dispose();
         _trayIcon.Dispose();
         base.ExitThreadCore();
+    }
+
+    private static string ResolveRepoRoot(string baseDirectory)
+    {
+        var current = new DirectoryInfo(baseDirectory);
+        while (current is not null)
+        {
+            var packageJsonPath = Path.Combine(current.FullName, "package.json");
+            var srcPath = Path.Combine(current.FullName, "src");
+            if (File.Exists(packageJsonPath) && Directory.Exists(srcPath))
+            {
+                return current.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        throw new InvalidOperationException("Could not resolve the RiftBoard repo root.");
     }
 
     private static Icon? LoadTrayIcon(string baseDirectory)
@@ -359,6 +384,7 @@ internal sealed class SettingsForm : Form
     private readonly Func<AgentConfig, Task> _saveAsync;
     private readonly Func<Task> _startAsync;
     private readonly Func<Task> _stopAsync;
+    private readonly Func<Task> _testLivePostAsync;
     private readonly string _baseDirectory;
     private AgentConfig _config = new();
     private bool _allowClose;
@@ -402,11 +428,13 @@ internal sealed class SettingsForm : Form
         string baseDirectory,
         Func<AgentConfig, Task> saveAsync,
         Func<Task> startAsync,
-        Func<Task> stopAsync)
+        Func<Task> stopAsync,
+        Func<Task> testLivePostAsync)
     {
         _saveAsync = saveAsync;
         _startAsync = startAsync;
         _stopAsync = stopAsync;
+        _testLivePostAsync = testLivePostAsync;
         _baseDirectory = baseDirectory;
 
         Text = "RiftBoard Refresh";
@@ -416,7 +444,7 @@ internal sealed class SettingsForm : Form
         MaximizeBox = false;
         MinimizeBox = false;
         ShowInTaskbar = false;
-        ClientSize = new Size(1120, 720);
+        ClientSize = new Size(1280, 780);
 
         FormClosing += (_, e) =>
         {
@@ -579,6 +607,8 @@ internal sealed class SettingsForm : Form
         tftLogButton.Click += (_, _) => ShowLogDialog(Path.Combine(_baseDirectory, "tft.log"), "TFT Log");
         var liveLogButton = new Button { AutoSize = true, Text = "Live Log" };
         liveLogButton.Click += (_, _) => ShowLogDialog(Path.Combine(_baseDirectory, "live.log"), "Live Games Log");
+        var testLiveButton = new Button { AutoSize = true, Text = "Test Live Post" };
+        testLiveButton.Click += async (_, _) => await RunCommandAsync(_testLivePostAsync);
 
         buttonBar.Controls.Add(closeButton);
         buttonBar.Controls.Add(_saveButton);
@@ -589,6 +619,7 @@ internal sealed class SettingsForm : Form
         buttonBar.Controls.Add(rankLogButton);
         buttonBar.Controls.Add(tftLogButton);
         buttonBar.Controls.Add(liveLogButton);
+        buttonBar.Controls.Add(testLiveButton);
         root.Controls.Add(buttonBar, 0, 4);
 
         Controls.Add(root);
@@ -790,7 +821,7 @@ internal sealed class SettingsForm : Form
         var footer = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2 };
         footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        var hint = new Label { AutoSize = true, MaximumSize = new Size(350, 0), Margin = new Padding(12, 6, 0, 0) };
+        var hint = new Label { AutoSize = true, MaximumSize = new Size(300, 0), Margin = new Padding(12, 6, 0, 0) };
         footer.Controls.Add(enabled, 0, 0);
         footer.Controls.Add(hint, 1, 0);
         root.Controls.Add(footer, 0, 3);
@@ -1272,6 +1303,7 @@ internal sealed class RefreshLoop
     {
         return message.Length <= 220 ? message : $"{message[..220]}...";
     }
+
 }
 
 internal enum RefreshJob
@@ -1294,6 +1326,7 @@ internal sealed record DiscordRoleSyncResult(BsonDocument Snapshot, string? Assi
 
 internal sealed class CSharpRefreshService
 {
+    private const int LivePostFormatVersion = 3;
     private static readonly string[] SeaPlatforms = ["sg2", "th2", "ph2", "vn2", "tw2"];
     private static readonly string[] ManagedRankTiers =
     [
@@ -1337,6 +1370,10 @@ internal sealed class CSharpRefreshService
     private readonly IMongoCollection<BsonDocument> _tftPlayerMatches;
     private readonly IMongoCollection<BsonDocument> _discordLinks;
     private readonly IMongoCollection<BsonDocument> _liveGamePosts;
+    private readonly IMongoCollection<BsonDocument> _participantProfiles;
+    private Dictionary<int, string>? _championNames;
+    private Dictionary<int, string>? _championIcons;
+    private DateTime _championNamesLoadedAt;
 
     public CSharpRefreshService(string repoRoot)
     {
@@ -1352,6 +1389,7 @@ internal sealed class CSharpRefreshService
         _tftPlayerMatches = db.GetCollection<BsonDocument>("tftplayermatches");
         _discordLinks = db.GetCollection<BsonDocument>("discordlinks");
         _liveGamePosts = db.GetCollection<BsonDocument>("livegameposts");
+        _participantProfiles = db.GetCollection<BsonDocument>("participantprofiles");
     }
 
     public async Task<CronResult> RefreshAsync(RefreshJob job, JobConfig config, CancellationToken cancellationToken)
@@ -1408,6 +1446,59 @@ internal sealed class CSharpRefreshService
         return result;
     }
 
+    public async Task SendTestLivePostAsync(CancellationToken cancellationToken)
+    {
+        if (!LiveGameDiscordConfigured())
+        {
+            throw new InvalidOperationException("Missing DISCORD_BOT_TOKEN or DISCORD_LIVE_GAMES_CHANNEL_ID.");
+        }
+
+        var dummyRiotIds = new[]
+        {
+            ("Zet", "kat22"),
+            ("N A n G", "520"),
+            ("ISuccPykeHarpoon", "Augh"),
+            ("Aung36", "412"),
+            ("Skull Shogun", "2652"),
+        };
+        var allowedUserIds = await LoadDiscordUserIdsForRiotIdsAsync(dummyRiotIds, cancellationToken);
+        var content = allowedUserIds.Length > 0
+            ? string.Join(" ", allowedUserIds.Select(id => $"<@{id}>"))
+            : "Zet#kat22, N A n G#520, ISuccPykeHarpoon#Augh, Aung36#412, Skull Shogun#2652";
+
+        var message = new LiveDiscordMessage(content, [
+            new Dictionary<string, object?>
+            {
+                ["title"] = "Ranked Solo/Duo live on SG2",
+                ["description"] = $"Dummy layout test - {DateTimeOffset.Now:hh:mm tt}",
+                ["color"] = 0x4ba3ff,
+                ["thumbnail"] = new Dictionary<string, object?>
+                {
+                    ["url"] = "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Seraphine_0.jpg",
+                },
+                ["fields"] = new[]
+                {
+                    new Dictionary<string, object?>
+                    {
+                        ["name"] = "Blue",
+                        ["value"] = $"Seraphine - Zet#kat22 - {RankLabel("DIAMOND", "IV", 16)}\nKha'Zix - N A n G#520 - {RankLabel("EMERALD", "III", 71)}\nMordekaiser - ISuccPykeHarpoon#Augh - {RankLabel("PLATINUM", "IV", 37)}\nHwei - Aung36#412 - {RankLabel("DIAMOND", "II", 67)}\nCho'Gath - Skull Shogun#2652 - {RankLabel("MASTER", "I", 29)}",
+                        ["inline"] = false,
+                    },
+                    new Dictionary<string, object?>
+                    {
+                        ["name"] = "Red",
+                        ["value"] = $"Aphelios - REDNick#1493 - {RankLabel("MASTER", "I", 112)}\nNunu & Willump - tiny url enjoyer#00000 - {RankLabel("EMERALD", "II", 9)}\nK'Sante - กินข้าวยัง#TH2 - {RankLabel("PLATINUM", "I", 63)}\nVel'Koz - iiilllIIIIllIlIIl#enemy - {RankLabel("GOLD", "IV", 7)}\nDr. Mundo - mundo mundo mundo mundo#MUNDO",
+                        ["inline"] = false,
+                    },
+                },
+                ["footer"] = new Dictionary<string, object?> { ["text"] = "RiftBoard live games test" },
+                ["timestamp"] = DateTimeOffset.UtcNow.ToString("O"),
+            }
+        ], allowedUserIds);
+
+        await SendDiscordChannelMessageAsync(LiveGamesChannelId(), message, cancellationToken);
+    }
+
     private async Task<CronResult> PublishLiveGamesAsync(JobConfig config, CancellationToken cancellationToken)
     {
         var result = new CronResult();
@@ -1417,14 +1508,43 @@ internal sealed class CSharpRefreshService
         }
 
         var now = DateTime.UtcNow;
-        var filter = Builders<BsonDocument>.Filter.Eq("leaderboard.group", "burmese") &
-                     Builders<BsonDocument>.Filter.Eq("leaderboard.status", "approved") &
-                     Builders<BsonDocument>.Filter.Ne("track.lol", false) &
-                     Builders<BsonDocument>.Filter.Type("puuid", BsonType.String);
-        var players = await _players.Find(filter)
+        var verifiedLinks = await _discordLinks.Find(
+            Builders<BsonDocument>.Filter.Eq("verifiedBinding", true) &
+            Builders<BsonDocument>.Filter.In("verificationSource", new[] { "discord_connections", "riot_rso", "legacy_manual" }))
+            .ToListAsync(cancellationToken);
+        var linksByPlayerId = verifiedLinks
+            .Where(link => link.TryGetValue("playerId", out var playerId) && playerId.IsObjectId)
+            .GroupBy(link => link.GetValue("playerId").AsObjectId)
+            .ToDictionary(group => group.Key, group => group.ToList());
+        var linkedPlayerIds = linksByPlayerId.Keys.ToList();
+
+        var approvedFilter = Builders<BsonDocument>.Filter.Eq("leaderboard.group", "burmese") &
+                             Builders<BsonDocument>.Filter.Eq("leaderboard.status", "approved") &
+                             Builders<BsonDocument>.Filter.Ne("track.lol", false) &
+                             Builders<BsonDocument>.Filter.Type("puuid", BsonType.String);
+        var linkedFilter = linkedPlayerIds.Count == 0
+            ? Builders<BsonDocument>.Filter.Where(_ => false)
+            : Builders<BsonDocument>.Filter.In("_id", linkedPlayerIds) &
+              Builders<BsonDocument>.Filter.Ne("track.lol", false) &
+              Builders<BsonDocument>.Filter.Type("puuid", BsonType.String);
+        var players = await _players.Find(linkedFilter | approvedFilter)
             .Sort(Builders<BsonDocument>.Sort.Descending("lastRefreshAt").Descending("updatedAt"))
             .Limit(config.Limit)
             .ToListAsync(cancellationToken);
+        foreach (var player in players)
+        {
+            var playerId = player.GetValue("_id").AsObjectId;
+            if (!linksByPlayerId.TryGetValue(playerId, out var links)) continue;
+            player["liveDiscordUsers"] = new BsonArray(links
+                .Select(link => new BsonDocument
+                {
+                    ["discordUserId"] = ReadString(link, "discordUserId") ?? "",
+                    ["discordUsername"] = ReadString(link, "discordUsername") ?? "",
+                })
+                .Where(doc => !string.IsNullOrWhiteSpace(doc["discordUserId"].AsString))
+                .GroupBy(doc => doc["discordUserId"].AsString)
+                .Select(group => group.First()));
+        }
 
         result.Scanned = players.Count;
         var liveGames = new Dictionary<string, (string Platform, JsonElement Game, List<BsonDocument> Players)>(StringComparer.Ordinal);
@@ -1491,18 +1611,43 @@ internal sealed class CSharpRefreshService
             if (existing is not null)
             {
                 result.Skipped++;
-                await _liveGamePosts.UpdateOneAsync(
-                    Builders<BsonDocument>.Filter.Eq("_id", existing.GetValue("_id").AsObjectId),
-                    Builders<BsonDocument>.Update
-                        .Set("lastSeenAt", now)
-                        .Set("riotIds", new BsonArray(riotIds)),
-                    cancellationToken: cancellationToken);
+                var existingFormatVersion = existing.TryGetValue("formatVersion", out var rawVersion) && rawVersion.IsNumeric
+                    ? rawVersion.ToInt32()
+                    : 0;
+                var messageId = ReadString(existing, "messageId");
+                if (existingFormatVersion < LivePostFormatVersion && !string.IsNullOrWhiteSpace(messageId))
+                {
+                    var knownPlayers = await LoadKnownPlayersForLiveGameAsync(group.Platform, group.Game, group.Players, cancellationToken);
+                    await EditDiscordChannelMessageAsync(
+                        LiveGamesChannelId(),
+                        messageId,
+                        await BuildLiveGameMessageAsync(group.Platform, group.Game, group.Players, knownPlayers, cancellationToken),
+                        cancellationToken);
+                    await _liveGamePosts.UpdateOneAsync(
+                        Builders<BsonDocument>.Filter.Eq("_id", existing.GetValue("_id").AsObjectId),
+                        Builders<BsonDocument>.Update
+                            .Set("lastSeenAt", now)
+                            .Set("updatedAt", now)
+                            .Set("riotIds", new BsonArray(riotIds))
+                            .Set("formatVersion", LivePostFormatVersion),
+                        cancellationToken: cancellationToken);
+                }
+                else
+                {
+                    await _liveGamePosts.UpdateOneAsync(
+                        Builders<BsonDocument>.Filter.Eq("_id", existing.GetValue("_id").AsObjectId),
+                        Builders<BsonDocument>.Update
+                            .Set("lastSeenAt", now)
+                            .Set("riotIds", new BsonArray(riotIds)),
+                        cancellationToken: cancellationToken);
+                }
                 continue;
             }
 
             try
             {
-                var message = await SendDiscordChannelMessageAsync(LiveGamesChannelId(), BuildLiveGameMessage(group.Platform, group.Game, group.Players), cancellationToken);
+                var knownPlayers = await LoadKnownPlayersForLiveGameAsync(group.Platform, group.Game, group.Players, cancellationToken);
+                var message = await SendDiscordChannelMessageAsync(LiveGamesChannelId(), await BuildLiveGameMessageAsync(group.Platform, group.Game, group.Players, knownPlayers, cancellationToken), cancellationToken);
                 var messageId = GetString(message, "id");
                 await _liveGamePosts.InsertOneAsync(new BsonDocument
                 {
@@ -1514,6 +1659,7 @@ internal sealed class CSharpRefreshService
                     ["messageId"] = messageId is null ? BsonNull.Value : messageId,
                     ["postedAt"] = now,
                     ["lastSeenAt"] = now,
+                    ["formatVersion"] = LivePostFormatVersion,
                     ["createdAt"] = now,
                     ["updatedAt"] = now,
                 }, cancellationToken: cancellationToken);
@@ -1528,6 +1674,220 @@ internal sealed class CSharpRefreshService
         }
 
         return result;
+    }
+
+    private async Task<string[]> LoadDiscordUserIdsForRiotIdsAsync(
+        IReadOnlyList<(string GameName, string TagLine)> riotIds,
+        CancellationToken cancellationToken)
+    {
+        var playerFilters = riotIds
+            .Select(riotId =>
+                Builders<BsonDocument>.Filter.Eq("gameName", riotId.GameName) &
+                Builders<BsonDocument>.Filter.Eq("tagLine", riotId.TagLine))
+            .ToList();
+        if (playerFilters.Count == 0) return [];
+
+        var players = await _players.Find(Builders<BsonDocument>.Filter.Or(playerFilters))
+            .Project(Builders<BsonDocument>.Projection.Include("_id").Include("gameName").Include("tagLine"))
+            .ToListAsync(cancellationToken);
+        var playersByRiotId = players
+            .Where(player => player.TryGetValue("_id", out var id) && id.IsObjectId)
+            .ToDictionary(PlayerRiotId, player => player.GetValue("_id").AsObjectId, StringComparer.OrdinalIgnoreCase);
+        var orderedPlayerIds = riotIds
+            .Select(riotId => $"{riotId.GameName}#{riotId.TagLine}")
+            .Where(key => playersByRiotId.ContainsKey(key))
+            .Select(key => playersByRiotId[key])
+            .Distinct()
+            .ToList();
+        if (orderedPlayerIds.Count == 0) return [];
+
+        var links = await _discordLinks.Find(
+                Builders<BsonDocument>.Filter.In("playerId", orderedPlayerIds) &
+                Builders<BsonDocument>.Filter.Eq("verifiedBinding", true) &
+                Builders<BsonDocument>.Filter.Type("discordUserId", BsonType.String))
+            .Project(Builders<BsonDocument>.Projection.Include("discordUserId").Include("playerId"))
+            .ToListAsync(cancellationToken);
+        var linksByPlayerId = links
+            .Where(link => link.TryGetValue("playerId", out var playerId) && playerId.IsObjectId)
+            .GroupBy(link => link.GetValue("playerId").AsObjectId)
+            .ToDictionary(group => group.Key, group => group.ToList());
+
+        return orderedPlayerIds
+            .SelectMany(playerId => linksByPlayerId.TryGetValue(playerId, out var playerLinks) ? playerLinks : [])
+            .Select(link => ReadString(link, "discordUserId"))
+            .Where(id => !string.IsNullOrWhiteSpace(id) && id.All(char.IsDigit))
+            .Select(id => id!)
+            .Distinct(StringComparer.Ordinal)
+            .Take(5)
+            .ToArray();
+    }
+
+    private async Task<List<BsonDocument>> LoadKnownPlayersForLiveGameAsync(
+        string platform,
+        JsonElement game,
+        IReadOnlyList<BsonDocument> trackedPlayers,
+        CancellationToken cancellationToken)
+    {
+        var participants = GetArray(game, "participants");
+        var puuids = participants
+            .Select(participant => GetString(participant, "puuid"))
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var riotIds = participants
+            .Select(participant => GetString(participant, "riotId"))
+            .Where(value => !string.IsNullOrWhiteSpace(value) && value!.Contains('#'))
+            .Select(value => value!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var filters = new List<FilterDefinition<BsonDocument>>();
+        if (puuids.Count > 0)
+        {
+            filters.Add(Builders<BsonDocument>.Filter.In("puuid", puuids));
+        }
+
+        foreach (var riotId in riotIds)
+        {
+            var hash = riotId.LastIndexOf('#');
+            if (hash <= 0 || hash >= riotId.Length - 1) continue;
+            var gameName = riotId[..hash];
+            var tagLine = riotId[(hash + 1)..];
+            filters.Add(
+                Builders<BsonDocument>.Filter.Eq("gameName", gameName) &
+                Builders<BsonDocument>.Filter.Eq("tagLine", tagLine));
+        }
+
+        var players = filters.Count == 0
+            ? new List<BsonDocument>()
+            : await _players.Find(Builders<BsonDocument>.Filter.Or(filters))
+                .Project(Builders<BsonDocument>.Projection.Include("gameName").Include("tagLine").Include("puuid").Include("solo"))
+                .ToListAsync(cancellationToken);
+        await AttachLiveDiscordUsersAsync(players, cancellationToken);
+        var playerPuuids = new HashSet<string>(
+            players.Concat(trackedPlayers)
+                .Select(player => ReadString(player, "puuid"))
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value!),
+            StringComparer.OrdinalIgnoreCase);
+        var participantProfiles = puuids.Count == 0
+            ? new List<BsonDocument>()
+            : await _participantProfiles.Find(Builders<BsonDocument>.Filter.In("puuid", puuids))
+                .Project(Builders<BsonDocument>.Projection.Include("gameName").Include("tagLine").Include("puuid").Include("solo").Include("lastRankFetchAt"))
+                .ToListAsync(cancellationToken);
+        var profilesByPuuid = participantProfiles
+            .Select(profile => new { Puuid = ReadString(profile, "puuid"), Profile = profile })
+            .Where(item => !string.IsNullOrWhiteSpace(item.Puuid))
+            .ToDictionary(item => item.Puuid!, item => item.Profile, StringComparer.OrdinalIgnoreCase);
+
+        var now = DateTime.UtcNow;
+        foreach (var participant in participants)
+        {
+            var puuid = GetString(participant, "puuid");
+            if (string.IsNullOrWhiteSpace(puuid) || playerPuuids.Contains(puuid))
+            {
+                continue;
+            }
+
+            var riotId = GetString(participant, "riotId");
+            var (gameName, tagLine) = SplitRiotId(riotId);
+            profilesByPuuid.TryGetValue(puuid, out var existingProfile);
+            var needsRankFetch = existingProfile is null || ParticipantRankCacheStale(existingProfile, now);
+            var profile = existingProfile is not null ? new BsonDocument(existingProfile) : new BsonDocument
+            {
+                ["puuid"] = puuid,
+            };
+            if (!string.IsNullOrWhiteSpace(gameName)) profile["gameName"] = gameName;
+            if (!string.IsNullOrWhiteSpace(tagLine)) profile["tagLine"] = tagLine;
+            profile["platform"] = platform;
+            profile["lastSeenAt"] = now;
+            profile["source"] = "live-game";
+            profile["origin"] = "foreigner";
+            profile["riftboardPlayer"] = false;
+            profile.Remove("_id");
+
+            if (needsRankFetch)
+            {
+                try
+                {
+                    var entries = await RiotGetJsonAsync($"https://{platform}.api.riotgames.com/lol/league/v4/entries/by-puuid/{Uri.EscapeDataString(puuid)}", "lol", cancellationToken);
+                    profile["solo"] = BuildLeagueSnapshot(entries, "RANKED_SOLO_5x5", now);
+                    profile["flex"] = BuildLeagueSnapshot(entries, "RANKED_FLEX_SR", now);
+                    profile["lastRankFetchAt"] = now;
+                }
+                catch (RiotApiException ex) when (ex.Status == 404 || IsDecryptingBadRequest(ex))
+                {
+                    profile["lastRankFetchAt"] = now;
+                }
+            }
+
+            await _participantProfiles.UpdateOneAsync(
+                Builders<BsonDocument>.Filter.Eq("puuid", puuid),
+                new BsonDocument
+                {
+                    ["$set"] = profile,
+                    ["$setOnInsert"] = new BsonDocument
+                    {
+                        ["createdAt"] = now,
+                    },
+                },
+                new UpdateOptions { IsUpsert = true },
+                cancellationToken);
+            profilesByPuuid[puuid] = profile;
+        }
+
+        var byId = new Dictionary<string, BsonDocument>(StringComparer.Ordinal);
+        foreach (var player in trackedPlayers.Concat(players).Concat(profilesByPuuid.Values))
+        {
+            if (player.TryGetValue("_id", out var id))
+            {
+                var key = id.ToString();
+                if (!string.IsNullOrWhiteSpace(key)) byId[key] = player;
+            }
+            else
+            {
+                byId[PlayerRiotId(player)] = player;
+            }
+        }
+
+        return byId.Values.ToList();
+    }
+
+    private async Task AttachLiveDiscordUsersAsync(List<BsonDocument> players, CancellationToken cancellationToken)
+    {
+        var playerIds = players
+            .Where(player => player.TryGetValue("_id", out var id) && id.IsObjectId)
+            .Select(player => player.GetValue("_id").AsObjectId)
+            .Distinct()
+            .ToList();
+        if (playerIds.Count == 0) return;
+
+        var links = await _discordLinks.Find(
+                Builders<BsonDocument>.Filter.In("playerId", playerIds) &
+                Builders<BsonDocument>.Filter.Eq("verifiedBinding", true) &
+                Builders<BsonDocument>.Filter.Type("discordUserId", BsonType.String))
+            .Project(Builders<BsonDocument>.Projection.Include("discordUserId").Include("discordUsername").Include("playerId"))
+            .ToListAsync(cancellationToken);
+        var linksByPlayerId = links
+            .Where(link => link.TryGetValue("playerId", out var playerId) && playerId.IsObjectId)
+            .GroupBy(link => link.GetValue("playerId").AsObjectId)
+            .ToDictionary(group => group.Key, group => group.ToList());
+
+        foreach (var player in players)
+        {
+            if (!player.TryGetValue("_id", out var rawId) || !rawId.IsObjectId) continue;
+            if (!linksByPlayerId.TryGetValue(rawId.AsObjectId, out var playerLinks)) continue;
+            player["liveDiscordUsers"] = new BsonArray(playerLinks
+                .Select(link => new BsonDocument
+                {
+                    ["discordUserId"] = ReadString(link, "discordUserId") ?? "",
+                    ["discordUsername"] = ReadString(link, "discordUsername") ?? "",
+                })
+                .Where(doc => !string.IsNullOrWhiteSpace(doc["discordUserId"].AsString))
+                .GroupBy(doc => doc["discordUserId"].AsString)
+                .Select(group => group.First()));
+        }
     }
 
     private async Task RefreshRankAsync(BsonDocument player, JobConfig config, CancellationToken cancellationToken)
@@ -1606,6 +1966,50 @@ internal sealed class CSharpRefreshService
         await InsertRankEntriesAsync(playerId, entries, now, cancellationToken);
         await InsertRankEntriesAsync(playerId, tftLeague, now, cancellationToken);
         await SyncDiscordGuildRolesForPlayerAsync(playerId, cancellationToken);
+    }
+
+    private static BsonDocument BuildLeagueSnapshot(JsonElement entries, string queue, DateTime now)
+    {
+        if (entries.ValueKind == JsonValueKind.Array)
+        {
+            var entry = entries.EnumerateArray().FirstOrDefault(e => string.Equals(GetString(e, "queueType"), queue, StringComparison.OrdinalIgnoreCase));
+            if (entry.ValueKind != JsonValueKind.Undefined)
+            {
+                return new BsonDocument
+                {
+                    ["tier"] = GetString(entry, "tier") ?? "",
+                    ["division"] = GetString(entry, "rank") ?? "",
+                    ["lp"] = GetInt(entry, "leaguePoints") ?? 0,
+                    ["wins"] = GetInt(entry, "wins") ?? 0,
+                    ["losses"] = GetInt(entry, "losses") ?? 0,
+                    ["fetchedAt"] = now,
+                };
+            }
+        }
+
+        return new BsonDocument
+        {
+            ["fetchedAt"] = now,
+        };
+    }
+
+    private static bool ParticipantRankCacheStale(BsonDocument profile, DateTime now)
+    {
+        var fetchedAt = profile.TryGetValue("lastRankFetchAt", out var rankFetch) && rankFetch.IsValidDateTime
+            ? rankFetch.ToUniversalTime()
+            : profile.TryGetValue("solo", out var solo) && solo.IsBsonDocument &&
+              solo.AsBsonDocument.TryGetValue("fetchedAt", out var soloFetch) && soloFetch.IsValidDateTime
+                ? soloFetch.ToUniversalTime()
+                : (DateTime?)null;
+        return fetchedAt is null || now - fetchedAt.Value > TimeSpan.FromHours(24);
+    }
+
+    private static (string? GameName, string? TagLine) SplitRiotId(string? riotId)
+    {
+        var value = (riotId ?? "").Trim();
+        var hash = value.LastIndexOf('#');
+        if (hash <= 0 || hash >= value.Length - 1) return (null, null);
+        return (value[..hash], value[(hash + 1)..]);
     }
 
     private async Task RefreshTftMatchesAsync(BsonDocument player, JobConfig config, CancellationToken cancellationToken)
@@ -1737,63 +2141,362 @@ internal sealed class CSharpRefreshService
         };
     }
 
-    private string BuildLiveGameMessage(string platform, JsonElement game, IReadOnlyList<BsonDocument> trackedPlayers)
+    private async Task<LiveDiscordMessage> BuildLiveGameMessageAsync(
+        string platform,
+        JsonElement game,
+        IReadOnlyList<BsonDocument> trackedPlayers,
+        IReadOnlyList<BsonDocument> knownPlayers,
+        CancellationToken cancellationToken)
     {
+        var championNames = await GetChampionNamesAsync(cancellationToken);
+        var championIcons = await GetChampionIconsAsync(cancellationToken);
         var gameId = GetLong(game, "gameId") ?? 0;
         var queueId = GetInt(game, "gameQueueConfigId");
         var length = GetInt(game, "gameLength") ?? 0;
-        var startTime = GetLong(game, "gameStartTime");
-        var started = startTime is { } unixMs ? $"<t:{unixMs / 1000}:R>" : "now";
         var participants = GetArray(game, "participants");
 
         string ChampionLine(JsonElement participant)
         {
             var riotId = GetString(participant, "riotId") ?? GetString(participant, "summonerName") ?? "Unknown";
             var championId = GetInt(participant, "championId");
-            return championId is null ? riotId : $"{riotId} - champion {championId}";
+            var soloRank = SoloRankForParticipant(participant, knownPlayers);
+            var rankText = string.IsNullOrWhiteSpace(soloRank) ? "" : $" - {soloRank}";
+            return championId is null
+                ? $"{riotId}{rankText}"
+                : $"{ChampionName(championNames, championId)} - {riotId}{rankText}";
         }
 
-        var trackedLines = trackedPlayers
+        string ChampionSummary(JsonElement participant)
+        {
+            return ChampionName(championNames, GetInt(participant, "championId"));
+        }
+
+        var trackedChampionId = default(int?);
+        var trackedTeamIds = new HashSet<int>();
+        var trackedPuuids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var mentionIds = new HashSet<string>(StringComparer.Ordinal);
+        var participantPuuids = participants
+            .Select(participant => GetString(participant, "puuid"))
+            .Where(puuid => !string.IsNullOrWhiteSpace(puuid))
+            .Select(puuid => puuid!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var linkedPlayersInGame = knownPlayers
+            .Concat(trackedPlayers)
+            .Where(player =>
+            {
+                var puuid = ReadString(player, "puuid");
+                return !string.IsNullOrWhiteSpace(puuid) &&
+                       participantPuuids.Contains(puuid) &&
+                       PlayerDiscordIds(player).Any();
+            })
+            .GroupBy(PlayerRiotId, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+        var trackedLines = linkedPlayersInGame
             .Select(player =>
             {
                 var puuid = ReadString(player, "puuid");
+                if (!string.IsNullOrWhiteSpace(puuid)) trackedPuuids.Add(puuid);
+                foreach (var id in PlayerDiscordIds(player))
+                {
+                    mentionIds.Add(id);
+                }
+
                 var participant = participants.FirstOrDefault(p => string.Equals(GetString(p, "puuid"), puuid, StringComparison.OrdinalIgnoreCase));
                 var championId = participant.ValueKind == JsonValueKind.Undefined ? null : GetInt(participant, "championId");
-                var profileUrl = $"{AppBaseUrl()}{PlayerPath(player)}";
+                if (trackedChampionId is null && championId is not null) trackedChampionId = championId;
+                var trackedTeamId = participant.ValueKind == JsonValueKind.Undefined ? null : GetInt(participant, "teamId");
+                if (trackedTeamId is not null) trackedTeamIds.Add(trackedTeamId.Value);
+                var riotId = PlayerRiotId(player);
+                var champion = ChampionName(championNames, championId);
+                var soloRank = SoloRank(player);
+                var rankText = string.IsNullOrWhiteSpace(soloRank) ? "" : $" - {soloRank}";
                 return championId is null
-                    ? $"• [{PlayerRiotId(player)}]({profileUrl})"
-                    : $"• [{PlayerRiotId(player)}]({profileUrl}) - champion {championId}";
+                    ? $"{riotId}{rankText}"
+                    : $"{riotId} - **{champion}**{rankText}";
             })
             .Where(line => !string.IsNullOrWhiteSpace(line))
             .Take(8)
             .ToList();
 
-        var blue = participants.Where(p => GetInt(p, "teamId") == 100).Take(5).Select(ChampionLine).ToList();
-        var red = participants.Where(p => GetInt(p, "teamId") == 200).Take(5).Select(ChampionLine).ToList();
+        var fields = new List<Dictionary<string, object?>>();
 
-        return string.Join("\n", new[]
+        foreach (var team in BuildLiveTeamFields(participants, queueId, trackedTeamIds, trackedPuuids, ChampionLine, ChampionSummary))
         {
-            $"**Live now: {QueueName(queueId)} on {platform.ToUpperInvariant()}**",
-            $"Game {gameId} - {FormatGameLength(length)} - started {started}",
-            "",
-            string.Join("\n", trackedLines),
-            "",
-            blue.Count > 0 ? $"Blue: {string.Join(", ", blue)}" : "",
-            red.Count > 0 ? $"Red: {string.Join(", ", red)}" : "",
-        }.Where(line => line.Length > 0));
+            fields.Add(team);
+        }
+
+        var embed = new Dictionary<string, object?>
+        {
+            ["title"] = $"{QueueName(queueId)} live on {platform.ToUpperInvariant()}",
+            ["description"] = $"Game `{gameId}` - {FormatGameLength(length)}",
+            ["color"] = QueueColor(queueId),
+            ["fields"] = fields,
+            ["footer"] = new Dictionary<string, object?> { ["text"] = "RiftBoard live games" },
+            ["timestamp"] = DateTimeOffset.UtcNow.ToString("O"),
+        };
+        if (trackedChampionId is not null && championIcons.TryGetValue(trackedChampionId.Value, out var iconUrl))
+        {
+            embed["thumbnail"] = new Dictionary<string, object?> { ["url"] = iconUrl };
+        }
+
+        var mentions = mentionIds.Select(id => $"<@{id}>").ToList();
+        var fallbackRiotIds = linkedPlayersInGame.Count > 0
+            ? linkedPlayersInGame.Select(PlayerRiotId).Where(id => !string.IsNullOrWhiteSpace(id)).Distinct().Take(8).ToList()
+            : trackedPlayers.Select(PlayerRiotId).Where(id => !string.IsNullOrWhiteSpace(id)).Distinct().Take(8).ToList();
+        var content = mentions.Count > 0 ? string.Join(" ", mentions.Take(8)) : string.Join(", ", fallbackRiotIds);
+        return new LiveDiscordMessage(content, [embed], mentionIds.Take(8).ToArray());
+    }
+
+    private IEnumerable<Dictionary<string, object?>> BuildLiveTeamFields(
+        IReadOnlyList<JsonElement> participants,
+        int? queueId,
+        IReadOnlySet<int> trackedTeamIds,
+        IReadOnlySet<string> trackedPuuids,
+        Func<JsonElement, string> formatParticipant,
+        Func<JsonElement, string> formatCompactParticipant)
+    {
+        var isArena = queueId is 1700 or 1710 or 1750;
+        var teams = participants
+            .Select(participant => new { TeamId = GetInt(participant, "teamId"), Participant = participant })
+            .Where(item => item.TeamId is not null)
+            .GroupBy(item => item.TeamId!.Value)
+            .OrderBy(group => group.Key)
+            .ToList();
+        var isTwoTeamGame = teams.Count <= 2 && teams.Any(team => team.Key == 100) && teams.Any(team => team.Key == 200);
+
+        if (isArena && teams.Count <= 2 && teams.Any(team => team.Count() > 4))
+        {
+            var arenaTeamSize = ArenaTeamSize(queueId, participants.Count);
+            var chunks = participants
+                .Select((participant, index) => new { Participant = participant, Index = index })
+                .GroupBy(item => item.Index / arenaTeamSize)
+                .Select(group => new
+                {
+                    TeamNumber = group.Key + 1,
+                    Participants = group.Select(item => item.Participant).ToList(),
+                    HasTrackedPlayer = group.Any(item =>
+                    {
+                        var puuid = GetString(item.Participant, "puuid");
+                        return !string.IsNullOrWhiteSpace(puuid) && trackedPuuids.Contains(puuid);
+                    }),
+                })
+                .OrderByDescending(group => group.HasTrackedPlayer)
+                .ThenBy(group => group.TeamNumber)
+                .ToList();
+            foreach (var chunk in chunks)
+            {
+                var lines = chunk.Participants.Select(formatParticipant).Where(line => !string.IsNullOrWhiteSpace(line)).ToList();
+                if (lines.Count == 0) continue;
+
+                yield return new Dictionary<string, object?>
+                {
+                    ["name"] = $"Team {chunk.TeamNumber}",
+                    ["value"] = TruncateDiscordField(string.Join("\n", lines)),
+                    ["inline"] = false,
+                };
+            }
+
+            yield break;
+        }
+
+        if (isTwoTeamGame)
+        {
+            foreach (var team in teams
+                         .OrderByDescending(group => trackedTeamIds.Contains(group.Key))
+                         .ThenBy(group => group.Key)
+                         .Take(2))
+            {
+                var teamParticipants = team.Select(item => item.Participant).ToList();
+                var lines = teamParticipants
+                    .Select((participant, index) => PrefixLaneEmoji(formatParticipant(participant), queueId, teamParticipants.Count, index))
+                    .Where(line => !string.IsNullOrWhiteSpace(line))
+                    .ToList();
+                if (lines.Count == 0) continue;
+
+                yield return new Dictionary<string, object?>
+                {
+                    ["name"] = TeamName(team.Key, isTwoTeamGame, isArena),
+                    ["value"] = TruncateDiscordField(string.Join("\n", lines)),
+                    ["inline"] = false,
+                };
+            }
+
+            yield break;
+        }
+
+        foreach (var team in teams
+                     .OrderByDescending(group => trackedTeamIds.Contains(group.Key))
+                     .ThenBy(group => group.Key)
+                     .Take(24))
+        {
+            var teamName = TeamName(team.Key, isTwoTeamGame, isArena);
+            var lines = team.Select(item => formatParticipant(item.Participant)).Where(line => !string.IsNullOrWhiteSpace(line)).ToList();
+            if (lines.Count == 0) continue;
+
+            yield return new Dictionary<string, object?>
+            {
+                ["name"] = teamName,
+                ["value"] = TruncateDiscordField(string.Join("\n", lines)),
+                ["inline"] = false,
+            };
+        }
+    }
+
+    private static string TeamName(int teamId, bool isTwoTeamGame, bool isArena)
+    {
+        if (isTwoTeamGame) return teamId == 100 ? "Blue" : "Red";
+        return isArena ? $"Team {ArenaTeamNumber(teamId)}" : $"Team {teamId}";
+    }
+
+    private string PrefixLaneEmoji(string line, int? queueId, int teamSize, int index)
+    {
+        if (string.IsNullOrWhiteSpace(line) || teamSize != 5 || !IsSummonersRiftQueue(queueId))
+        {
+            return line;
+        }
+
+        var lane = index switch
+        {
+            0 => "top",
+            1 => "jungle",
+            2 => "mid",
+            3 => "bot",
+            4 => "support",
+            _ => "",
+        };
+        var emoji = LaneEmoji(lane);
+        return string.IsNullOrWhiteSpace(emoji) ? line : $"{emoji} {line}";
+    }
+
+    private static bool IsSummonersRiftQueue(int? queueId)
+    {
+        return queueId is 400 or 420 or 430 or 440 or 480 or 490;
+    }
+
+    private string LaneEmoji(string lane)
+    {
+        return lane switch
+        {
+            "top" => DiscordEmoji("top"),
+            "jungle" => DiscordEmoji("jungle"),
+            "mid" => DiscordEmoji("mid"),
+            "bot" => DiscordEmoji("bot"),
+            "support" => DiscordEmoji("support"),
+            _ => "",
+        };
+    }
+
+    private static int ArenaTeamNumber(int teamId)
+    {
+        return teamId >= 100 ? ((teamId - 100) / 100) + 1 : teamId;
+    }
+
+    private static int ArenaTeamSize(int? queueId, int participantCount)
+    {
+        if (queueId == 1750) return 3;
+        if (queueId == 1710) return 2;
+        if (queueId == 1700) return 2;
+        if (participantCount % 2 == 0) return 2;
+        if (participantCount % 3 == 0) return 3;
+        return 2;
     }
 
     private static string QueueName(int? queueId) => queueId switch
     {
+        1700 => "Arena",
+        1710 => "Arena",
+        1750 => "Arena",
         420 => "Ranked Solo/Duo",
         440 => "Ranked Flex",
         400 => "Draft Pick",
         430 => "Blind Pick",
         450 => "ARAM",
-        1700 => "Arena",
+        480 => "Swiftplay",
+        490 => "Quickplay",
         0 or null => "Custom",
+        2300 => "Brawl",
+        2400 => "ARAM: Mayhem",
         _ => $"Queue {queueId}",
     };
+
+    private static int QueueColor(int? queueId) => queueId switch
+    {
+        420 => 0x4ba3ff,
+        440 => 0x2ecc71,
+        1700 or 1710 or 1750 => 0xf0c74b,
+        450 or 2400 => 0xa970ff,
+        _ => 0x5865f2,
+    };
+
+    private static string TruncateDiscordField(string value)
+    {
+        const int max = 1024;
+        var normalized = string.IsNullOrWhiteSpace(value) ? "-" : value.Trim();
+        return normalized.Length <= max ? normalized : $"{normalized[..(max - 3)]}...";
+    }
+
+    private async Task<Dictionary<int, string>> GetChampionNamesAsync(CancellationToken cancellationToken)
+    {
+        if (_championNames is not null && DateTime.UtcNow - _championNamesLoadedAt < TimeSpan.FromHours(24))
+        {
+            return _championNames;
+        }
+
+        try
+        {
+            var versionJson = await HttpGetJsonAsync("https://ddragon.leagueoflegends.com/api/versions.json", cancellationToken);
+            var version = versionJson.ValueKind == JsonValueKind.Array
+                ? versionJson.EnumerateArray().FirstOrDefault().GetString()
+                : null;
+            version = string.IsNullOrWhiteSpace(version) ? "latest" : version;
+            var championJson = await HttpGetJsonAsync($"https://ddragon.leagueoflegends.com/cdn/{version}/data/en_US/champion.json", cancellationToken);
+            var map = new Dictionary<int, string>();
+            var icons = new Dictionary<int, string>();
+            if (championJson.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var champion in data.EnumerateObject())
+                {
+                    var key = GetString(champion.Value, "key");
+                    var name = GetString(champion.Value, "name");
+                    if (int.TryParse(key, out var id) && !string.IsNullOrWhiteSpace(name))
+                    {
+                        map[id] = name;
+                        if (champion.Value.TryGetProperty("image", out var image))
+                        {
+                            var file = GetString(image, "full");
+                            if (!string.IsNullOrWhiteSpace(file))
+                            {
+                                icons[id] = $"https://ddragon.leagueoflegends.com/cdn/{version}/img/champion/{file}";
+                            }
+                        }
+                    }
+                }
+            }
+
+            _championNames = map;
+            _championIcons = icons;
+            _championNamesLoadedAt = DateTime.UtcNow;
+            return map;
+        }
+        catch
+        {
+            _championNames ??= new Dictionary<int, string>();
+            return _championNames;
+        }
+    }
+
+    private static string ChampionName(IReadOnlyDictionary<int, string> championNames, int? championId)
+    {
+        if (championId is null) return "Unknown";
+        return championNames.TryGetValue(championId.Value, out var name) ? name : $"Champion {championId}";
+    }
+
+    private async Task<Dictionary<int, string>> GetChampionIconsAsync(CancellationToken cancellationToken)
+    {
+        await GetChampionNamesAsync(cancellationToken);
+        return _championIcons ?? new Dictionary<int, string>();
+    }
 
     private static string FormatGameLength(int seconds)
     {
@@ -1806,6 +2509,176 @@ internal sealed class CSharpRefreshService
         return $"{ReadString(player, "gameName")}#{ReadString(player, "tagLine")}";
     }
 
+    private static string? PlayerDiscordLabel(BsonDocument player)
+    {
+        if (!player.TryGetValue("liveDiscordUsers", out var raw) || !raw.IsBsonArray)
+        {
+            return null;
+        }
+
+        var users = raw.AsBsonArray
+            .Where(value => value.IsBsonDocument)
+            .Select(value => value.AsBsonDocument)
+            .Select(doc =>
+            {
+                var username = ReadString(doc, "discordUsername");
+                return username;
+            })
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct()
+            .Take(3)
+            .ToList();
+
+        return users.Count == 0 ? null : string.Join(", ", users);
+    }
+
+    private static IEnumerable<string> PlayerDiscordIds(BsonDocument player)
+    {
+        if (!player.TryGetValue("liveDiscordUsers", out var raw) || !raw.IsBsonArray)
+        {
+            yield break;
+        }
+
+        foreach (var value in raw.AsBsonArray)
+        {
+            if (!value.IsBsonDocument) continue;
+            var id = ReadString(value.AsBsonDocument, "discordUserId");
+            if (!string.IsNullOrWhiteSpace(id) && id.All(char.IsDigit))
+            {
+                yield return id;
+            }
+        }
+    }
+
+    private string? SoloRankForParticipant(JsonElement participant, IReadOnlyList<BsonDocument> knownPlayers)
+    {
+        var puuid = GetString(participant, "puuid");
+        if (!string.IsNullOrWhiteSpace(puuid))
+        {
+            var byPuuid = knownPlayers.FirstOrDefault(player =>
+                string.Equals(ReadString(player, "puuid"), puuid, StringComparison.OrdinalIgnoreCase));
+            if (byPuuid is not null) return SoloRank(byPuuid);
+        }
+
+        var riotId = GetString(participant, "riotId");
+        if (!string.IsNullOrWhiteSpace(riotId))
+        {
+            var byRiotId = knownPlayers.FirstOrDefault(player =>
+                string.Equals(PlayerRiotId(player), riotId, StringComparison.OrdinalIgnoreCase));
+            if (byRiotId is not null) return SoloRank(byRiotId);
+        }
+
+        return null;
+    }
+
+    private string? SoloRank(BsonDocument player)
+    {
+        if (!player.TryGetValue("solo", out var raw) || !raw.IsBsonDocument)
+        {
+            return null;
+        }
+
+        var solo = raw.AsBsonDocument;
+        var tier = ReadString(solo, "tier");
+        if (string.IsNullOrWhiteSpace(tier)) return null;
+        var division = ReadString(solo, "division");
+        var lp = solo.TryGetValue("lp", out var lpValue) && lpValue.IsNumeric ? lpValue.ToInt32() : (int?)null;
+        return RankLabel(tier, division, lp);
+    }
+
+    private string RankLabel(string tier, string? division, int? lp)
+    {
+        var emoji = RankEmoji(tier);
+        var prefix = string.IsNullOrWhiteSpace(emoji) ? "" : $"{emoji} ";
+        var lpText = lp is null ? "" : $" {lp.Value}";
+        return $"{prefix}{RankShort(tier)}{DivisionShort(division)}{lpText}";
+    }
+
+    private string RankEmoji(string tier)
+    {
+        var name = tier.Trim().ToUpperInvariant() switch
+        {
+            "CHALLENGER" => "Challenger",
+            "GRANDMASTER" => "Grandmaster",
+            "MASTER" => "Master",
+            "DIAMOND" => "Diamond",
+            "EMERALD" => "Emerald",
+            "PLATINUM" => "Platinum",
+            "GOLD" => "Gold",
+            "SILVER" => "Silver",
+            "BRONZE" => "Bronze",
+            "IRON" => "Iron",
+            _ => "",
+        };
+        return string.IsNullOrWhiteSpace(name) ? "" : DiscordEmoji(name);
+    }
+
+    private string DiscordEmoji(string name)
+    {
+        var direct = Env($"DISCORD_EMOJI_{NormalizeEnvKey(name)}");
+        if (!string.IsNullOrWhiteSpace(direct))
+        {
+            return direct.Trim();
+        }
+
+        var map = Env("DISCORD_EMOJI_MAP");
+        if (!string.IsNullOrWhiteSpace(map))
+        {
+            foreach (var pair in map.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                var eq = pair.IndexOf('=');
+                if (eq <= 0) continue;
+                var key = pair[..eq].Trim();
+                var value = pair[(eq + 1)..].Trim();
+                if (string.Equals(key, name, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(value))
+                {
+                    return value;
+                }
+            }
+        }
+
+        return "";
+    }
+
+    private static string NormalizeEnvKey(string value)
+    {
+        var chars = value
+            .Select(ch => char.IsLetterOrDigit(ch) ? char.ToUpperInvariant(ch) : '_')
+            .ToArray();
+        return new string(chars);
+    }
+
+    private static string RankShort(string tier)
+    {
+        return tier.ToUpperInvariant() switch
+        {
+            "CHALLENGER" => "CH",
+            "GRANDMASTER" => "GM",
+            "MASTER" => "M",
+            "DIAMOND" => "D",
+            "EMERALD" => "E",
+            "PLATINUM" => "P",
+            "GOLD" => "G",
+            "SILVER" => "S",
+            "BRONZE" => "B",
+            "IRON" => "I",
+            _ => tier,
+        };
+    }
+
+    private static string DivisionShort(string? division)
+    {
+        var value = (division ?? "").Trim().ToUpperInvariant();
+        return string.IsNullOrWhiteSpace(value) ? "" : value switch
+        {
+            "I" => "1",
+            "II" => "2",
+            "III" => "3",
+            "IV" => "4",
+            _ => value.Length > 0 ? value : "",
+        };
+    }
+
     private static string PlayerPath(BsonDocument player)
     {
         return $"/p/{Uri.EscapeDataString(ReadString(player, "gameName") ?? "")}/{Uri.EscapeDataString(ReadString(player, "tagLine") ?? "")}";
@@ -1813,7 +2686,15 @@ internal sealed class CSharpRefreshService
 
     private string AppBaseUrl()
     {
-        return (Env("NEXT_PUBLIC_APP_URL") ?? Env("APP_BASE_URL") ?? "https://rift-board-myanmar.vercel.app").TrimEnd('/');
+        var configured = (Env("PUBLIC_APP_URL") ?? Env("APP_BASE_URL") ?? Env("NEXT_PUBLIC_APP_URL") ?? "").Trim();
+        if (
+            Uri.TryCreate(configured, UriKind.Absolute, out var uri) &&
+            uri.Host is not "127.0.0.1" and not "localhost" and not "::1")
+        {
+            return uri.AbsoluteUri.TrimEnd('/');
+        }
+
+        return "https://rift-board-myanmar.vercel.app";
     }
 
     private async Task SyncDiscordGuildRolesForPlayerAsync(ObjectId playerId, CancellationToken cancellationToken)
@@ -1826,7 +2707,7 @@ internal sealed class CSharpRefreshService
         var links = await _discordLinks.Find(
             Builders<BsonDocument>.Filter.Eq("playerId", playerId) &
             Builders<BsonDocument>.Filter.Eq("verifiedBinding", true) &
-            Builders<BsonDocument>.Filter.In("verificationSource", new[] { "discord_connections", "legacy_manual" }))
+            Builders<BsonDocument>.Filter.In("verificationSource", new[] { "discord_connections", "riot_rso", "legacy_manual" }))
             .ToListAsync(cancellationToken);
         if (links.Count == 0)
         {
@@ -2032,16 +2913,32 @@ internal sealed class CSharpRefreshService
         throw new InvalidOperationException($"Discord API {(int)response.StatusCode}: {ParseDiscordError(text, response.ReasonPhrase ?? "Request failed")}");
     }
 
-    private async Task<JsonElement> SendDiscordChannelMessageAsync(string channelId, string content, CancellationToken cancellationToken)
+    private async Task<JsonElement> SendDiscordChannelMessageAsync(string channelId, LiveDiscordMessage message, CancellationToken cancellationToken)
     {
         using var body = new StringContent(JsonSerializer.Serialize(new
         {
-            content,
-            allowed_mentions = new { parse = Array.Empty<string>() },
+            content = message.Content,
+            embeds = message.Embeds,
+            allowed_mentions = new { parse = Array.Empty<string>(), users = message.AllowedUserIds },
         }), System.Text.Encoding.UTF8, "application/json");
         return await DiscordApiAsync(
             HttpMethod.Post,
             $"/channels/{Uri.EscapeDataString(channelId)}/messages",
+            body,
+            cancellationToken);
+    }
+
+    private async Task<JsonElement> EditDiscordChannelMessageAsync(string channelId, string messageId, LiveDiscordMessage message, CancellationToken cancellationToken)
+    {
+        using var body = new StringContent(JsonSerializer.Serialize(new
+        {
+            content = message.Content,
+            embeds = message.Embeds,
+            allowed_mentions = new { parse = Array.Empty<string>(), users = message.AllowedUserIds },
+        }), System.Text.Encoding.UTF8, "application/json");
+        return await DiscordApiAsync(
+            HttpMethod.Patch,
+            $"/channels/{Uri.EscapeDataString(channelId)}/messages/{Uri.EscapeDataString(messageId)}",
             body,
             cancellationToken);
     }
@@ -2234,6 +3131,19 @@ internal sealed class CSharpRefreshService
 
         int? retry = response.Headers.RetryAfter?.Delta is { } delta ? (int)delta.TotalMilliseconds : null;
         throw new RiotApiException((int)response.StatusCode, ParseRiotError(text, response.ReasonPhrase ?? "Riot API error"), retry);
+    }
+
+    private async Task<JsonElement> HttpGetJsonAsync(string url, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        using var response = await _http.SendAsync(request, cancellationToken);
+        var text = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"HTTP {(int)response.StatusCode}: {response.ReasonPhrase}");
+        }
+
+        return JsonDocument.Parse(text).RootElement.Clone();
     }
 
     private async Task<List<string>> GetStringArrayAsync(string url, string game, CancellationToken cancellationToken)
@@ -2449,6 +3359,8 @@ internal sealed class RiotApiException(int status, string message, int? retryAft
     public int? RetryAfterMs { get; } = retryAfterMs;
 }
 
+internal sealed record LiveDiscordMessage(string Content, object[] Embeds, string[] AllowedUserIds);
+
 internal sealed record JobPanel(
     GroupBox Panel,
     Label Status,
@@ -2533,7 +3445,7 @@ internal sealed class AgentConfig
     public string LocalAppUrl { get; init; } = "http://127.0.0.1:43117";
     public JobConfig RankJob { get; init; } = new() { SyncMatches = true, SyncTftMatches = false };
     public JobConfig TftJob { get; init; } = new() { SyncMatches = false, SyncTftMatches = true };
-    public JobConfig LiveJob { get; init; } = new() { IntervalSec = 600, Limit = 80, DelayMs = 350, SyncMatches = false, SyncTftMatches = false, MatchesCount = 1 };
+    public JobConfig LiveJob { get; init; } = new() { IntervalSec = 120, Limit = 80, DelayMs = 350, SyncMatches = false, SyncTftMatches = false, MatchesCount = 1 };
     public int StartupTimeoutSec { get; init; } = 120;
 
     public AgentConfig Normalize()
