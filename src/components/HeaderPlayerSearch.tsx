@@ -12,11 +12,16 @@ type SearchResult = {
   id: string;
   name: string;
   path: string;
+  tftPath?: string | null;
   platform?: string | null;
   profileIconId?: number | null;
   soloTier?: string | null;
   soloDivision?: string | null;
   soloLp?: number | null;
+  flexTier?: string | null;
+  tftTier?: string | null;
+  tftDivision?: string | null;
+  tftLp?: number | null;
 };
 
 function profileIconUrl(profileIconId?: number | null) {
@@ -31,6 +36,14 @@ function rankLine(item: SearchResult) {
   const lp = typeof item.soloLp === "number" ? ` ${item.soloLp} LP` : "";
   const rank = `${tier}${division}${lp}`;
   return item.platform ? `${item.platform} - ${rank}` : rank;
+}
+
+function tftRankLine(item: SearchResult) {
+  if (!item.tftTier) return "TFT UNRANKED";
+  const tier = String(item.tftTier).toUpperCase();
+  const division = item.tftDivision ? ` ${String(item.tftDivision).toUpperCase()}` : "";
+  const lp = typeof item.tftLp === "number" ? ` ${item.tftLp} LP` : "";
+  return `TFT ${tier}${division}${lp}`;
 }
 
 function tierColorClass(tier?: string | null) {
@@ -128,7 +141,16 @@ export default function HeaderPlayerSearch() {
     if (!item?.path) return;
     setOpen(false);
     setQuery("");
-    router.push(item.path);
+    const hasTft = !!item.tftTier;
+    const hasLolRank = !!item.soloTier || !!item.flexTier;
+    router.push(hasTft && !hasLolRank && item.tftPath ? item.tftPath : item.path);
+  }
+
+  function goPath(path: string | null | undefined) {
+    if (!path) return;
+    setOpen(false);
+    setQuery("");
+    router.push(path);
   }
 
   return (
@@ -176,11 +198,18 @@ export default function HeaderPlayerSearch() {
                 const activeRow = index === active;
 
                 return (
-                  <button
+                  <div
                     key={item.id}
-                    type="button"
+                    role="button"
+                    tabIndex={0}
                     onMouseEnter={() => setActive(index)}
                     onClick={() => go(item)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        go(item);
+                      }
+                    }}
                     className={`flex w-full items-center gap-2 px-3 py-2 text-left transition ${
                       activeRow ? "bg-white/8" : "hover:bg-white/5"
                     }`}
@@ -219,8 +248,41 @@ export default function HeaderPlayerSearch() {
                         />
                         <span className="truncate">{rankLine(item)}</span>
                       </div>
+                      {item.tftTier ? (
+                        <div className="mt-1 inline-flex max-w-full items-center gap-1 rounded-full border border-teal-300/35 bg-teal-400/12 px-1.5 py-0.5 text-[10px] font-medium leading-none text-teal-100">
+                          <RankEmblem
+                            tier={item.tftTier}
+                            className="h-3.5 w-3.5 shrink-0"
+                            alt={`${item.tftTier} TFT emblem`}
+                          />
+                          <span className="truncate">{tftRankLine(item)}</span>
+                        </div>
+                      ) : null}
                     </div>
-                  </button>
+                    <div className="flex shrink-0 flex-col gap-1">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          goPath(item.path);
+                        }}
+                        className="rounded-full border border-white/10 bg-zinc-950/50 px-2 py-1 text-[10px] font-medium text-zinc-300 transition hover:bg-white/8 hover:text-zinc-100"
+                      >
+                        LoL
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          goPath(item.tftPath);
+                        }}
+                        className="rounded-full border border-teal-300/25 bg-teal-400/10 px-2 py-1 text-[10px] font-medium text-teal-100 transition hover:bg-teal-400/18 disabled:opacity-35"
+                        disabled={!item.tftPath}
+                      >
+                        TFT
+                      </button>
+                    </div>
+                  </div>
                 );
               })}
             </div>

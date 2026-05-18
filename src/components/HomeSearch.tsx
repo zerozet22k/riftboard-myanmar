@@ -15,6 +15,7 @@ type SearchResult = {
     id: string;
     name: string;
     path: string;
+    tftPath?: string | null;
     platform?: string | null;
 
     profileIconId?: number | null;
@@ -22,6 +23,8 @@ type SearchResult = {
     soloTier?: string | null;
     soloDivision?: string | null;
     soloLp?: number | null;
+    flexTier?: string | null;
+    tftTier?: string | null;
 
     soloWins?: number | null;
     soloLosses?: number | null;
@@ -101,7 +104,7 @@ export default function HomeSearch() {
     const canGo = Boolean(items[0]?.path);
 
     function go(it: SearchResult | undefined) {
-        const href = it?.path;
+        const href = it?.tftTier && !it.soloTier && !it.flexTier && it.tftPath ? it.tftPath : it?.path;
         if (!href) return;
         setOpen(false);
         router.push(href);

@@ -116,36 +116,27 @@ export default function ProfileCommentsSection({
   }
 
   return (
-    <section className="rounded-[22px] bg-zinc-900/18 p-4 ring-1 ring-white/5 sm:p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <section className="rounded-[18px] bg-zinc-900/16 p-3 ring-1 ring-white/5">
+      <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-[11px] uppercase tracking-[0.22em] text-zinc-500">
-            Community notes
-          </div>
-          <div className="mt-1 text-xl font-semibold tracking-tight text-zinc-50">
-            Comments
-          </div>
-          <div className="mt-2 text-sm text-zinc-400">
-            Signed by verified Discord-linked Riftboard members.
-          </div>
-        </div>
-        <div className="text-sm text-zinc-500">
-          {comments.length} comment{comments.length === 1 ? "" : "s"}
+          <div className="text-sm font-semibold tracking-tight text-zinc-50">Comments</div>
+          {comments.length ? (
+            <div className="mt-0.5 text-xs text-zinc-500">
+              {comments.length} note{comments.length === 1 ? "" : "s"}
+            </div>
+          ) : null}
         </div>
       </div>
 
-      <div className="mt-4 rounded-[18px] bg-zinc-950/34 p-4 ring-1 ring-white/5">
+      <div className="mt-3 rounded-[14px] bg-zinc-950/30 p-3 ring-1 ring-white/5">
         {viewer ? (
-          <form onSubmit={submitComment} className="space-y-3">
-            <div className="flex flex-wrap items-center gap-2 text-sm text-zinc-400">
+          <form onSubmit={submitComment} className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
               <span className="text-zinc-200">
-                Posting as {viewer.gameName}#{viewer.tagLine}
-              </span>
-              <span className="text-zinc-500">
-                Discord: {viewer.discordUsername ?? "Connected account"}
+                {viewer.gameName}#{viewer.tagLine}
               </span>
               {viewer.isProfileOwner ? (
-                <span className="text-zinc-500">You can remove any message on this profile.</span>
+                <span>Owner controls enabled</span>
               ) : null}
             </div>
 
@@ -154,10 +145,10 @@ export default function ProfileCommentsSection({
               <textarea
                 value={body}
                 onChange={(event) => setBody(event.target.value)}
-                rows={4}
+                rows={3}
                 maxLength={PROFILE_COMMENT_MAX_LENGTH}
-                placeholder="Write something for this profile..."
-                className="w-full resize-y rounded-[16px] bg-zinc-900/70 px-4 py-3 text-sm text-zinc-100 outline-none ring-1 ring-white/8 placeholder:text-zinc-500 focus:ring-white/15"
+                placeholder="Leave a note..."
+                className="w-full resize-y rounded-[12px] bg-zinc-900/70 px-3 py-2 text-sm text-zinc-100 outline-none ring-1 ring-white/8 placeholder:text-zinc-500 focus:ring-white/15"
                 disabled={pending}
               />
             </label>
@@ -169,24 +160,22 @@ export default function ProfileCommentsSection({
               <button
                 type="submit"
                 disabled={!canSubmit}
-                className="rounded-xl bg-zinc-100 px-4 py-2 text-sm font-semibold text-black transition hover:bg-white disabled:opacity-60"
+                className="rounded-lg bg-zinc-100 px-3 py-1.5 text-xs font-semibold text-black transition hover:bg-white disabled:opacity-60"
               >
-                {pending && busyCommentId == null ? "Posting..." : "Post comment"}
+                {pending && busyCommentId == null ? "Posting..." : "Post"}
               </button>
             </div>
           </form>
         ) : (
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="text-sm text-zinc-400">
-              Connect Discord to leave a signed comment on this profile.
-            </div>
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-xs text-zinc-500">Discord login required.</div>
             <form action="/api/discord/oauth/start" method="GET">
               <input type="hidden" name="returnTo" value={profilePath} />
               <button
                 type="submit"
-                className="inline-flex rounded-xl bg-emerald-500/90 px-4 py-2 text-sm font-semibold text-black transition hover:bg-emerald-400"
+                className="inline-flex rounded-lg bg-emerald-500/90 px-3 py-1.5 text-xs font-semibold text-black transition hover:bg-emerald-400"
               >
-                Connect Discord
+                Connect
               </button>
             </form>
           </div>
@@ -196,7 +185,7 @@ export default function ProfileCommentsSection({
         {error ? <div className="mt-3 text-sm text-red-300">{error}</div> : null}
       </div>
 
-      <div className="mt-4 space-y-3">
+      <div className="mt-3 space-y-2">
         {comments.length ? (
           comments.map((comment) => {
             const timestampLabel = formatMetaDateTime(comment.createdAt);
@@ -206,9 +195,9 @@ export default function ProfileCommentsSection({
             return (
               <article
                 key={comment.id}
-                className="rounded-[18px] bg-zinc-950/34 p-4 ring-1 ring-white/5"
+                className="rounded-[14px] bg-zinc-950/30 p-3 ring-1 ring-white/5"
               >
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2 text-sm">
                       <Link
@@ -234,22 +223,22 @@ export default function ProfileCommentsSection({
                       type="button"
                       onClick={() => deleteComment(comment.id)}
                       disabled={pending}
-                      className="rounded-xl border border-white/10 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:bg-white/5 disabled:opacity-60"
+                      className="rounded-lg border border-white/10 px-2.5 py-1 text-xs font-medium text-zinc-300 transition hover:bg-white/5 disabled:opacity-60"
                     >
                       {deletingThisComment ? "Removing..." : "Remove"}
                     </button>
                   ) : null}
                 </div>
 
-                <div className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-zinc-200">
+                <div className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-zinc-200">
                   {comment.body}
                 </div>
               </article>
             );
           })
         ) : (
-          <div className="rounded-[18px] bg-zinc-950/34 p-5 text-sm text-zinc-500 ring-1 ring-white/5">
-            No comments yet. Be the first one to leave a note.
+          <div className="rounded-[14px] bg-zinc-950/30 p-3 text-xs text-zinc-500 ring-1 ring-white/5">
+            No notes yet.
           </div>
         )}
       </div>

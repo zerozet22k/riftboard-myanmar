@@ -45,13 +45,25 @@ function winrate(w?: number | null, l?: number | null) {
     return Math.round((w / total) * 100);
 }
 
-function toItem(p: any) {
+type SearchPlayerRow = {
+    _id?: unknown;
+    gameName?: unknown;
+    tagLine?: unknown;
+    platform?: unknown;
+    profileIconId?: unknown;
+    solo?: Record<string, unknown> | null;
+    flex?: Record<string, unknown> | null;
+    tft?: Record<string, unknown> | null;
+};
+
+function toItem(p: SearchPlayerRow) {
     const gameName = String(p?.gameName ?? "").trim();
     const tagLine = String(p?.tagLine ?? "").trim();
     const tagLower = tagLine.toLowerCase();
 
     const solo = p?.solo ?? {};
     const flex = p?.flex ?? {};
+    const tft = p?.tft ?? {};
 
     const soloWins = typeof solo?.wins === "number" ? solo.wins : null;
     const soloLosses = typeof solo?.losses === "number" ? solo.losses : null;
@@ -65,6 +77,7 @@ function toItem(p: any) {
         gameName,
         tagLine,
         path: `/p/${encodeURIComponent(gameName)}/${encodeURIComponent(tagLower)}`,
+        tftPath: `/tft/p/${encodeURIComponent(gameName)}/${encodeURIComponent(tagLower)}`,
 
         platform: p?.platform ? String(p.platform).toUpperCase() : null,
 
@@ -84,6 +97,10 @@ function toItem(p: any) {
         flexWins,
         flexLosses,
         flexWr: winrate(flexWins, flexLosses),
+
+        tftTier: tft?.tier ?? null,
+        tftDivision: tft?.division ?? null,
+        tftLp: typeof tft?.lp === "number" ? tft.lp : null,
     };
 }
 
@@ -103,6 +120,7 @@ export async function GET(req: NextRequest) {
         profileIconId: 1,
         solo: 1,
         flex: 1,
+        tft: 1,
         updatedAt: 1,
         lastRefreshAt: 1,
     } as const;

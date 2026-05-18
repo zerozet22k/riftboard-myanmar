@@ -9,7 +9,6 @@ export type MasteryRow = {
   championLevel: number | null;
   championPoints: number | null;
   lastPlayTime: number | null;
-  chestGranted: boolean | null;
   tokensEarned: number | null;
   championPointsSinceLastLevel: number | null;
   championPointsUntilNextLevel: number | null;
@@ -27,6 +26,31 @@ function numberOrDash(value: number | null | undefined) {
 
 function lastPlayedText(lastPlayTime: number | null) {
   return formatFullDateTime(lastPlayTime) ?? "--";
+}
+
+function compactDate(lastPlayTime: number | null) {
+  if (!lastPlayTime) return "--";
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+  }).format(new Date(lastPlayTime));
+}
+
+function progressPercent(row: MasteryRow) {
+  const since = row.championPointsSinceLastLevel;
+  const until = row.championPointsUntilNextLevel;
+  if (typeof since !== "number" || typeof until !== "number") return null;
+  const total = since + Math.max(0, until);
+  if (total <= 0) return 100;
+  return Math.max(0, Math.min(100, Math.round((since / total) * 100)));
+}
+
+function masteryTone(level: number | null) {
+  if ((level ?? 0) >= 20) return "from-fuchsia-500/18 via-amber-400/10 to-cyan-400/12 ring-fuchsia-300/20";
+  if ((level ?? 0) >= 10) return "from-amber-400/16 via-zinc-950/20 to-emerald-400/10 ring-amber-300/18";
+  if ((level ?? 0) >= 5) return "from-sky-400/14 via-zinc-950/20 to-violet-400/10 ring-sky-300/14";
+  return "from-zinc-800/42 via-zinc-950/20 to-zinc-900/28 ring-white/8";
 }
 
 export default function MasteryTable({
@@ -73,7 +97,7 @@ export default function MasteryTable({
         <div>
           <div className="text-lg font-semibold text-zinc-100">Champion mastery</div>
           <div className="mt-1 text-sm text-zinc-400">
-            Stored Riot mastery entries for this tracked player.
+            Collection view for levels, points, marks, and recent champion activity.
           </div>
           <div className="mt-1 text-xs text-zinc-500">
             Last mastery sync: <span className="text-zinc-300">{lastSyncedLabel ?? "--"}</span>
@@ -109,68 +133,92 @@ export default function MasteryTable({
       {filtered.length === 0 ? (
         <div className="mt-4 text-sm text-zinc-500">No stored mastery rows match this search yet.</div>
       ) : (
-        <div className="mt-4 space-y-3">
-          {filtered.map((row) => (
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {filtered.map((row) => {
+            const progress = progressPercent(row);
+            const marksNeeded = row.markRequiredForNextLevel;
+            const milestone = row.championSeasonMilestone;
+            const untilNext =
+              typeof row.championPointsUntilNextLevel === "number"
+                ? Math.max(0, row.championPointsUntilNextLevel)
+                : null;
+            return (
             <article
               key={row.championId}
-              className="rounded-[18px] bg-zinc-950/34 p-3.5"
+              className={`overflow-hidden rounded-[18px] bg-gradient-to-br ${masteryTone(row.championLevel)} p-3.5 ring-1`}
             >
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                <div className="flex items-start gap-3">
+              <div className="flex items-start gap-3">
+                <div className="relative shrink-0">
                   <img
                     src={`${CHAMP_ICON_BASE}/${row.championId}.png`}
                     alt={row.championName}
-                    className="h-12 w-12 rounded-xl bg-zinc-900/40"
+                    className="h-14 w-14 rounded-2xl bg-zinc-900/40 ring-1 ring-white/10"
                     loading="lazy"
                   />
-                  <div>
-                    <div className="text-sm font-semibold text-zinc-100">{row.championName}</div>
-                    <div className="mt-1 text-sm text-zinc-400">
-                      Mastery {numberOrDash(row.championLevel)} / {numberOrDash(row.championPoints)} pts
-                    </div>
-                    <div className="mt-1 text-xs text-zinc-500">
-                      Last played: <span className="text-zinc-300">{lastPlayedText(row.lastPlayTime)}</span>
-                    </div>
+                  <div className="absolute -bottom-1 -right-1 rounded-lg bg-zinc-950 px-1.5 py-0.5 text-[11px] font-semibold text-zinc-100 ring-1 ring-white/10">
+                    M{numberOrDash(row.championLevel)}
                   </div>
                 </div>
 
-                <div className="grid gap-3 text-sm text-zinc-300 sm:grid-cols-2 xl:grid-cols-4">
-                  <div>
-                    <div className="text-xs uppercase tracking-wide text-zinc-500">Chest</div>
-                    <div>{row.chestGranted ? "Granted" : "Not granted"}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-zinc-100">{row.championName}</div>
+                      <div className="mt-1 text-sm tabular-nums text-zinc-300">
+                        {numberOrDash(row.championPoints)} pts
+                      </div>
+                    </div>
+                    <div
+                      className="shrink-0 rounded-lg bg-zinc-950/50 px-2 py-1 text-right text-[11px] text-zinc-400"
+                      title={lastPlayedText(row.lastPlayTime)}
+                    >
+                      {compactDate(row.lastPlayTime)}
+                    </div>
                   </div>
-                  <div>
-                    <div className="text-xs uppercase tracking-wide text-zinc-500">Tokens</div>
-                    <div>{numberOrDash(row.tokensEarned)}</div>
+
+                  <div className="mt-3">
+                    <div className="flex items-center justify-between text-xs text-zinc-500">
+                      <span>Level progress</span>
+                      <span>{progress == null ? "--" : `${progress}%`}</span>
+                    </div>
+                    <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-zinc-950/70">
+                      <div
+                        className="h-full rounded-full bg-zinc-100"
+                        style={{ width: `${progress ?? 0}%` }}
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <div className="text-xs uppercase tracking-wide text-zinc-500">Since last level</div>
-                    <div>{numberOrDash(row.championPointsSinceLastLevel)}</div>
+
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                    <div className="rounded-xl bg-zinc-950/38 px-2 py-2">
+                      <div className="text-[10px] uppercase tracking-wide text-zinc-500">Marks</div>
+                      <div className="mt-0.5 text-sm font-semibold text-zinc-200">
+                        {numberOrDash(marksNeeded)}
+                      </div>
+                    </div>
+                    <div className="rounded-xl bg-zinc-950/38 px-2 py-2">
+                      <div className="text-[10px] uppercase tracking-wide text-zinc-500">Tokens</div>
+                      <div className="mt-0.5 text-sm font-semibold text-zinc-200">
+                        {numberOrDash(row.tokensEarned)}
+                      </div>
+                    </div>
+                    <div className="rounded-xl bg-zinc-950/38 px-2 py-2">
+                      <div className="text-[10px] uppercase tracking-wide text-zinc-500">Season</div>
+                      <div className="mt-0.5 text-sm font-semibold text-zinc-200">
+                        {numberOrDash(milestone)}
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <div className="text-xs uppercase tracking-wide text-zinc-500">Until next level</div>
-                    <div>{numberOrDash(row.championPointsUntilNextLevel)}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs uppercase tracking-wide text-zinc-500">Marks needed</div>
-                    <div>{numberOrDash(row.markRequiredForNextLevel)}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs uppercase tracking-wide text-zinc-500">Season milestone</div>
-                    <div>{numberOrDash(row.championSeasonMilestone)}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs uppercase tracking-wide text-zinc-500">Champion ID</div>
-                    <div>{row.championId}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs uppercase tracking-wide text-zinc-500">Stored at</div>
-                    <div>{formatFullDateTime(row.fetchedAt) ?? "--"}</div>
+
+                  <div className="mt-3 flex items-center justify-between gap-2 text-xs text-zinc-500">
+                    <span>{numberOrDash(row.championPointsSinceLastLevel)} earned</span>
+                    <span>{numberOrDash(untilNext)} to next</span>
                   </div>
                 </div>
               </div>
             </article>
-          ))}
+          );
+          })}
         </div>
       )}
     </section>

@@ -86,7 +86,7 @@ export async function generateMetadata({
 
   const canonicalPath = `${canonicalPlayerPath(player.gameName, player.tagLine)}/mastery`;
   const title = `${player.gameName}#${player.tagLine} Champion Mastery`;
-  const description = `Champion mastery table for ${player.gameName}#${player.tagLine} on RiftBoard Myanmar, including points, levels, and tracked mastery progress.`;
+  const description = `${player.gameName}#${player.tagLine}'s champion mastery collection on RiftBoard Myanmar, including points, levels, marks, and recent champion activity.`;
 
   return {
     title,
@@ -156,7 +156,6 @@ export default async function PlayerMasteryPage({
     championLevel: typeof doc.championLevel === "number" ? doc.championLevel : null,
     championPoints: typeof doc.championPoints === "number" ? doc.championPoints : null,
     lastPlayTime: typeof doc.lastPlayTime === "number" ? doc.lastPlayTime : null,
-    chestGranted: typeof doc.chestGranted === "boolean" ? doc.chestGranted : null,
     tokensEarned: typeof doc.tokensEarned === "number" ? doc.tokensEarned : null,
     championPointsSinceLastLevel:
       typeof doc.championPointsSinceLastLevel === "number" ? doc.championPointsSinceLastLevel : null,
@@ -179,7 +178,7 @@ export default async function PlayerMasteryPage({
           <div>
             <div className="text-3xl font-semibold tracking-tight">{player.gameName}#{player.tagLine}</div>
             <div className="mt-1 text-sm text-zinc-400">
-              Full champion mastery database for this tracked player.
+              Champion mastery collection for this tracked player.
             </div>
           </div>
           <div className="flex flex-wrap gap-3 text-sm">

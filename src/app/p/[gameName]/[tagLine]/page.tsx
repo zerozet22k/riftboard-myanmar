@@ -247,6 +247,75 @@ function pct(wins: number, games: number) {
   return Math.round((wins / games) * 100);
 }
 
+function scoreFromBadges(badges: MatchPerformanceBadge[]) {
+  const scoreBadge = badges.find((badge) => badge.kind === "score");
+  const match = scoreBadge?.label.match(/\d+/);
+  return match ? Number(match[0]) : 0;
+}
+
+function signatureChampionFromRecent(
+  matches: MatchDoc[],
+  mains: PlayerView["mains"],
+) {
+  const rows = new Map<number, { games: number; wins: number; scoreTotal: number }>();
+
+  for (const match of matches.slice(0, 20)) {
+    if (typeof match.championId !== "number") continue;
+    const current = rows.get(match.championId) ?? { games: 0, wins: 0, scoreTotal: 0 };
+    current.games += 1;
+    if (match.win === true) current.wins += 1;
+    current.scoreTotal += scoreFromBadges(analyzeMatchPerformance({
+      queueId: typeof match.queueId === "number" ? match.queueId : null,
+      gameDuration: typeof match.gameDuration === "number" ? match.gameDuration : null,
+      teamPosition: typeof match.teamPosition === "string" ? match.teamPosition : null,
+      win: typeof match.win === "boolean" ? match.win : null,
+      kills: typeof match.kills === "number" ? match.kills : null,
+      deaths: typeof match.deaths === "number" ? match.deaths : null,
+      assists: typeof match.assists === "number" ? match.assists : null,
+      largestMultiKill: typeof match.largestMultiKill === "number" ? match.largestMultiKill : null,
+      doubleKills: typeof match.doubleKills === "number" ? match.doubleKills : null,
+      tripleKills: typeof match.tripleKills === "number" ? match.tripleKills : null,
+      quadraKills: typeof match.quadraKills === "number" ? match.quadraKills : null,
+      pentaKills: typeof match.pentaKills === "number" ? match.pentaKills : null,
+      cs: typeof match.cs === "number" ? match.cs : null,
+      gold: typeof match.gold === "number" ? match.gold : null,
+    }));
+    rows.set(match.championId, current);
+  }
+
+  const bestRecent = [...rows.entries()]
+    .map(([championId, row]) => {
+      const winrate = row.wins / row.games;
+      const averageScore = row.scoreTotal / row.games;
+      return {
+        championId,
+        games: row.games,
+        wins: row.wins,
+        averageScore,
+        reason:
+          row.games >= 3
+            ? `${row.games} games - ${Math.round(winrate * 100)}% WR - ${Math.round(averageScore)} score`
+            : `${row.games} ${row.games === 1 ? "game" : "games"} - ${Math.round(averageScore)} score`,
+        key: averageScore + row.games * 7 + winrate * 18 + (row.games >= 3 ? 10 : 0),
+      };
+    })
+    .sort((left, right) => right.key - left.key)[0];
+
+  if (bestRecent) return bestRecent;
+
+  const mastery = Array.isArray(mains) ? mains[0] : null;
+  return typeof mastery?.championId === "number"
+    ? {
+        championId: mastery.championId,
+        games: 0,
+        wins: 0,
+        averageScore: 0,
+        reason: `${formatNumber(mastery.championPoints)} mastery points`,
+        key: 0,
+      }
+    : null;
+}
+
 function ladderRanks(players: LeaderboardRankView[], playerId: unknown): LadderRanks {
   const id = String(playerId);
   const soloRows = players
@@ -335,7 +404,7 @@ function recentQueueSummary(matches: MatchDoc[], queueId: number): RecentQueueSu
 function playerMetaDescription(player: Pick<PlayerView, "gameName" | "tagLine" | "solo" | "flex">) {
   const soloLine = rankLine(player.solo?.tier ?? null, player.solo?.division ?? null, player.solo?.lp ?? null);
   const flexLine = rankLine(player.flex?.tier ?? null, player.flex?.division ?? null, player.flex?.lp ?? null);
-  return `${player.gameName}#${player.tagLine} on RiftBoard Myanmar. Solo: ${soloLine}. Flex: ${flexLine}. View LP, match history, and champion mastery.`;
+  return `${player.gameName}#${player.tagLine} League profile on RiftBoard Myanmar. Solo/Duo ${soloLine}; Flex ${flexLine}. View rank, match history, Riftboard scores, and champion mastery.`;
 }
 
 export async function generateMetadata({
@@ -384,7 +453,7 @@ export async function generateMetadata({
 
   const canonicalPath = canonicalPlayerPath(player.gameName, player.tagLine);
   const description = playerMetaDescription(player);
-  const title = `${player.gameName}#${player.tagLine} Profile`;
+  const title = `${player.gameName}#${player.tagLine} LoL Profile`;
 
   return {
     title,
@@ -397,6 +466,7 @@ export async function generateMetadata({
       url: absoluteUrl(canonicalPath),
       title,
       description,
+      siteName: "RiftBoard Myanmar",
       images: getSiteOpenGraphImages(),
     },
     twitter: {
@@ -571,12 +641,13 @@ export default async function PlayerProfilePage({
     formatDisplayMetaDateTime(isoOrNull(player.flex?.fetchedAt));
   const masteryUpdatedShort = formatDisplayMetaDateTime(player.masterySyncedAt);
   const masteryPath = `${canonicalPath}/mastery`;
+  const tftProfilePath = `/tft/p/${encodeURIComponent(canonicalGameName)}/${encodeURIComponent(canonicalTagLineLower)}`;
   const profileUrl = absoluteUrl(canonicalPath);
   const facebookShareUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(profileUrl)}`;
-  const mainChampion = Array.isArray(player.mains) ? player.mains[0] : null;
-  const mainChampionId = typeof mainChampion?.championId === "number" ? mainChampion.championId : null;
-  const mainChampionName = mainChampionId != null ? champNames[String(mainChampionId)] ?? `Champion ${mainChampionId}` : null;
-  const mainChampionIcon = champIconUrl(mainChampionId);
+  const signatureChampion = signatureChampionFromRecent(matchDocs, player.mains);
+  const signatureChampionId = signatureChampion?.championId ?? null;
+  const signatureChampionName = signatureChampionId != null ? champNames[String(signatureChampionId)] ?? `Champion ${signatureChampionId}` : null;
+  const signatureChampionIcon = champIconUrl(signatureChampionId);
   const initialCursor = cursorFromLast(initialMatchDocs[initialMatchDocs.length - 1]);
   const initialComments: ProfileCommentView[] = commentDocs.map(serializeProfileComment);
   const profileJsonLd = {
@@ -663,10 +734,23 @@ export default async function PlayerProfilePage({
 
                 <div className="flex flex-wrap gap-2.5">
                   <Link
-                    href={masteryPath}
+                    href={canonicalPath}
+                    aria-current="page"
+                    className="rounded-xl bg-emerald-500/12 px-3.5 py-2 text-sm font-medium text-emerald-100 ring-1 ring-emerald-300/20"
+                  >
+                    LoL profile
+                  </Link>
+                  <Link
+                    href={tftProfilePath}
                     className="rounded-xl bg-zinc-950/42 px-3.5 py-2 text-sm font-medium text-zinc-300 transition hover:bg-white/5"
                   >
-                    Full mastery
+                    TFT profile
+                  </Link>
+                  <Link
+                    href="/leaderboard"
+                    className="rounded-xl bg-zinc-950/42 px-3.5 py-2 text-sm font-medium text-zinc-300 transition hover:bg-white/5"
+                  >
+                    LoL leaderboard
                   </Link>
                   <a
                     href={facebookShareUrl}
@@ -696,16 +780,16 @@ export default async function PlayerProfilePage({
                 secondaryRank={ladder.flex}
               />
               <MainChampionCard
-                name={mainChampionName}
-                icon={mainChampionIcon}
-                points={typeof mainChampion?.championPoints === "number" ? mainChampion.championPoints : null}
+                name={signatureChampionName}
+                icon={signatureChampionIcon}
+                detail={signatureChampion?.reason ?? null}
                 masteryPath={masteryPath}
               />
             </div>
           </div>
         </section>
 
-        <div className="grid gap-3 2xl:grid-cols-[280px_minmax(0,1fr)]">
+        <div className="grid gap-3 xl:grid-cols-[280px_minmax(0,1fr)]">
           <aside className="space-y-3">
             <RankCard
               title="Ranked Solo"
@@ -729,6 +813,22 @@ export default async function PlayerProfilePage({
               recent={flexRecent}
               champNames={champNames}
             />
+            <ProfileCommentsSection
+              gameName={canonicalGameName}
+              tagLine={canonicalTagLineLower}
+              profilePath={canonicalPath}
+              initialComments={initialComments}
+              viewer={
+                viewer
+                  ? {
+                      discordUsername: viewer.discordUsername,
+                      gameName: viewer.gameName,
+                      tagLine: viewer.tagLine,
+                      isProfileOwner: viewer.playerId === String(player._id),
+                    }
+                  : null
+              }
+            />
           </aside>
 
           <div className="space-y-4">
@@ -739,7 +839,7 @@ export default async function PlayerProfilePage({
                     Champion pool
                   </div>
                   <div className="mt-1 text-xl font-semibold tracking-tight text-zinc-50">
-                    Top champions
+                    Main champions
                   </div>
                   <div className="mt-2 text-sm text-zinc-400">
                     Stored from your latest mastery sync and used on the leaderboard too.
@@ -802,23 +902,6 @@ export default async function PlayerProfilePage({
                 )}
               </div>
             </section>
-
-            <ProfileCommentsSection
-              gameName={canonicalGameName}
-              tagLine={canonicalTagLineLower}
-              profilePath={canonicalPath}
-              initialComments={initialComments}
-              viewer={
-                viewer
-                  ? {
-                      discordUsername: viewer.discordUsername,
-                      gameName: viewer.gameName,
-                      tagLine: viewer.tagLine,
-                      isProfileOwner: viewer.playerId === String(player._id),
-                    }
-                  : null
-              }
-            />
 
             <section className="space-y-3">
               <div className="flex items-center justify-between gap-3">
@@ -964,12 +1047,12 @@ function HeroQueueSummaryRow({
 function MainChampionCard({
   name,
   icon,
-  points,
+  detail,
   masteryPath,
 }: {
   name: string | null;
   icon: string | null;
-  points: number | null;
+  detail: string | null;
   masteryPath: string;
 }) {
   if (!name && !icon) return null;
@@ -983,9 +1066,9 @@ function MainChampionCard({
         <div className="h-10 w-10 rounded-xl bg-zinc-950/40" />
       )}
       <div className="min-w-0">
-        <div className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Main champion</div>
+        <div className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Signature pick</div>
         <div className="mt-0.5 truncate text-sm font-semibold text-zinc-100">{name ?? "--"}</div>
-        <div className="mt-0.5 text-xs tabular-nums text-zinc-500">{formatNumber(points) ?? "--"} mastery</div>
+        <div className="mt-0.5 truncate text-xs tabular-nums text-zinc-500">{detail ?? "Recent performance pick"}</div>
       </div>
     </Link>
   );

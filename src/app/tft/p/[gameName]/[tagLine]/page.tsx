@@ -205,11 +205,11 @@ function serializeParticipants(raw: unknown) {
 }
 
 function playerMetaDescription(player: Pick<PlayerView, "gameName" | "tagLine" | "tft">) {
-  return `${player.gameName}#${player.tagLine} TFT profile on RiftBoard Myanmar. Current TFT rank: ${rankLine(
+  return `${player.gameName}#${player.tagLine} TFT profile on RiftBoard Myanmar. Current TFT rank ${rankLine(
     player.tft?.tier ?? null,
     player.tft?.division ?? null,
     player.tft?.lp ?? null
-  )}. View TFT LP, previous peak rank, and TFT match history.`;
+  )}. View TFT LP, peak rank, placements, traits, units, and match history.`;
 }
 
 export async function generateMetadata({
@@ -245,6 +245,7 @@ export async function generateMetadata({
       url: absoluteUrl(canonicalPath),
       title,
       description,
+      siteName: "RiftBoard Myanmar",
       images: getSiteOpenGraphImages(),
     },
     twitter: {
@@ -338,6 +339,9 @@ export default async function TftPlayerProfilePage({
   const lastUpdatedShort =
     formatDisplayMetaDateTime(player.tft?.fetchedAt ?? null) ??
     formatDisplayMetaDateTime(player.lastRefreshAt ?? null);
+  const lolProfilePath = `/p/${encodeURIComponent(canonicalGameName)}/${encodeURIComponent(canonicalTagLineLower)}`;
+  const profileUrl = absoluteUrl(canonicalPath);
+  const facebookShareUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(profileUrl)}`;
   // eslint-disable-next-line react-hooks/purity
   const renderedAtMs = Date.now();
   const profileJsonLd = {
@@ -395,10 +399,17 @@ export default async function TftPlayerProfilePage({
 
                 <div className="flex flex-wrap gap-2.5">
                   <Link
-                    href={`/p/${encodeURIComponent(canonicalGameName)}/${encodeURIComponent(canonicalTagLineLower)}`}
+                    href={lolProfilePath}
                     className="rounded-xl bg-zinc-950/42 px-3.5 py-2 text-sm font-medium text-zinc-300 transition hover:bg-white/5"
                   >
                     LoL profile
+                  </Link>
+                  <Link
+                    href={canonicalPath}
+                    aria-current="page"
+                    className="rounded-xl bg-teal-500/12 px-3.5 py-2 text-sm font-medium text-teal-100 ring-1 ring-teal-300/20"
+                  >
+                    TFT profile
                   </Link>
                   <Link
                     href="/tft"
@@ -406,6 +417,14 @@ export default async function TftPlayerProfilePage({
                   >
                     TFT leaderboard
                   </Link>
+                  <a
+                    href={facebookShareUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-xl bg-zinc-950/42 px-3.5 py-2 text-sm font-medium text-zinc-300 transition hover:bg-white/5"
+                  >
+                    Share Facebook
+                  </a>
                 </div>
               </div>
             </div>
