@@ -55,6 +55,7 @@ type RuneReforgedStyle = {
 };
 
 type DetailsParticipant = NonNullable<MatchDetailsResponse["teams"]>["blue"][number];
+type QueueFilter = "all" | "solo" | "flex" | "arena" | "aram" | "normal" | "other";
 
 const QUEUE_NAMES: Record<number, string> = {
   420: "Ranked Solo/Duo",
@@ -92,6 +93,8 @@ const QUEUE_NAMES: Record<number, string> = {
 };
 
 const ARENA_QUEUES = new Set([1700, 1710, 1720, 1750]);
+const ARAM_QUEUES = new Set([65, 67, 72, 73, 78, 100, 300, 450, 720, 920, 2400]);
+const NORMAL_QUEUES = new Set([400, 430, 480, 490]);
 const CHAMP_ICON_BASE =
   "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-icons";
 const CHAMP_SUMMARY_URL =
@@ -100,6 +103,25 @@ const CHAMP_SUMMARY_URL =
 function queueName(queueId: number | null) {
   if (queueId == null) return "Unknown";
   return QUEUE_NAMES[queueId] ?? `Queue ${queueId}`;
+}
+
+function queueFilterFor(queueId: number | null): Exclude<QueueFilter, "all"> {
+  if (queueId === 420) return "solo";
+  if (queueId === 440) return "flex";
+  if (queueId != null && ARENA_QUEUES.has(queueId)) return "arena";
+  if (queueId != null && ARAM_QUEUES.has(queueId)) return "aram";
+  if (queueId != null && NORMAL_QUEUES.has(queueId)) return "normal";
+  return "other";
+}
+
+function queueFilterLabel(filter: QueueFilter) {
+  if (filter === "all") return "All";
+  if (filter === "solo") return "Solo/Duo";
+  if (filter === "flex") return "Flex";
+  if (filter === "arena") return "Arena";
+  if (filter === "aram") return "ARAM";
+  if (filter === "normal") return "Normals";
+  return "Other";
 }
 
 function matchesUrl(gameName: string, tagLine: string, limit: number, cursor?: string | null) {
@@ -395,6 +417,7 @@ export default function MatchHistory({
   const [detailsByMatchId, setDetailsByMatchId] = useState<Record<string, MatchDetailsResponse>>({});
   const [copyingId, setCopyingId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [queueFilter, setQueueFilter] = useState<QueueFilter>("all");
   const [itemMap, setItemMap] = useState<Record<string, ItemInfo>>({});
   const [spellMap, setSpellMap] = useState<Record<string, SpellInfo>>({});
   const [champMap, setChampMap] = useState<Record<string, string>>({});
@@ -406,6 +429,7 @@ export default function MatchHistory({
     setCursor(initialCursor);
     setErr(null);
     setLoading(false);
+    setQueueFilter("all");
   }, [initialMatches, initialCursor, gameName, tagLine]);
 
   useEffect(() => {
@@ -602,7 +626,8 @@ export default function MatchHistory({
           {
             copiedFor: "AI brag / recent match history review",
             profile: `${gameName}#${tagLine}`,
-            shownMatches: items.map((match) =>
+            filter: queueFilterLabel(queueFilter),
+            shownMatches: visibleItems.map((match) =>
               serializeMatchForAi(match, detailsByMatchId[match.matchId], itemMap, champMap),
             ),
           },
@@ -617,7 +642,38 @@ export default function MatchHistory({
   }
 
   const empty = items.length === 0;
-  const shownCount = useMemo(() => items.length, [items.length]);
+  const queueCounts = useMemo(() => {
+    const counts: Record<QueueFilter, number> = {
+      all: items.length,
+      solo: 0,
+      flex: 0,
+      arena: 0,
+      aram: 0,
+      normal: 0,
+      other: 0,
+    };
+
+    for (const match of items) {
+      counts[queueFilterFor(match.queueId)] += 1;
+    }
+
+    return counts;
+  }, [items]);
+  const filterOptions = useMemo(
+    () =>
+      (["all", "solo", "flex", "arena", "aram", "normal", "other"] as QueueFilter[]).filter(
+        (filter) => filter === "all" || queueCounts[filter] > 0,
+      ),
+    [queueCounts],
+  );
+  const visibleItems = useMemo(
+    () =>
+      queueFilter === "all"
+        ? items
+        : items.filter((match) => queueFilterFor(match.queueId) === queueFilter),
+    [items, queueFilter],
+  );
+  const shownCount = visibleItems.length;
 
   return (
     <div className="space-y-2">
@@ -625,7 +681,32 @@ export default function MatchHistory({
         <div className="text-sm text-zinc-400">No matches yet. Hit Refresh to sync some.</div>
       ) : (
         <div className="space-y-3">
-          {items.map((match) => {
+          <div className="x-scroll-area -mx-1 px-1 pb-1">
+            <div className="flex min-w-max items-center gap-1">
+              {filterOptions.map((filter) => {
+                const active = filter === queueFilter;
+                return (
+                  <button
+                    key={filter}
+                    type="button"
+                    onClick={() => setQueueFilter(filter)}
+                    className={`inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                      active
+                        ? "border-emerald-300/30 bg-emerald-400/15 text-emerald-100"
+                        : "border-white/8 bg-zinc-950/30 text-zinc-400 hover:bg-white/5 hover:text-zinc-100"
+                    }`}
+                  >
+                    <span>{queueFilterLabel(filter)}</span>
+                    <span className={active ? "text-emerald-100/70" : "text-zinc-600"}>
+                      {queueCounts[filter]}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {visibleItems.map((match) => {
             const champIcon =
               match.championId != null ? `${CHAMP_ICON_BASE}/${match.championId}.png` : null;
             const champName = match.championId != null ? champMap[String(match.championId)] : null;
@@ -971,6 +1052,12 @@ export default function MatchHistory({
               </article>
             );
           })}
+
+          {!visibleItems.length ? (
+            <div className="rounded-2xl bg-zinc-950/30 px-4 py-6 text-sm text-zinc-500">
+              No {queueFilterLabel(queueFilter).toLowerCase()} games in the loaded match list.
+            </div>
+          ) : null}
         </div>
       )}
       {err ? <div className="text-sm text-red-300">{err}</div> : null}
