@@ -228,6 +228,7 @@ export default function AdminAddPlayerForm({ stats }: { stats: AdminStats }) {
           limit: 15,
           delayMs: 900,
           matchesCount: 20,
+          matchBackfillCount: 20,
           syncMatches: true,
           syncTftMatches: true,
           force: false,

@@ -64,6 +64,12 @@ export type PlayerDoc = {
   matchSync?: {
     enabled?: boolean;
     lastSyncAt?: Date;
+    recentRequested?: number;
+    recentWritten?: number;
+    backfillLastSyncAt?: Date;
+    backfillStart?: number;
+    backfillRequested?: number;
+    backfillWritten?: number;
   };
 
   tftMatchSync?: {
@@ -156,6 +162,12 @@ const PlayerSchema = new Schema<PlayerDoc>(
     matchSync: {
       enabled: { type: Boolean, default: true },
       lastSyncAt: Date,
+      recentRequested: Number,
+      recentWritten: Number,
+      backfillLastSyncAt: Date,
+      backfillStart: Number,
+      backfillRequested: Number,
+      backfillWritten: Number,
     },
 
     tftMatchSync: {

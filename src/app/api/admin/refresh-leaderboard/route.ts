@@ -29,6 +29,7 @@ export async function POST(req: NextRequest) {
       limit: toInt(body.limit, 15, 1, 200),
       delayMs: toInt(body.delayMs, 900, 0, 5000),
       matchesCount: toInt(body.matchesCount, 20, 1, 100),
+      matchBackfillCount: toInt(body.matchBackfillCount, 20, 0, 100),
       force: toBool(body.force),
       syncMatches: toBool(body.syncMatches),
       syncTftMatches: false,

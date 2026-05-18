@@ -71,6 +71,8 @@ Important variables:
 - `RIOT_API_KEY`: League of Legends production key
 - `RIOT_TFT_API_KEY`: Teamfight Tactics production key
 - `RIOT_ACCOUNT_REGION`: Riot account routing region, currently `asia` for this project
+- `LEADERBOARD_CRON_SYNC_MATCHES`: background leaderboard refresh also caches LoL match history, default `true`
+- `LEADERBOARD_CRON_MATCH_BACKFILL_COUNT`: older LoL matches cached per player per refresh pass, default `20`
 - MongoDB and Discord variables as needed by the enabled flows
 
 For Vercel deployments, add the same variables in the project environment settings. TFT syncing will stay disabled until `RIOT_TFT_API_KEY` is set.

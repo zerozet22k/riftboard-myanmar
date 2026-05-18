@@ -44,6 +44,7 @@ export default function ProfileRefreshButton({
           syncMatches: mode === "lol",
           syncTftMatches: mode === "tft",
           matchesCount: mode === "tft" ? 20 : 10,
+          matchBackfillCount: mode === "lol" ? 20 : 0,
           fullMastery: mode === "lol",
         }),
       });

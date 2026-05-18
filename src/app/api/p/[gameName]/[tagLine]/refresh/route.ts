@@ -106,6 +106,7 @@ export async function POST(
 
     // keep it sane
     const matchesCount = Math.max(1, Math.min(100, toInt(body?.matchesCount, 10)));
+    const matchBackfillCount = Math.max(0, Math.min(100, toInt(body?.matchBackfillCount, 10)));
 
     // optional override for cooldown if you want it
     const force = toBool(body?.force);
@@ -125,6 +126,7 @@ export async function POST(
       force,
       syncMatches,
       matchesCount,
+      matchBackfillCount,
       fullMastery, 
     });
     const discordRoleSync = out?._skipped

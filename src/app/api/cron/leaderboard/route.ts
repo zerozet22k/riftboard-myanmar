@@ -19,6 +19,12 @@ const DEFAULT_MATCHES_COUNT = Math.max(
     1,
     Math.min(100, Number(process.env.LEADERBOARD_CRON_MATCHES_COUNT ?? 20) || 20)
 );
+const DEFAULT_SYNC_MATCHES =
+    String(process.env.LEADERBOARD_CRON_SYNC_MATCHES ?? "true").toLowerCase() !== "false";
+const DEFAULT_MATCH_BACKFILL_COUNT = Math.max(
+    0,
+    Math.min(100, Number(process.env.LEADERBOARD_CRON_MATCH_BACKFILL_COUNT ?? 20) || 20)
+);
 const DEFAULT_SYNC_TFT_MATCHES =
     String(process.env.LEADERBOARD_CRON_SYNC_TFT_MATCHES ?? "true").toLowerCase() !== "false";
 
@@ -69,9 +75,12 @@ export async function GET(req: NextRequest) {
         const delayMs = Math.max(0, Math.min(5000, numParam(url, "delayMs", DEFAULT_DELAY_MS)!));
         const cooldownMs = numParam(url, "cooldownMs", undefined);
         const force = boolParam(url, "force", false);
-        const syncMatches = boolParam(url, "syncMatches", false);
+        const syncMatches = boolParam(url, "syncMatches", DEFAULT_SYNC_MATCHES);
         const syncTftMatches = boolParam(url, "syncTftMatches", syncMatches || DEFAULT_SYNC_TFT_MATCHES);
         const matchesCount = Math.max(1, Math.min(100, numParam(url, "matchesCount", DEFAULT_MATCHES_COUNT)!));
+        const matchBackfillCount = syncMatches
+            ? Math.max(0, Math.min(100, numParam(url, "matchBackfillCount", DEFAULT_MATCH_BACKFILL_COUNT)!))
+            : 0;
 
         const result = await refreshAllPlayers({
             leaderboardOnly: true,
@@ -84,6 +93,7 @@ export async function GET(req: NextRequest) {
             syncMatches,
             syncTftMatches,
             matchesCount,
+            matchBackfillCount,
         });
 
         revalidatePath("/");

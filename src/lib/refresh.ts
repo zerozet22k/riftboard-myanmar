@@ -277,21 +277,24 @@ async function syncFullMastery(player: any, platform: string, puuid: string, now
   player.masterySyncedAt = now;
 }
 
-async function syncRecentMatches(params: { player: any; puuid: string; matchRegion: string; count: number }) {
-  const { player, puuid, matchRegion, count } = params;
-  const now = new Date();
+async function syncMatchIdsForPlayer(params: {
+  player: any;
+  puuid: string;
+  matchRegion: string;
+  ids: string[];
+  now: Date;
+}) {
+  const { player, puuid, matchRegion, ids, now } = params;
+  if (!Array.isArray(ids) || ids.length === 0) return { requested: 0, written: 0 };
 
-  const ids = await getMatchIdsByPuuid({ puuid, matchRegion, start: 0, count });
-  if (!Array.isArray(ids) || ids.length === 0) {
-    player.matchSync = { ...(player.matchSync ?? {}), lastSyncAt: now };
-    await player.save();
-    return;
-  }
+  const uniqueIds = [...new Set(ids.map((id) => String(id ?? "").trim()).filter(Boolean))];
+  if (!uniqueIds.length) return { requested: 0, written: 0 };
 
-  const existing = await Match.find({ matchId: { $in: ids } }, { matchId: 1 }).lean();
+  const existing = await Match.find({ matchId: { $in: uniqueIds } }, { matchId: 1 }).lean();
   const have = new Set(existing.map((x: any) => x.matchId));
+  let written = 0;
 
-  await mapLimit(ids, MATCH_SYNC_CONCURRENCY, async (matchId) => {
+  await mapLimit(uniqueIds, MATCH_SYNC_CONCURRENCY, async (matchId) => {
     try {
       let payload: any | null = null;
 
@@ -373,12 +376,59 @@ async function syncRecentMatches(params: { player: any; puuid: string; matchRegi
         },
         { upsert: true }
       );
+      written++;
     } catch (e) {
       if (isRateLimit(e)) await sleep(rateLimitWaitMs(e, 2500));
     }
   });
 
-  player.matchSync = { ...(player.matchSync ?? {}), lastSyncAt: now };
+  return { requested: uniqueIds.length, written };
+}
+
+async function syncRecentMatches(params: {
+  player: any;
+  puuid: string;
+  matchRegion: string;
+  count: number;
+  backfillCount?: number;
+}) {
+  const { player, puuid, matchRegion, count } = params;
+  const backfillCount = Math.max(0, Math.min(MAX_MATCH_SYNC_COUNT, Number(params.backfillCount ?? 0) || 0));
+  const now = new Date();
+
+  const ids = await getMatchIdsByPuuid({ puuid, matchRegion, start: 0, count });
+  if (!Array.isArray(ids) || ids.length === 0) {
+    player.matchSync = { ...(player.matchSync ?? {}), lastSyncAt: now };
+    await player.save();
+    return;
+  }
+
+  const recent = await syncMatchIdsForPlayer({ player, puuid, matchRegion, ids, now });
+  let backfill = { requested: 0, written: 0, start: 0 };
+
+  if (backfillCount > 0) {
+    try {
+      const storedCount = await PlayerMatch.countDocuments({ playerId: player._id });
+      const start = Math.max(count, storedCount);
+      const olderIds = await getMatchIdsByPuuid({ puuid, matchRegion, start, count: backfillCount });
+      const synced = await syncMatchIdsForPlayer({ player, puuid, matchRegion, ids: olderIds, now });
+      backfill = { ...synced, start };
+    } catch (e) {
+      if (isRateLimit(e)) await sleep(rateLimitWaitMs(e, 2500));
+      else console.error("LoL match backfill failed:", e);
+    }
+  }
+
+  player.matchSync = {
+    ...(player.matchSync ?? {}),
+    lastSyncAt: now,
+    recentRequested: recent.requested,
+    recentWritten: recent.written,
+    backfillLastSyncAt: backfill.requested > 0 ? now : player.matchSync?.backfillLastSyncAt,
+    backfillStart: backfill.start,
+    backfillRequested: backfill.requested,
+    backfillWritten: backfill.written,
+  };
   await player.save();
 }
 
@@ -475,6 +525,7 @@ export async function refreshPlayerById(
 
     syncMatches?: boolean;
     matchesCount?: number;
+    matchBackfillCount?: number;
 
     fullMastery?: boolean;
     syncTftMatches?: boolean;
@@ -708,6 +759,7 @@ export async function refreshPlayerById(
       puuid,
       matchRegion,
       count: Math.max(1, Math.min(MAX_MATCH_SYNC_COUNT, Number(opts?.matchesCount ?? 10) || 10)),
+      backfillCount: Math.max(0, Math.min(MAX_MATCH_SYNC_COUNT, Number(opts?.matchBackfillCount ?? 0) || 0)),
     });
   }
 
@@ -754,6 +806,7 @@ export async function refreshAllPlayers(opts?: {
   syncMatches?: boolean;
   syncTftMatches?: boolean;
   matchesCount?: number;
+  matchBackfillCount?: number;
 }) {
   await dbConnect();
 
@@ -767,15 +820,18 @@ export async function refreshAllPlayers(opts?: {
   }
 
   const playerSort: [string, 1][] =
-    opts?.syncTftMatches === true
-      ? [["tftMatchSync.lastSyncAt", 1], ["lastRefreshAt", 1], ["updatedAt", 1]]
-      : [["lastRefreshAt", 1], ["updatedAt", 1]];
+    opts?.syncMatches === true
+      ? [["matchSync.backfillLastSyncAt", 1], ["matchSync.lastSyncAt", 1], ["lastRefreshAt", 1], ["updatedAt", 1]]
+      : opts?.syncTftMatches === true
+        ? [["tftMatchSync.lastSyncAt", 1], ["lastRefreshAt", 1], ["updatedAt", 1]]
+        : [["lastRefreshAt", 1], ["updatedAt", 1]];
 
   const players = await Player.find(q, {
     _id: 1,
     gameName: 1,
     tagLine: 1,
     lastRefreshAt: 1,
+    matchSync: 1,
     tftMatchSync: 1,
   })
     .sort(playerSort)
@@ -796,6 +852,7 @@ export async function refreshAllPlayers(opts?: {
         syncMatches: opts?.syncMatches === true,
         syncTftMatches: opts?.syncTftMatches === true,
         matchesCount: opts?.matchesCount,
+        matchBackfillCount: opts?.matchBackfillCount,
         fullMastery: false,
       });
 
@@ -843,6 +900,7 @@ export async function upsertAndRefreshByRiotId(
 
     syncMatches?: boolean;
     matchesCount?: number;
+    matchBackfillCount?: number;
 
     fullMastery?: boolean;
   }
