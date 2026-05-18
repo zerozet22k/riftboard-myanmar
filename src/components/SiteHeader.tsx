@@ -3,6 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
+import HeaderPlayerSearch from "@/components/HeaderPlayerSearch";
 import { SITE_LOGO_PATH } from "@/lib/seo";
 
 type SiteHeaderProps = {
@@ -71,7 +72,7 @@ export default function SiteHeader({
           ) : null}
         </div>
 
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+        <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center">
           <nav className="flex flex-wrap items-center gap-1">
             {NAV_ITEMS.map((item) => {
               const active = isActivePath(pathname, item.href);
@@ -87,6 +88,8 @@ export default function SiteHeader({
               );
             })}
           </nav>
+
+          <HeaderPlayerSearch />
 
           <div className="flex flex-wrap items-center gap-2">
             <Link

@@ -1,0 +1,88 @@
+
+> burmese-lp-ranking@0.1.0 dev
+> next dev -p 3001
+
+   ▲ Next.js 16.0.10 (Turbopack)
+   - Local:         http://localhost:3001
+   - Network:       http://169.254.83.107:3001
+   - Environments: .env.local, .env
+
+ ✓ Starting...
+Creating turbopack project { dir: 'C:\\Code\\Riftboard', testMode: true }
+ ✓ Ready in 3.1s
+ ○ Compiling /p/[gameName]/[tagLine] ...
+ GET /p/Zet/kat22?verify=score-layout 200 in 18.1s (compile: 12.8s, render: 5.3s)
+ GET /api/p/Zet/kat22/matches/SG2_153765057 200 in 2.3s (compile: 1833ms, render: 447ms)
+ GET / 200 in 3.7s (compile: 1729ms, render: 2.0s)
+ GET /p/Zet/kat22 200 in 459ms (compile: 42ms, render: 416ms)
+ GET /api/p/Zet/kat22/matches/SG2_153765057 200 in 475ms (compile: 12ms, render: 462ms)
+ POST /api/p/Zet/kat22/refresh 200 in 1945ms (compile: 1841ms, render: 104ms)
+ GET /api/p/Zet/kat22/matches?limit=10&autosync=1&cursor=eyJnYyI6MTc3ODYwNDc1MTk4NCwiaWQiOiI2YTAzNjU1NDAwZGU2OWZhNTJkYWJkZjYiLCJtYXRjaElkIjoiU0cyXzE1MjU2MDg4NCJ9 200 in 1462ms (compile: 1342ms, render: 120ms)
+ ✓ Compiled in 296ms
+ ✓ Compiled in 553ms
+ ✓ Compiled in 440ms
+ ✓ Compiled in 340ms
+ GET /api/p/Zet/kat22/matches/SG2_153765057 200 in 447ms (compile: 10ms, render: 437ms)
+ ✓ Compiled in 681ms
+ ✓ Compiled in 621ms
+ POST /api/p/Zet/kat22/refresh 200 in 47s (compile: 13ms, render: 47s)
+ GET /p/Zet/kat22 200 in 1355ms (compile: 427ms, render: 928ms)
+ GET /p/Zet/kat22?verify=copy-json 200 in 755ms (compile: 20ms, render: 734ms)
+ GET /api/p/Zet/kat22/matches/SG2_153769064 200 in 827ms (compile: 18ms, render: 809ms)
+ GET /p/Zet/kat22?verify=copy-json 200 in 805ms (compile: 271ms, render: 534ms)
+ GET /p/Zet/kat22 200 in 2.9s (compile: 405ms, render: 2.5s)
+ ✓ Compiled in 785ms
+ ✓ Compiled in 122ms
+ GET /p/Zet/kat22?verify=copy-json 200 in 815ms (compile: 251ms, render: 564ms)
+ GET /p/Zet/kat22 200 in 439ms (compile: 7ms, render: 433ms)
+ GET /p/Zet/kat22?verify=120-score 200 in 2.0s (compile: 52ms, render: 1960ms)
+ GET /p/Zet/kat22?verify=120-score 200 in 594ms (compile: 16ms, render: 578ms)
+ ✓ Compiled in 416ms
+ GET /p/Zet/kat22?verify=120-score 200 in 761ms (compile: 208ms, render: 553ms)
+ GET /p/Zet/kat22 200 in 444ms (compile: 6ms, render: 438ms)
+ GET /api/p/Zet/kat22/matches?limit=10&autosync=1&cursor=eyJnYyI6MTc3ODY1NTQxNzEyMywiaWQiOiI2YTA1NThiZThjZjRiMzQ5MGIzOTE2MDYiLCJtYXRjaElkIjoiU0cyXzE1MjYzNDUyMyJ9 200 in 149ms (compile: 13ms, render: 136ms)
+ GET /p/Zet/kat22?verify=120-score 200 in 834ms (compile: 261ms, render: 573ms)
+ GET /p/Zet/kat22 200 in 852ms (compile: 413ms, render: 439ms)
+ ✓ Compiled in 607ms
+ ✓ Compiled in 233ms
+ ✓ Compiled in 1094ms
+ ✓ Compiled in 809ms
+ GET /p/Zet/kat22 200 in 416ms (compile: 6ms, render: 410ms)
+ GET /p/Zet/kat22?verify=120-score 200 in 776ms (compile: 199ms, render: 578ms)
+ GET /api/p/Zet/kat22/matches/SG2_153769064 200 in 474ms (compile: 20ms, render: 454ms)
+ GET /p/Zet/kat22?verify=queue-scoring 200 in 2.9s (compile: 22ms, render: 2.8s)
+ GET /p/Zet/kat22 200 in 741ms (compile: 224ms, render: 516ms)
+ GET /p/Zet/kat22?verify=queue-scoring 200 in 761ms (compile: 359ms, render: 401ms)
+ GET /p/Zet/kat22 200 in 892ms (compile: 268ms, render: 624ms)
+ GET /p/Zet/kat22?verify=queue-scoring 200 in 928ms (compile: 397ms, render: 531ms)
+ GET /p/Zet/kat22?verify=queue-scoring 200 in 805ms (compile: 250ms, render: 555ms)
+ GET /p/Zet/kat22 200 in 820ms (compile: 382ms, render: 438ms)
+ GET /api/p/Zet/kat22/matches/SG2_153765057 200 in 522ms (compile: 17ms, render: 504ms)
+ GET /p/Zet/kat22?verify=queue-scoring 200 in 1145ms (compile: 376ms, render: 768ms)
+ GET /p/Zet/kat22 200 in 546ms (compile: 76ms, render: 470ms)
+ GET /p/Zet/kat22?verify=legendary-labels 200 in 1114ms (compile: 27ms, render: 1087ms)
+ GET /api/p/Zet/kat22/matches/SG2_153769064 200 in 574ms (compile: 21ms, render: 553ms)
+ GET /p/Zet/kat22 200 in 797ms (compile: 287ms, render: 510ms)
+ GET /p/Zet/kat22?verify=diagnostic-tags 200 in 1796ms (compile: 15ms, render: 1781ms)
+ GET /p/Zet/kat22 200 in 658ms (compile: 20ms, render: 638ms)
+ GET /leaderboard 200 in 2.5s (compile: 651ms, render: 1893ms)
+ GET /leaderboard 200 in 2.2s (compile: 7ms, render: 2.2s)
+ GET /p/Kyren%E3%82%BC%E3%83%AD/nano 200 in 337ms (compile: 22ms, render: 315ms)
+ POST /api/p/Kyren%E3%82%BC%E3%83%AD/nano/refresh 200 in 7.3s (compile: 20ms, render: 7.3s)
+ GET /p/Kyren%E3%82%BC%E3%83%AD/nano 200 in 325ms (compile: 20ms, render: 305ms)
+ GET /api/p/Kyren%E3%82%BC%E3%83%AD/nano/matches/SG2_153714278 200 in 519ms (compile: 19ms, render: 500ms)
+ GET /api/p/Kyren%E3%82%BC%E3%83%AD/nano/matches/SG2_153723471 200 in 512ms (compile: 19ms, render: 493ms)
+ ✓ Compiled in 305ms
+ ✓ Compiled in 370ms
+ GET /p/Zet/kat22?verify=diagnostic-tags 200 in 2.7s (compile: 285ms, render: 2.4s)
+ GET /p/Zet/kat22 200 in 2.1s (compile: 9ms, render: 2.0s)
+ GET /p/Kyren%E3%82%BC%E3%83%AD/nano 200 in 2.2s (compile: 109ms, render: 2.1s)
+ ✓ Compiled in 239ms
+ GET /api/p/search?q=Zet 200 in 432ms (compile: 360ms, render: 72ms)
+ GET /p/Zet/kat22?verify=header-search 200 in 1004ms (compile: 231ms, render: 773ms)
+ ✓ Compiled in 380ms
+ GET /p/Kyren%E3%82%BC%E3%83%AD/nano 200 in 1547ms (compile: 72ms, render: 1476ms)
+ GET /p/Zet/kat22 200 in 1596ms (compile: 8ms, render: 1588ms)
+ GET /p/Zet/kat22?verify=header-search 200 in 2.3s (compile: 269ms, render: 2.1s)
+ GET /p/Zet/kat22?verify=header-rank-chip 200 in 760ms (compile: 26ms, render: 734ms)
+ GET /api/p/search?q=Zet 200 in 49ms (compile: 3ms, render: 46ms)

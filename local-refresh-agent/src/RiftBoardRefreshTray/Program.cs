@@ -595,6 +595,9 @@ internal sealed class SettingsForm : Form
         {
             SetConfig(new AgentConfig
             {
+                CronOnly = _config.CronOnly,
+                RemoteAppUrl = _config.RemoteAppUrl,
+                CronToken = _config.CronToken,
                 StartupTimeoutSec = _config.StartupTimeoutSec,
                 LocalAppUrl = _config.LocalAppUrl,
             });
@@ -664,6 +667,9 @@ internal sealed class SettingsForm : Form
     {
         var updated = new AgentConfig
         {
+            CronOnly = _config.CronOnly,
+            RemoteAppUrl = _config.RemoteAppUrl,
+            CronToken = _config.CronToken,
             LocalAppUrl = _config.LocalAppUrl,
             StartupTimeoutSec = _config.StartupTimeoutSec,
             RankJob = BuildJobConfig(_rankEnabledBox, _rankIntervalBox, _rankLimitBox, _rankDelayBox, _rankMatchesCountBox) with
@@ -928,6 +934,7 @@ internal sealed class RefreshLoop
     private readonly Action<DateTimeOffset?> _updateTftNext;
     private readonly Action<DateTimeOffset?> _updateLiveNext;
     private readonly Action<string> _updateLastError;
+    private readonly HttpClient _http = new();
     private readonly SemaphoreSlim _gate = new(1, 1);
     private CancellationTokenSource? _cts;
     private Task? _rankTask;
@@ -1141,7 +1148,9 @@ internal sealed class RefreshLoop
     private async Task<TickOutcome> RunTickJobAsync(RefreshJob job, AgentConfig config, JobConfig jobConfig, CancellationToken cancellationToken)
     {
         _updateCurrent(JobLabel(job));
-        var result = await new CSharpRefreshService(_repoRoot).RefreshAsync(job, jobConfig, cancellationToken);
+        var result = config.CronOnly
+            ? await RunRemoteCronJobAsync(job, config, jobConfig, cancellationToken)
+            : await new CSharpRefreshService(_repoRoot).RefreshAsync(job, jobConfig, cancellationToken);
 
         return new TickOutcome(
             result.Ok,
@@ -1150,6 +1159,69 @@ internal sealed class RefreshLoop
             result.Scanned,
             BuildCronPlayerSummary(result.Players),
             PrefixError(JobLabel(job), BuildCronErrorSummary(result.Errors)));
+    }
+
+    private async Task<CronResult> RunRemoteCronJobAsync(
+        RefreshJob job,
+        AgentConfig config,
+        JobConfig jobConfig,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(config.CronToken))
+        {
+            throw new InvalidOperationException("Missing cron token in config.json.");
+        }
+
+        var path = job switch
+        {
+            RefreshJob.Rank => "/api/cron/leaderboard",
+            RefreshJob.Tft => "/api/cron/tft-matches",
+            _ => "/api/cron/live-games",
+        };
+        var baseUrl = config.RemoteAppUrl.TrimEnd('/');
+        var url = new UriBuilder($"{baseUrl}{path}");
+        var query = new List<string>
+        {
+            $"limit={jobConfig.Limit}",
+            $"delayMs={jobConfig.DelayMs}",
+        };
+
+        if (job != RefreshJob.Live)
+        {
+            query.Add($"matchesCount={jobConfig.MatchesCount}");
+            if (jobConfig.CooldownMs is { } cooldownMs) query.Add($"cooldownMs={cooldownMs}");
+            if (jobConfig.Force) query.Add("force=1");
+        }
+
+        if (job == RefreshJob.Rank)
+        {
+            query.Add($"syncMatches={(jobConfig.SyncMatches ? "1" : "0")}");
+            query.Add("syncTftMatches=0");
+        }
+
+        url.Query = string.Join("&", query);
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, url.Uri);
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", config.CronToken);
+        using var response = await _http.SendAsync(request, cancellationToken);
+        var text = await response.Content.ReadAsStringAsync(cancellationToken);
+        CronResponse? payload = null;
+        try
+        {
+            payload = JsonSerializer.Deserialize<CronResponse>(text, AgentConfig.JsonOptions);
+        }
+        catch
+        {
+        }
+
+        if (!response.IsSuccessStatusCode || payload?.Ok != true)
+        {
+            var error = payload?.Error;
+            if (string.IsNullOrWhiteSpace(error)) error = string.IsNullOrWhiteSpace(text) ? response.ReasonPhrase : text;
+            throw new InvalidOperationException($"Cron {(int)response.StatusCode}: {error}");
+        }
+
+        return payload.Result ?? new CronResult();
     }
 
     private static string JobLabel(RefreshJob job)
@@ -1296,7 +1368,7 @@ internal sealed class RefreshLoop
             current = current.Parent;
         }
 
-        throw new InvalidOperationException("Could not resolve the RiftBoard repo root.");
+        return baseDirectory;
     }
 
     private static string TrimForNotification(string message)
@@ -1326,7 +1398,7 @@ internal sealed record DiscordRoleSyncResult(BsonDocument Snapshot, string? Assi
 
 internal sealed class CSharpRefreshService
 {
-    private const int LivePostFormatVersion = 3;
+    private const int LivePostFormatVersion = 4;
     private static readonly string[] SeaPlatforms = ["sg2", "th2", "ph2", "vn2", "tw2"];
     private static readonly string[] ManagedRankTiers =
     [
@@ -1474,7 +1546,7 @@ internal sealed class CSharpRefreshService
                 ["color"] = 0x4ba3ff,
                 ["thumbnail"] = new Dictionary<string, object?>
                 {
-                    ["url"] = "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Seraphine_0.jpg",
+                    ["url"] = NeutralLiveThumbnailUrl(),
                 },
                 ["fields"] = new[]
                 {
@@ -2149,7 +2221,6 @@ internal sealed class CSharpRefreshService
         CancellationToken cancellationToken)
     {
         var championNames = await GetChampionNamesAsync(cancellationToken);
-        var championIcons = await GetChampionIconsAsync(cancellationToken);
         var gameId = GetLong(game, "gameId") ?? 0;
         var queueId = GetInt(game, "gameQueueConfigId");
         var length = GetInt(game, "gameLength") ?? 0;
@@ -2171,7 +2242,6 @@ internal sealed class CSharpRefreshService
             return ChampionName(championNames, GetInt(participant, "championId"));
         }
 
-        var trackedChampionId = default(int?);
         var trackedTeamIds = new HashSet<int>();
         var trackedPuuids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var mentionIds = new HashSet<string>(StringComparer.Ordinal);
@@ -2204,7 +2274,6 @@ internal sealed class CSharpRefreshService
 
                 var participant = participants.FirstOrDefault(p => string.Equals(GetString(p, "puuid"), puuid, StringComparison.OrdinalIgnoreCase));
                 var championId = participant.ValueKind == JsonValueKind.Undefined ? null : GetInt(participant, "championId");
-                if (trackedChampionId is null && championId is not null) trackedChampionId = championId;
                 var trackedTeamId = participant.ValueKind == JsonValueKind.Undefined ? null : GetInt(participant, "teamId");
                 if (trackedTeamId is not null) trackedTeamIds.Add(trackedTeamId.Value);
                 var riotId = PlayerRiotId(player);
@@ -2231,14 +2300,11 @@ internal sealed class CSharpRefreshService
             ["title"] = $"{QueueName(queueId)} live on {platform.ToUpperInvariant()}",
             ["description"] = $"Game `{gameId}` - {FormatGameLength(length)}",
             ["color"] = QueueColor(queueId),
+            ["thumbnail"] = new Dictionary<string, object?> { ["url"] = NeutralLiveThumbnailUrl() },
             ["fields"] = fields,
             ["footer"] = new Dictionary<string, object?> { ["text"] = "RiftBoard live games" },
             ["timestamp"] = DateTimeOffset.UtcNow.ToString("O"),
         };
-        if (trackedChampionId is not null && championIcons.TryGetValue(trackedChampionId.Value, out var iconUrl))
-        {
-            embed["thumbnail"] = new Dictionary<string, object?> { ["url"] = iconUrl };
-        }
 
         var mentions = mentionIds.Select(id => $"<@{id}>").ToList();
         var fallbackRiotIds = linkedPlayersInGame.Count > 0
@@ -2496,6 +2562,11 @@ internal sealed class CSharpRefreshService
     {
         await GetChampionNamesAsync(cancellationToken);
         return _championIcons ?? new Dictionary<int, string>();
+    }
+
+    private string NeutralLiveThumbnailUrl()
+    {
+        return $"{AppBaseUrl()}/logo.png";
     }
 
     private static string FormatGameLength(int seconds)
@@ -3442,6 +3513,9 @@ internal sealed class SingleInstanceGuard : IDisposable
 
 internal sealed class AgentConfig
 {
+    public bool CronOnly { get; init; }
+    public string RemoteAppUrl { get; init; } = "https://rift-board-myanmar.vercel.app";
+    public string CronToken { get; init; } = "";
     public string LocalAppUrl { get; init; } = "http://127.0.0.1:43117";
     public JobConfig RankJob { get; init; } = new() { SyncMatches = true, SyncTftMatches = false };
     public JobConfig TftJob { get; init; } = new() { SyncMatches = false, SyncTftMatches = true };
@@ -3452,6 +3526,9 @@ internal sealed class AgentConfig
     {
         return new AgentConfig
         {
+            CronOnly = CronOnly,
+            RemoteAppUrl = NormalizeRemoteAppUrl(RemoteAppUrl),
+            CronToken = CronToken?.Trim() ?? "",
             LocalAppUrl = NormalizeLocalAppUrl(LocalAppUrl),
             RankJob = RankJob.Normalize() with { SyncTftMatches = false },
             TftJob = TftJob.Normalize() with { SyncMatches = false, SyncTftMatches = true },
@@ -3502,6 +3579,19 @@ internal sealed class AgentConfig
         }
 
         return uri.AbsoluteUri.TrimEnd('/');
+    }
+
+    private static string NormalizeRemoteAppUrl(string? raw)
+    {
+        if (
+            Uri.TryCreate(raw, UriKind.Absolute, out var uri) &&
+            uri.Scheme is "https" or "http" &&
+            uri.Host is not "127.0.0.1" and not "localhost" and not "::1")
+        {
+            return uri.AbsoluteUri.TrimEnd('/');
+        }
+
+        return "https://rift-board-myanmar.vercel.app";
     }
 
     internal static readonly JsonSerializerOptions JsonOptions = new()

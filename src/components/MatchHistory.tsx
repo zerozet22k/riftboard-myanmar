@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import MatchDetailsPanel, { type MatchDetailsResponse } from "@/components/MatchDetailsPanel";
 import { formatCompactDateTime, formatNumber, formatRelativeTime } from "@/lib/displayTime";
-import { analyzeMatchPerformance, matchPerformanceToneClass, type MatchPerformanceBadge } from "@/lib/matchAnalysis";
+import { analyzeMatchPerformance, csPerMinute, matchPerformanceToneClass, type MatchPerformanceBadge } from "@/lib/matchAnalysis";
 
 export type MatchRow = {
   _id: string;
@@ -54,12 +54,16 @@ type RuneReforgedStyle = {
   slots?: Array<{ runes?: Array<{ id?: number; name?: string; icon?: string }> }>;
 };
 
+type DetailsParticipant = NonNullable<MatchDetailsResponse["teams"]>["blue"][number];
+
 const QUEUE_NAMES: Record<number, string> = {
   420: "Ranked Solo/Duo",
   440: "Ranked Flex",
   700: "Clash",
+  720: "ARAM Clash",
   400: "Normal Draft",
   430: "Normal Blind",
+  480: "Swiftplay",
   490: "Quickplay",
   450: "ARAM",
   900: "ARURF",
@@ -67,12 +71,19 @@ const QUEUE_NAMES: Record<number, string> = {
   1020: "One for All",
   1300: "Nexus Blitz",
   1400: "Ultimate Spellbook",
+  1900: "Pick URF",
+  2300: "Brawl",
+  2400: "ARAM: Mayhem",
   830: "Co-op vs AI (Intro)",
   840: "Co-op vs AI (Beginner)",
   850: "Co-op vs AI (Intermediate)",
+  870: "Co-op vs AI (Intro)",
+  880: "Co-op vs AI (Beginner)",
+  890: "Co-op vs AI (Intermediate)",
   1700: "Arena",
   1710: "Arena",
   1720: "Arena",
+  1750: "Arena",
   1090: "TFT (Normal)",
   1100: "TFT (Ranked)",
   1110: "TFT (Tutorial)",
@@ -80,7 +91,7 @@ const QUEUE_NAMES: Record<number, string> = {
   1160: "TFT (Double Up)",
 };
 
-const ARENA_QUEUES = new Set([1700, 1710, 1720]);
+const ARENA_QUEUES = new Set([1700, 1710, 1720, 1750]);
 const CHAMP_ICON_BASE =
   "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-icons";
 const CHAMP_SUMMARY_URL =
@@ -114,6 +125,14 @@ function fmtDuration(sec: number | null) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatRankForAi(snapshot: DetailsParticipant["solo"] | null | undefined) {
+  if (!snapshot?.tier) return "UNRANKED";
+  const tier = String(snapshot.tier).toUpperCase();
+  const division = snapshot.division ? ` ${String(snapshot.division).toUpperCase()}` : "";
+  const lp = snapshot.lp != null ? ` ${formatNumber(snapshot.lp)} LP` : "";
+  return `${tier}${division}${lp}`.trim();
 }
 
 function sideLabel(teamId?: number | null) {
@@ -219,7 +238,9 @@ function PerformanceBadges({ badges }: { badges: MatchPerformanceBadge[] }) {
       {badges.map((badge) => (
         <Pill
           key={`${badge.kind}-${badge.label}`}
-          className={`${matchPerformanceToneClass(badge.tone)} ${badge.kind === "verdict" ? "font-semibold" : ""}`}
+          className={`${matchPerformanceToneClass(badge.tone)} ${
+            badge.kind === "score" || badge.kind === "verdict" ? "font-semibold" : ""
+          }`}
           title={badge.title}
         >
           {badge.label}
@@ -227,6 +248,126 @@ function PerformanceBadges({ badges }: { badges: MatchPerformanceBadge[] }) {
       ))}
     </div>
   );
+}
+
+function readableItems(ids: number[], itemMap: Record<string, ItemInfo>) {
+  return ids.slice(0, 7).map((id) => ({
+    id,
+    name: itemMap[String(id)]?.name ?? `Item ${id}`,
+  }));
+}
+
+function badgeColor(tone: MatchPerformanceBadge["tone"]) {
+  if (tone === "rainbow") {
+    return {
+      name: "rainbow",
+      accent: "#f472b6",
+      text: "#ffffff",
+      gradient: "linear-gradient(90deg, #f472b6, #facc15, #34d399, #60a5fa, #a855f7)",
+    };
+  }
+  if (tone === "gold") return { name: "gold", accent: "#facc15", text: "#fef9c3" };
+  if (tone === "silver") return { name: "silver", accent: "#e4e4e7", text: "#fafafa" };
+  if (tone === "bronze") return { name: "bronze", accent: "#b45309", text: "#fed7aa" };
+  if (tone === "elite") return { name: "emerald", accent: "#34d399", text: "#d1fae5" };
+  if (tone === "good") return { name: "cyan", accent: "#22d3ee", text: "#cffafe" };
+  if (tone === "warn") return { name: "yellow", accent: "#facc15", text: "#fef3c7" };
+  if (tone === "bad") return { name: "orange", accent: "#fb923c", text: "#ffedd5" };
+  if (tone === "awful") return { name: "red", accent: "#f87171", text: "#fee2e2" };
+  return { name: "neutral", accent: "#71717a", text: "#d4d4d8" };
+}
+
+function readableBadges(badges: MatchPerformanceBadge[]) {
+  return badges.map((badge) => ({
+    label: badge.label,
+    kind: badge.kind,
+    tier: badge.tone,
+    color: badgeColor(badge.tone),
+    note: badge.title,
+  }));
+}
+
+function serializeParticipantForAi(
+  participant: DetailsParticipant,
+  matchDuration: number | null | undefined,
+  queueId: number | null | undefined,
+  itemMap: Record<string, ItemInfo>,
+  champMap: Record<string, string>,
+) {
+  const kills = participant.kills ?? 0;
+  const deaths = participant.deaths ?? 0;
+  const assists = participant.assists ?? 0;
+  const kda = deaths === 0 ? kills + assists : Number(((kills + assists) / deaths).toFixed(2));
+  const badges = analyzeMatchPerformance({ ...participant, gameDuration: matchDuration ?? null, queueId });
+
+  return {
+    player: participant.riotId ?? participant.summonerName ?? "Unknown player",
+    isMe: participant.isMe,
+    champion: participant.championId != null ? champMap[String(participant.championId)] ?? `Champion ${participant.championId}` : null,
+    role: prettyPos(participant.teamPosition) ?? participant.teamPosition,
+    result: participant.win === true ? "win" : participant.win === false ? "loss" : null,
+    kdaLine: `${kills}/${deaths}/${assists}`,
+    kda,
+    damage: participant.damage ?? null,
+    visionScore: participant.visionScore ?? null,
+    wards: {
+      placed: participant.wardsPlaced ?? null,
+      killed: participant.wardsKilled ?? null,
+    },
+    cs: participant.cs ?? null,
+    csPerMinute: csPerMinute(participant.cs, matchDuration)?.toFixed(1) ?? null,
+    gold: participant.gold ?? null,
+    soloRank: formatRankForAi(participant.solo),
+    flexRank: formatRankForAi(participant.flex),
+    items: readableItems(participant.items, itemMap),
+    riftboard: readableBadges(badges),
+  };
+}
+
+function serializeMatchForAi(
+  match: MatchRow,
+  details: MatchDetailsResponse | undefined,
+  itemMap: Record<string, ItemInfo>,
+  champMap: Record<string, string>,
+) {
+  const kills = match.kills ?? 0;
+  const deaths = match.deaths ?? 0;
+  const assists = match.assists ?? 0;
+  const badges = analyzeMatchPerformance(match);
+  const matchDuration = details?.match?.gameDuration ?? match.gameDuration ?? null;
+
+  return {
+    copiedFor: "AI brag / match review",
+    player: `${match.championId != null ? champMap[String(match.championId)] ?? `Champion ${match.championId}` : "Unknown champion"} game by profile owner`,
+    match: {
+      id: match.matchId,
+      queue: queueName(match.queueId),
+      result: match.win === true ? "victory" : match.win === false ? "defeat" : null,
+      duration: fmtDuration(match.gameDuration ?? null),
+      playedAt: match.gameCreation ? new Date(match.gameCreation).toISOString() : null,
+      side: sideLabel(match.teamId ?? null),
+      role: prettyPos(match.teamPosition ?? null),
+    },
+    performance: {
+      champion: match.championId != null ? champMap[String(match.championId)] ?? `Champion ${match.championId}` : null,
+      kdaLine: `${kills}/${deaths}/${assists}`,
+      cs: match.cs ?? null,
+      csPerMinute: csPerMinute(match.cs, match.gameDuration ?? null)?.toFixed(1) ?? null,
+      gold: match.gold ?? null,
+      items: readableItems(match.items, itemMap),
+      riftboard: readableBadges(badges),
+    },
+    teams: details?.teams
+      ? {
+          blue: details.teams.blue.map((participant) =>
+            serializeParticipantForAi(participant, matchDuration, details.match?.queueId ?? match.queueId, itemMap, champMap),
+          ),
+          red: details.teams.red.map((participant) =>
+            serializeParticipantForAi(participant, matchDuration, details.match?.queueId ?? match.queueId, itemMap, champMap),
+          ),
+        }
+      : null,
+  };
 }
 
 export default function MatchHistory({
@@ -252,6 +393,8 @@ export default function MatchHistory({
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
   const [detailErrors, setDetailErrors] = useState<Record<string, string>>({});
   const [detailsByMatchId, setDetailsByMatchId] = useState<Record<string, MatchDetailsResponse>>({});
+  const [copyingId, setCopyingId] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [itemMap, setItemMap] = useState<Record<string, ItemInfo>>({});
   const [spellMap, setSpellMap] = useState<Record<string, SpellInfo>>({});
   const [champMap, setChampMap] = useState<Record<string, string>>({});
@@ -384,13 +527,7 @@ export default function MatchHistory({
     }
   }
 
-  async function toggleDetails(matchId: string) {
-    if (openMatchId === matchId) {
-      setOpenMatchId(null);
-      return;
-    }
-
-    setOpenMatchId(matchId);
+  async function fetchMatchDetails(matchId: string) {
     if (detailsByMatchId[matchId] || detailLoadingId === matchId) return;
 
     setDetailLoadingId(matchId);
@@ -409,6 +546,7 @@ export default function MatchHistory({
       }
 
       setDetailsByMatchId((previous) => ({ ...previous, [matchId]: json }));
+      return json;
     } catch (error) {
       setDetailErrors((previous) => ({
         ...previous,
@@ -419,10 +557,63 @@ export default function MatchHistory({
     }
   }
 
-  async function copy(text: string) {
+  async function toggleDetails(matchId: string) {
+    if (openMatchId === matchId) {
+      setOpenMatchId(null);
+      return;
+    }
+
+    setOpenMatchId(matchId);
+    await fetchMatchDetails(matchId);
+  }
+
+  async function copy(text: string, copiedKey?: string) {
     try {
       await navigator.clipboard.writeText(text);
+      if (copiedKey) {
+        setCopiedId(copiedKey);
+        window.setTimeout(() => {
+          setCopiedId((current) => (current === copiedKey ? null : current));
+        }, 1600);
+      }
     } catch {}
+  }
+
+  async function copyMatchForAi(match: MatchRow) {
+    const key = `match:${match.matchId}`;
+    setCopyingId(key);
+    try {
+      const details = detailsByMatchId[match.matchId] ?? (await fetchMatchDetails(match.matchId));
+      await copy(
+        JSON.stringify(serializeMatchForAi(match, details, itemMap, champMap), null, 2),
+        key,
+      );
+    } finally {
+      setCopyingId((current) => (current === key ? null : current));
+    }
+  }
+
+  async function copyShownHistoryForAi() {
+    const key = "shown-history";
+    setCopyingId(key);
+    try {
+      await copy(
+        JSON.stringify(
+          {
+            copiedFor: "AI brag / recent match history review",
+            profile: `${gameName}#${tagLine}`,
+            shownMatches: items.map((match) =>
+              serializeMatchForAi(match, detailsByMatchId[match.matchId], itemMap, champMap),
+            ),
+          },
+          null,
+          2,
+        ),
+        key,
+      );
+    } finally {
+      setCopyingId((current) => (current === key ? null : current));
+    }
   }
 
   const empty = items.length === 0;
@@ -581,7 +772,7 @@ export default function MatchHistory({
                     )}
                   </div>
 
-                  <div className="grid gap-1.5 sm:grid-cols-2">
+                  <div className="grid gap-1.5 sm:grid-cols-3">
                     <button
                       type="button"
                       onClick={() => toggleDetails(match.matchId)}
@@ -592,10 +783,23 @@ export default function MatchHistory({
 
                     <button
                       type="button"
-                      onClick={() => copy(match.matchId)}
+                      onClick={() => copy(match.matchId, `id:${match.matchId}`)}
                       className="rounded-lg bg-zinc-950/35 px-2.5 py-1.5 text-[11px] text-zinc-300 transition hover:bg-white/5"
                     >
-                      Copy match ID
+                      {copiedId === `id:${match.matchId}` ? "Copied ID" : "Copy match ID"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => copyMatchForAi(match)}
+                      disabled={copyingId === `match:${match.matchId}`}
+                      className="rounded-lg bg-emerald-500/10 px-2.5 py-1.5 text-[11px] font-medium text-emerald-100 ring-1 ring-emerald-400/15 transition hover:bg-emerald-400/15 disabled:opacity-50"
+                    >
+                      {copyingId === `match:${match.matchId}`
+                        ? "Copying..."
+                        : copiedId === `match:${match.matchId}`
+                          ? "Copied JSON"
+                          : "Copy AI JSON"}
                     </button>
                   </div>
                 </div>
@@ -730,10 +934,23 @@ export default function MatchHistory({
 
                     <button
                       type="button"
-                      onClick={() => copy(match.matchId)}
+                      onClick={() => copy(match.matchId, `id:${match.matchId}`)}
                       className="rounded-lg bg-zinc-950/28 px-2 py-1.5 text-[10px] text-zinc-300 transition hover:bg-white/5"
                     >
-                      Copy match ID
+                      {copiedId === `id:${match.matchId}` ? "Copied ID" : "Copy match ID"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => copyMatchForAi(match)}
+                      disabled={copyingId === `match:${match.matchId}`}
+                      className="rounded-lg bg-emerald-500/10 px-2 py-1.5 text-[10px] font-medium text-emerald-100 ring-1 ring-emerald-400/15 transition hover:bg-emerald-400/15 disabled:opacity-50"
+                    >
+                      {copyingId === `match:${match.matchId}`
+                        ? "Copying..."
+                        : copiedId === `match:${match.matchId}`
+                          ? "Copied JSON"
+                          : "Copy AI JSON"}
                     </button>
                   </div>
                 </div>
@@ -757,18 +974,32 @@ export default function MatchHistory({
         </div>
       )}
       {err ? <div className="text-sm text-red-300">{err}</div> : null}
-      <div className="flex items-center justify-between gap-3 px-1">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-1">
         <div className="text-xs text-zinc-500">
           Showing <span className="text-zinc-300">{shownCount}</span> matches
         </div>
-        <button
-          type="button"
-          onClick={loadMore}
-          disabled={!cursor || loading}
-          className="rounded-2xl border border-zinc-800 bg-zinc-950/40 px-4 py-2 text-sm hover:bg-white/5 disabled:opacity-40"
-        >
-          {loading ? "Loading..." : cursor ? "Load more" : "No more"}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={copyShownHistoryForAi}
+            disabled={!items.length || copyingId === "shown-history"}
+            className="rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-100 hover:bg-emerald-400/15 disabled:opacity-40"
+          >
+            {copyingId === "shown-history"
+              ? "Copying..."
+              : copiedId === "shown-history"
+                ? "Copied JSON"
+                : "Copy shown JSON"}
+          </button>
+          <button
+            type="button"
+            onClick={loadMore}
+            disabled={!cursor || loading}
+            className="rounded-2xl border border-zinc-800 bg-zinc-950/40 px-4 py-2 text-sm hover:bg-white/5 disabled:opacity-40"
+          >
+            {loading ? "Loading..." : cursor ? "Load more" : "No more"}
+          </button>
+        </div>
       </div>
     </div>
   );

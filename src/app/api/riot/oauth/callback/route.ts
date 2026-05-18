@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { dbConnect } from "@/lib/mongodb";
 import { decryptDiscordSecret } from "@/lib/discord";
 import { syncDiscordGuildRankRoleForStoredLink } from "@/lib/discordGuildRoles";
@@ -29,6 +30,7 @@ import {
   setRsoSessionCookie,
 } from "@/lib/riotAuth";
 import { getRsoAccountMe } from "@/lib/riot";
+import { refreshPlayerById } from "@/lib/refresh";
 import { Player } from "@/models/player";
 
 export const runtime = "nodejs";
@@ -40,6 +42,23 @@ function redirectOAuthError(req: NextRequest, returnTo: string | undefined | nul
   target.searchParams.set("status", "error");
   target.searchParams.set("message", error);
   return NextResponse.redirect(target);
+}
+
+async function refreshLinkedPlayer(playerId: unknown) {
+  try {
+    await refreshPlayerById(String(playerId), {
+      force: true,
+      cooldownMs: 0,
+      syncMatches: true,
+      syncTftMatches: true,
+      matchesCount: 20,
+      fullMastery: false,
+    });
+    revalidatePath("/leaderboard");
+    revalidatePath("/tft");
+  } catch (error) {
+    console.error("[riot/oauth] linked player refresh failed", error);
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -131,6 +150,8 @@ export async function GET(req: NextRequest) {
         },
       });
 
+      await refreshLinkedPlayer(player._id);
+
       let syncFailed = false;
       try {
         await syncDiscordLinkedRoleForStoredLink(String(bound.link._id), { force: true });
@@ -190,6 +211,8 @@ export async function GET(req: NextRequest) {
         },
       });
 
+      await refreshLinkedPlayer(player._id);
+
       let syncFailed = false;
       try {
         await syncDiscordLinkedRoleForStoredLink(String(bound.link._id), { force: true });
@@ -226,6 +249,11 @@ export async function GET(req: NextRequest) {
       player.gameName ?? account.gameName,
       player.tagLine ?? account.tagLine
     );
+
+    if (player?._id) {
+      await refreshLinkedPlayer(player._id);
+    }
+
     const target = new URL(
       returnTo === "/" ? profilePath : returnTo,
       req.url

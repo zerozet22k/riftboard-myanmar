@@ -65,11 +65,13 @@ const QUEUE_NAMES: Record<number, string> = {
   1110: "Tutorial",
   1130: "Hyper Roll",
   1160: "Double Up",
+  1210: "Choncc's Treasure",
+  1220: "TFT Event",
 };
 
 function queueName(queueId: number | null) {
   if (queueId == null) return "Unknown";
-  return QUEUE_NAMES[queueId] ?? `Queue ${queueId}`;
+  return QUEUE_NAMES[queueId] ?? (queueId >= 1090 && queueId < 1300 ? "TFT Special" : `Queue ${queueId}`);
 }
 
 function placementTone(placement: number | null) {

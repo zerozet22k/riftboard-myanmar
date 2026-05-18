@@ -17,8 +17,8 @@ import { dbConnect } from "@/lib/mongodb";
 import { DiscordLink } from "@/models/discordLink";
 
 export const metadata: Metadata = {
-  title: "Discord Access",
-  description: "Connect Discord and unlock Burma-only community access for your linked Riot account.",
+  title: "Account hub",
+  description: "Connect Discord and Riot accounts on RiftBoard.",
   robots: {
     index: false,
     follow: false,
@@ -160,22 +160,7 @@ export default async function DiscordLinkedRolesPage({
         {notice ? <Notice tone={notice.tone} text={notice.text} /> : null}
 
         <section className="rounded-[28px] bg-zinc-900/25 p-5 ring-1 ring-white/5 sm:p-6">
-          <div className="text-xl font-semibold text-zinc-50">
-            {viewer ? "Connected" : "Connect Discord"}
-          </div>
-
-            {!viewer && communityUnlocked && communityDiscordUrl ? (
-              <div className="mt-5">
-                <Link
-                  href={communityDiscordUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-5 py-3 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-400/20"
-                >
-                  Open Discord invite
-                </Link>
-              </div>
-            ) : null}
+          <div className="text-xl font-semibold text-zinc-50">Account hub</div>
 
             {viewer ? (
               <div className="mt-5 space-y-4">
@@ -185,27 +170,6 @@ export default async function DiscordLinkedRolesPage({
                     {viewer.discordUsername ?? viewer.discordUserId}
                   </div>
                   <div className="mt-4 flex flex-wrap gap-3">
-                    <form action="/api/riot/oauth/start" method="GET">
-                      <input type="hidden" name="returnTo" value="/discord/linked-roles" />
-                      <input type="hidden" name="bindDiscord" value="1" />
-                      <button
-                        type="submit"
-                        className="rounded-2xl bg-emerald-500/90 px-5 py-3 text-sm font-semibold text-black transition hover:bg-emerald-400"
-                      >
-                        Add Riot account
-                      </button>
-                    </form>
-                    <form action="/api/riot/oauth/start" method="GET">
-                      <input type="hidden" name="returnTo" value="/discord/linked-roles" />
-                      <input type="hidden" name="bindDiscord" value="1" />
-                      <input type="hidden" name="switch" value="1" />
-                      <button
-                        type="submit"
-                        className="rounded-2xl border border-emerald-300/25 px-5 py-3 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-400/10"
-                      >
-                        Switch Riot account
-                      </button>
-                    </form>
                     <form action="/api/discord/oauth/start" method="GET">
                       <input type="hidden" name="returnTo" value="/discord/linked-roles" />
                       <button
@@ -229,9 +193,34 @@ export default async function DiscordLinkedRolesPage({
                 </div>
 
                 <div className="rounded-[24px] bg-zinc-950/55 p-4 ring-1 ring-white/6">
-                  <div className="text-sm font-semibold text-zinc-100">Linked Riot accounts</div>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-sm font-semibold text-zinc-100">Riot accounts</div>
+                    <div className="flex flex-wrap gap-2">
+                      <form action="/api/riot/oauth/start" method="GET">
+                        <input type="hidden" name="returnTo" value="/discord/linked-roles" />
+                        <input type="hidden" name="bindDiscord" value="1" />
+                        <button
+                          type="submit"
+                          className="rounded-2xl bg-emerald-500/90 px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-emerald-400"
+                        >
+                          Add Riot account
+                        </button>
+                      </form>
+                      <form action="/api/riot/oauth/start" method="GET">
+                        <input type="hidden" name="returnTo" value="/discord/linked-roles" />
+                        <input type="hidden" name="bindDiscord" value="1" />
+                        <input type="hidden" name="switch" value="1" />
+                        <button
+                          type="submit"
+                          className="rounded-2xl border border-emerald-300/25 px-4 py-2.5 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-400/10"
+                        >
+                          Switch Riot account
+                        </button>
+                      </form>
+                    </div>
+                  </div>
                   <div className="mt-3 grid gap-2">
-                    {linkedAccounts.map((account) => (
+                    {linkedAccounts.length ? linkedAccounts.map((account) => (
                       <div
                         key={`${account.gameName}#${account.tagLine}`}
                         className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-zinc-900/65 px-3 py-2"
@@ -252,7 +241,11 @@ export default async function DiscordLinkedRolesPage({
                           </span>
                         ) : null}
                       </div>
-                    ))}
+                    )) : (
+                      <div className="rounded-2xl bg-zinc-900/65 px-3 py-3 text-sm text-zinc-400">
+                        No Riot accounts linked yet.
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -293,26 +286,37 @@ export default async function DiscordLinkedRolesPage({
                 </form>
               </div>
             ) : (
-              <div className="mt-5 flex flex-wrap gap-3">
-                <form action="/api/discord/oauth/start" method="GET">
-                  <input type="hidden" name="returnTo" value="/discord/linked-roles" />
-                  <button
-                    type="submit"
-                    className="rounded-2xl bg-emerald-500/90 px-5 py-3 text-sm font-semibold text-black transition hover:bg-emerald-400"
-                  >
-                    Connect Discord
-                  </button>
-                </form>
-                {communityDiscordUrl ? (
-                  <Link
-                    href={communityDiscordUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="rounded-2xl border border-white/10 px-5 py-3 text-sm text-zinc-200 transition hover:bg-white/5"
-                  >
-                    Open Discord invite
-                  </Link>
-                ) : null}
+              <div className="mt-5 grid gap-4 md:grid-cols-2">
+                <div className="rounded-[24px] bg-zinc-950/55 p-4 ring-1 ring-white/6">
+                  <div className="text-sm font-semibold text-zinc-100">Discord</div>
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <form action="/api/discord/oauth/start" method="GET">
+                      <input type="hidden" name="returnTo" value="/discord/linked-roles" />
+                      <button
+                        type="submit"
+                        className="rounded-2xl bg-emerald-500/90 px-5 py-3 text-sm font-semibold text-black transition hover:bg-emerald-400"
+                      >
+                        Connect Discord
+                      </button>
+                    </form>
+                    {communityDiscordUrl ? (
+                      <Link
+                        href={communityDiscordUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-2xl border border-white/10 px-5 py-3 text-sm text-zinc-200 transition hover:bg-white/5"
+                      >
+                        Discord invite
+                      </Link>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="rounded-[24px] bg-zinc-950/55 p-4 ring-1 ring-white/6">
+                  <div className="text-sm font-semibold text-zinc-100">Riot account</div>
+                  <div className="mt-4 inline-flex rounded-2xl border border-white/10 px-5 py-3 text-sm text-zinc-500">
+                    Connect Discord first
+                  </div>
+                </div>
               </div>
             )}
         </section>

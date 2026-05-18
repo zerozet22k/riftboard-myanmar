@@ -186,7 +186,7 @@ function Pill({ children, className = "", title }: { children: ReactNode; classN
     <span
       title={title}
       className={
-        "inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] leading-none tabular-nums " +
+        "inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] leading-none tabular-nums " +
         className
       }
     >
@@ -197,11 +197,13 @@ function Pill({ children, className = "", title }: { children: ReactNode; classN
 
 function PerformanceBadges({ badges }: { badges: MatchPerformanceBadge[] }) {
   return (
-    <div className="flex min-w-0 flex-wrap gap-1">
+    <div className="flex min-w-0 flex-wrap gap-0.5">
       {badges.map((badge) => (
         <Pill
           key={`${badge.kind}-${badge.label}`}
-          className={`${matchPerformanceToneClass(badge.tone)} ${badge.kind === "verdict" ? "font-semibold" : ""}`}
+          className={`${matchPerformanceToneClass(badge.tone)} ${
+            badge.kind === "score" || badge.kind === "verdict" ? "font-semibold" : ""
+          }`}
           title={badge.title}
         >
           {badge.label}
@@ -219,7 +221,7 @@ function ItemIcon({ id, url, info }: { id: number; url: string; info: ItemInfo |
       src={url}
       alt={title}
       title={title}
-      className="h-5 w-5 rounded-md bg-zinc-900/30 ring-1 ring-white/6"
+      className="h-4 w-4 rounded bg-zinc-900/30 ring-1 ring-white/6"
       loading="lazy"
     />
   );
@@ -235,7 +237,7 @@ function RuneIcon({ rune, title }: { rune: RuneInfo | null; title: string }) {
       src={`https://ddragon.leagueoflegends.com/cdn/img/${rune.icon}`}
       alt={rune.name || title}
       title={rune.name || title}
-      className="h-4 w-4 rounded-sm bg-zinc-900/30 ring-1 ring-white/6"
+        className="h-3.5 w-3.5 rounded-sm bg-zinc-900/30 ring-1 ring-white/6"
       loading="lazy"
     />
   );
@@ -249,15 +251,15 @@ function RankLine({
   snapshot: RankSnapshot | null | undefined;
 }) {
   return (
-    <div className="flex items-center gap-1.5 px-0 py-0.5">
+    <div className="flex items-center gap-1 px-0 py-0">
       <RankEmblem
         tier={snapshot?.tier ?? null}
-        className="h-4 w-4 shrink-0"
+        className="h-3.5 w-3.5 shrink-0"
         alt={snapshot?.tier ? `${snapshot.tier} emblem` : "Unranked emblem"}
       />
       <div className="min-w-0">
-        <div className="text-[8px] uppercase tracking-[0.14em] text-zinc-500">{label}</div>
-        <div className="truncate text-[10px] font-medium text-zinc-100">{formatRank(snapshot)}</div>
+        <div className="text-[7px] uppercase tracking-[0.12em] text-zinc-500">{label}</div>
+        <div className="truncate text-[9px] font-medium text-zinc-100">{formatRank(snapshot)}</div>
       </div>
     </div>
   );
@@ -300,33 +302,33 @@ function PlayerSummaryCell({
   const position = prettyPos(participant.teamPosition);
 
   return (
-    <div className="flex min-w-[190px] items-start gap-2">
+    <div className="flex min-w-[170px] items-start gap-1.5">
       <div className="relative shrink-0">
         {championIcon ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={championIcon}
             alt={championName ?? "Champion"}
-            className="h-9 w-9 rounded-[12px] bg-zinc-900/30 ring-1 ring-white/6"
+            className="h-8 w-8 rounded-lg bg-zinc-900/30 ring-1 ring-white/6"
             loading="lazy"
           />
         ) : (
-          <div className="h-9 w-9 rounded-[12px] bg-zinc-900/30 ring-1 ring-white/6" />
+          <div className="h-8 w-8 rounded-lg bg-zinc-900/30 ring-1 ring-white/6" />
         )}
         {profileIcon ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={profileIcon}
             alt="Profile icon"
-            className="absolute -bottom-1 -right-1 h-3.5 w-3.5 rounded-full bg-zinc-950 ring-1 ring-black/30"
+            className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-zinc-950 ring-1 ring-black/30"
             loading="lazy"
           />
         ) : null}
       </div>
 
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <div className="truncate text-[11px] font-semibold text-zinc-100">
+        <div className="flex flex-wrap items-center gap-1">
+          <div className="max-w-[106px] truncate text-[10px] font-semibold text-zinc-100">
             {participantName(participant)}
           </div>
           {participant.isMe ? (
@@ -346,20 +348,20 @@ function PlayerSummaryCell({
           ) : null}
         </div>
 
-        <div className="mt-0.5 text-[10px] text-zinc-500">{championName ?? "Unknown champion"}</div>
+        <div className="mt-0.5 text-[9px] text-zinc-500">{championName ?? "Unknown champion"}</div>
 
-        <div className="mt-1.5 flex flex-wrap items-center gap-1">
+        <div className="mt-1 flex flex-wrap items-center gap-0.5">
           {spellAInfo ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={`https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/spell/${spellAInfo.iconFull}`}
               alt={spellAInfo.name}
               title={spellAInfo.name}
-              className="h-4 w-4 rounded-sm bg-zinc-900/30 ring-1 ring-white/6"
+              className="h-3.5 w-3.5 rounded-sm bg-zinc-900/30 ring-1 ring-white/6"
               loading="lazy"
             />
           ) : (
-            <div className="h-4 w-4 rounded-sm bg-zinc-900/30 ring-1 ring-white/6" />
+            <div className="h-3.5 w-3.5 rounded-sm bg-zinc-900/30 ring-1 ring-white/6" />
           )}
           {spellBInfo ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -367,11 +369,11 @@ function PlayerSummaryCell({
               src={`https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/spell/${spellBInfo.iconFull}`}
               alt={spellBInfo.name}
               title={spellBInfo.name}
-              className="h-4 w-4 rounded-sm bg-zinc-900/30 ring-1 ring-white/6"
+              className="h-3.5 w-3.5 rounded-sm bg-zinc-900/30 ring-1 ring-white/6"
               loading="lazy"
             />
           ) : (
-            <div className="h-4 w-4 rounded-sm bg-zinc-900/30 ring-1 ring-white/6" />
+            <div className="h-3.5 w-3.5 rounded-sm bg-zinc-900/30 ring-1 ring-white/6" />
           )}
           <RuneIcon rune={primaryRune} title="Primary rune" />
           <RuneIcon rune={subStyle} title="Secondary style" />
@@ -408,6 +410,7 @@ function MobileParticipantRow({
   runeMap,
   styleMap,
   matchDuration,
+  queueId,
   tone,
 }: {
   participant: MatchParticipant;
@@ -418,6 +421,7 @@ function MobileParticipantRow({
   runeMap: Record<string, RuneInfo>;
   styleMap: Record<string, RuneInfo>;
   matchDuration: number | null | undefined;
+  queueId: number | null | undefined;
   tone: "blue" | "red";
 }) {
   const championName =
@@ -442,7 +446,7 @@ function MobileParticipantRow({
   const kda = deaths === 0 ? `${kills + assists}.00` : ((kills + assists) / deaths).toFixed(2);
   const csPm = csPerMinute(participant.cs, matchDuration);
   const position = prettyPos(participant.teamPosition);
-  const badges = analyzeMatchPerformance({ ...participant, gameDuration: matchDuration ?? null });
+  const badges = analyzeMatchPerformance({ ...participant, gameDuration: matchDuration ?? null, queueId });
   const rowTone =
     participant.isMe && tone === "blue"
       ? "rounded-xl bg-blue-500/8"
@@ -604,6 +608,7 @@ function MobileTeamList({
   runeMap,
   styleMap,
   matchDuration,
+  queueId,
   tone,
 }: {
   title: string;
@@ -615,6 +620,7 @@ function MobileTeamList({
   runeMap: Record<string, RuneInfo>;
   styleMap: Record<string, RuneInfo>;
   matchDuration: number | null | undefined;
+  queueId: number | null | undefined;
   tone: "blue" | "red";
 }) {
   const teamWon = participants.some((participant) => participant.win === true);
@@ -648,6 +654,7 @@ function MobileTeamList({
             runeMap={runeMap}
             styleMap={styleMap}
             matchDuration={matchDuration}
+            queueId={queueId}
             tone={tone}
           />
         ))}
@@ -666,6 +673,7 @@ function TeamTable({
   runeMap,
   styleMap,
   matchDuration,
+  queueId,
   tone,
 }: {
   title: string;
@@ -677,6 +685,7 @@ function TeamTable({
   runeMap: Record<string, RuneInfo>;
   styleMap: Record<string, RuneInfo>;
   matchDuration: number | null | undefined;
+  queueId: number | null | undefined;
   tone: "blue" | "red";
 }) {
   const teamWon = participants.some((participant) => participant.win === true);
@@ -684,10 +693,10 @@ function TeamTable({
 
   return (
     <section
-      className={tone === "blue" ? "rounded-[18px] bg-blue-500/[0.032]" : "rounded-[18px] bg-red-500/[0.032]"}
+      className={tone === "blue" ? "rounded-xl bg-blue-500/[0.032]" : "rounded-xl bg-red-500/[0.032]"}
     >
-      <div className="flex items-center gap-2 border-b border-white/6 px-3 py-2">
-        <div className="text-xs font-semibold text-zinc-100">{title}</div>
+      <div className="flex items-center gap-2 border-b border-white/6 px-2.5 py-1.5">
+        <div className="text-[11px] font-semibold text-zinc-100">{title}</div>
         <Pill
           className={
             teamWon
@@ -699,17 +708,17 @@ function TeamTable({
         </Pill>
       </div>
 
-      <table className="w-full border-collapse text-[10px] text-zinc-300">
+      <table className="w-full border-collapse text-[9px] text-zinc-300">
         <thead>
-          <tr className="text-left uppercase tracking-[0.14em] text-zinc-500">
-            <th className="w-[210px] px-2.5 py-2 font-medium">Player</th>
-            <th className="w-[64px] px-1.5 py-2 font-medium">KDA</th>
-            <th className="w-[84px] px-1.5 py-2 font-medium">Dmg</th>
-            <th className="w-[68px] px-1.5 py-2 font-medium">Vision</th>
-            <th className="w-[72px] px-1.5 py-2 font-medium">CS</th>
-            <th className="w-[136px] px-1.5 py-2 font-medium">Rank</th>
-            <th className="w-[118px] px-1.5 py-2 font-medium">Items</th>
-            <th className="w-[84px] px-2.5 py-2 font-medium">Link</th>
+          <tr className="text-left uppercase tracking-[0.12em] text-zinc-500">
+            <th className="w-[190px] px-2 py-1.5 font-medium">Player</th>
+            <th className="w-[104px] px-1 py-1.5 font-medium">KDA / Score</th>
+            <th className="w-[72px] px-1 py-1.5 font-medium">Dmg</th>
+            <th className="w-[54px] px-1 py-1.5 font-medium">Vision</th>
+            <th className="w-[62px] px-1 py-1.5 font-medium">CS</th>
+            <th className="w-[120px] px-1 py-1.5 font-medium">Rank</th>
+            <th className="w-[98px] px-1 py-1.5 font-medium">Items</th>
+            <th className="w-[62px] px-2 py-1.5 font-medium">Link</th>
           </tr>
         </thead>
 
@@ -738,7 +747,7 @@ function TeamTable({
             const damage = participant.damage ?? null;
             const vision = participant.visionScore ?? null;
             const csPm = csPerMinute(participant.cs, matchDuration);
-            const badges = analyzeMatchPerformance({ ...participant, gameDuration: matchDuration ?? null });
+            const badges = analyzeMatchPerformance({ ...participant, gameDuration: matchDuration ?? null, queueId });
             const rowTone =
               participant.isMe && tone === "blue"
                 ? "bg-blue-500/7"
@@ -751,7 +760,7 @@ function TeamTable({
                 key={`${participant.puuid ?? participant.riotId ?? participant.summonerName ?? title}-${index}`}
                 className={`align-top ${rowTone}`}
               >
-                <td className="border-t border-white/6 px-2.5 py-2">
+                <td className="border-t border-white/6 px-2 py-1">
                   <PlayerSummaryCell
                     participant={participant}
                     championName={championName}
@@ -765,21 +774,21 @@ function TeamTable({
                   />
                 </td>
 
-                <td className="border-t border-white/6 px-1.5 py-2">
+                <td className="border-t border-white/6 px-1 py-1">
                   <div className="font-semibold tabular-nums text-zinc-100">
                     {kills}/{deaths}/{assists}
                   </div>
-                  <div className="mt-0.5 text-[9px] tabular-nums text-zinc-500">{kda} KDA</div>
-                  <div className="mt-1">
+                  <div className="mt-0.5 text-[8px] tabular-nums text-zinc-500">{kda} KDA</div>
+                  <div className="mt-0.5">
                     <PerformanceBadges badges={badges} />
                   </div>
                 </td>
 
-                <td className="border-t border-white/6 px-1.5 py-2">
+                <td className="border-t border-white/6 px-1 py-1">
                   <div className="font-medium tabular-nums text-zinc-100">
                     {formatNumber(damage) ?? "--"}
                   </div>
-                  <div className="mt-1 h-1.5 w-[60px] rounded-full bg-white/6">
+                  <div className="mt-0.5 h-1 w-[48px] rounded-full bg-white/6">
                     <div
                       className={
                         "h-full rounded-full " + (tone === "blue" ? "bg-blue-400/80" : "bg-red-400/80")
@@ -789,36 +798,36 @@ function TeamTable({
                   </div>
                 </td>
 
-                <td className="border-t border-white/6 px-1.5 py-2">
+                <td className="border-t border-white/6 px-1 py-1">
                   <div className="font-medium tabular-nums text-zinc-100">
                     {formatNumber(vision) ?? "--"}
                   </div>
-                  <div className="mt-0.5 text-[9px] tabular-nums text-zinc-500">
+                  <div className="mt-0.5 text-[8px] tabular-nums text-zinc-500">
                     {participant.wardsPlaced ?? "--"} / {participant.wardsKilled ?? "--"}
                   </div>
                 </td>
 
-                <td className="border-t border-white/6 px-1.5 py-2">
+                <td className="border-t border-white/6 px-1 py-1">
                   <div className="font-medium tabular-nums text-zinc-100">
                     {formatNumber(participant.cs) ?? "--"}
                   </div>
-                  <div className="mt-0.5 text-[9px] tabular-nums text-zinc-500">
+                  <div className="mt-0.5 text-[8px] tabular-nums text-zinc-500">
                     {csPm ? `${csPm}/m` : "--"}
                   </div>
-                  <div className="mt-0.5 text-[9px] tabular-nums text-zinc-500">
+                  <div className="mt-0.5 text-[8px] tabular-nums text-zinc-500">
                     {formatNumber(participant.gold) ?? "--"} gold
                   </div>
                 </td>
 
-                <td className="border-t border-white/6 px-1.5 py-2">
-                  <div className="space-y-1.5">
+                <td className="border-t border-white/6 px-1 py-1">
+                  <div className="space-y-0.5">
                     <RankLine label="Solo" snapshot={participant.solo} />
                     <RankLine label="Flex" snapshot={participant.flex} />
                   </div>
                 </td>
 
-                <td className="border-t border-white/6 px-1.5 py-2">
-                  <div className="flex min-w-[104px] flex-wrap gap-1">
+                <td className="border-t border-white/6 px-1 py-1">
+                  <div className="flex min-w-[84px] flex-wrap gap-0.5">
                     {participant.items.length ? (
                       participant.items.slice(0, 7).map((id, itemIndex) => {
                         const url = `https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/item/${id}.png`;
@@ -837,20 +846,20 @@ function TeamTable({
                   </div>
                 </td>
 
-                <td className="border-t border-white/6 px-2.5 py-2">
-                  <div className="w-[72px] space-y-1">
-                    <div className="text-[9px] text-zinc-500">{participantRankStatus(participant)}</div>
+                <td className="border-t border-white/6 px-2 py-1">
+                  <div className="w-[54px] space-y-0.5">
+                    <div className="text-[8px] leading-tight text-zinc-500">{participantRankStatus(participant)}</div>
                     {!participant.isMe && participant.opggUrl ? (
                       <a
                         href={participant.opggUrl}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex w-full items-center justify-center rounded-lg bg-zinc-950/40 px-1.5 py-1 text-[10px] text-zinc-300 ring-1 ring-white/5 transition hover:bg-white/5 hover:text-white"
+                        className="inline-flex w-full items-center justify-center rounded-md bg-zinc-950/40 px-1 py-0.5 text-[9px] text-zinc-300 ring-1 ring-white/5 transition hover:bg-white/5 hover:text-white"
                       >
                         OP.GG
                       </a>
                     ) : (
-                      <div className="rounded-lg bg-zinc-950/30 px-1.5 py-1 text-center text-[9px] text-zinc-600 ring-1 ring-white/5">
+                      <div className="rounded-md bg-zinc-950/30 px-1 py-0.5 text-center text-[8px] text-zinc-600 ring-1 ring-white/5">
                         Tracked
                       </div>
                     )}
@@ -889,9 +898,9 @@ export default function MatchDetailsPanel({
   styleMap: Record<string, RuneInfo>;
 }) {
   return (
-    <div className="mt-2 space-y-2">
+    <div className="mt-1.5 space-y-1.5">
       <div className="px-5 sm:px-6">
-        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/6 pb-2">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/6 pb-1.5">
           <div>
             <div className="text-xs font-semibold text-zinc-100">Match details</div>
             <div className="text-[11px] text-zinc-500">
@@ -901,7 +910,7 @@ export default function MatchDetailsPanel({
               ) : null}
             </div>
           </div>
-          <div className="max-w-[240px] text-right text-[10px] text-zinc-500">
+          <div className="max-w-[240px] text-right text-[9px] leading-tight text-zinc-500">
             Current ranks refresh on demand and may be cached for up to 24h.
           </div>
         </div>
@@ -923,6 +932,7 @@ export default function MatchDetailsPanel({
               runeMap={runeMap}
               styleMap={styleMap}
               matchDuration={details.match?.gameDuration ?? null}
+              queueId={details.match?.queueId ?? null}
               tone="blue"
             />
             <MobileTeamList
@@ -935,13 +945,14 @@ export default function MatchDetailsPanel({
               runeMap={runeMap}
               styleMap={styleMap}
               matchDuration={details.match?.gameDuration ?? null}
+              queueId={details.match?.queueId ?? null}
               tone="red"
             />
           </div>
 
           <div className="hidden sm:block">
             <div className="x-scroll-area pb-2">
-              <div className="min-w-[760px] space-y-3 p-2.5 sm:p-3">
+              <div className="min-w-[720px] space-y-1.5 p-2">
                 <TeamTable
                   title="Blue side"
                   participants={details.teams.blue}
@@ -952,6 +963,7 @@ export default function MatchDetailsPanel({
                   runeMap={runeMap}
                   styleMap={styleMap}
                   matchDuration={details.match?.gameDuration ?? null}
+                  queueId={details.match?.queueId ?? null}
                   tone="blue"
                 />
                 <TeamTable
@@ -964,6 +976,7 @@ export default function MatchDetailsPanel({
                   runeMap={runeMap}
                   styleMap={styleMap}
                   matchDuration={details.match?.gameDuration ?? null}
+                  queueId={details.match?.queueId ?? null}
                   tone="red"
                 />
               </div>

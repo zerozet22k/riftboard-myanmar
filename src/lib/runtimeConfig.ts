@@ -77,6 +77,8 @@ export function getSchedulerTokens() {
     process.env.SCHEDULER_TOKEN,
     process.env.CRON_SECRET,
     process.env.CRON_KEY,
+    process.env.COMMUNITY_RUNNER_TOKEN,
+    process.env.REFRESH_RUNNER_TOKEN,
   ]
     .map((value) => value?.trim())
     .filter((value): value is string => !!value);

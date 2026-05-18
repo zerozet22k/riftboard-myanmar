@@ -1,13 +1,24 @@
-export type MatchPerformanceTone = "elite" | "good" | "warn" | "bad" | "awful" | "neutral";
+export type MatchPerformanceTone =
+  | "rainbow"
+  | "gold"
+  | "silver"
+  | "bronze"
+  | "elite"
+  | "good"
+  | "warn"
+  | "bad"
+  | "awful"
+  | "neutral";
 
 export type MatchPerformanceBadge = {
   label: string;
   tone: MatchPerformanceTone;
   title: string;
-  kind: "verdict" | "fact";
+  kind: "score" | "verdict" | "fact";
 };
 
 export type MatchPerformanceInput = {
+  queueId?: number | null;
   gameDuration?: number | null;
   teamPosition?: string | null;
   win?: boolean | null;
@@ -24,14 +35,117 @@ export type MatchPerformanceInput = {
 };
 
 export const MATCH_ANALYSIS_VERSION = "RiftBoard read v1";
+const MAX_RIFTBOARD_SCORE = 120;
+const ARENA_QUEUE_IDS = new Set([1700, 1710, 1720, 1750]);
+const ARAM_QUEUE_IDS = new Set([65, 67, 72, 73, 78, 100, 300, 450, 720, 920, 2400]);
+
+type MatchQueueKind = "arena" | "aram" | "rift";
 
 export function matchPerformanceToneClass(tone: MatchPerformanceTone) {
+  if (tone === "rainbow") {
+    return "riftboard-rainbow-badge border-white/35 bg-[linear-gradient(90deg,rgba(244,114,182,0.34),rgba(250,204,21,0.3),rgba(52,211,153,0.3),rgba(96,165,250,0.34),rgba(168,85,247,0.34),rgba(244,114,182,0.34))] text-white shadow-[0_0_18px_rgba(255,255,255,0.2)]";
+  }
+  if (tone === "gold") return "border-yellow-300/50 bg-[linear-gradient(90deg,rgba(250,204,21,0.22),rgba(251,191,36,0.12))] text-yellow-50";
+  if (tone === "silver") return "border-zinc-200/40 bg-[linear-gradient(90deg,rgba(228,228,231,0.18),rgba(148,163,184,0.12))] text-zinc-50";
+  if (tone === "bronze") return "border-amber-700/45 bg-[linear-gradient(90deg,rgba(180,83,9,0.2),rgba(245,158,11,0.1))] text-amber-100";
   if (tone === "elite") return "border-emerald-300/30 bg-emerald-300/10 text-emerald-100";
   if (tone === "good") return "border-cyan-300/30 bg-cyan-300/10 text-cyan-100";
   if (tone === "warn") return "border-yellow-300/30 bg-yellow-300/10 text-yellow-100";
   if (tone === "bad") return "border-orange-300/30 bg-orange-300/10 text-orange-100";
   if (tone === "awful") return "border-red-300/30 bg-red-300/10 text-red-100";
   return "border-zinc-700/70 bg-zinc-900/55 text-zinc-300";
+}
+
+function scoreTone(score: number): MatchPerformanceTone {
+  if (score >= 96) return "rainbow";
+  if (score >= 88) return "gold";
+  if (score >= 72) return "silver";
+  if (score >= 54) return "bronze";
+  return "neutral";
+}
+
+function scoreBonus({
+  kills,
+  deaths,
+  assists,
+  kdaValue,
+  cspm,
+  gpm,
+  support,
+  win,
+  largestMultiKill,
+  queueKind,
+}: {
+  kills: number;
+  deaths: number;
+  assists: number;
+  kdaValue: number;
+  cspm: number | null;
+  gpm: number | null;
+  support: boolean;
+  win: boolean;
+  largestMultiKill: number;
+  queueKind: MatchQueueKind;
+}) {
+  let bonus = 0;
+  const takedowns = kills + assists;
+
+  if (win && deaths === 0 && takedowns >= 12) bonus += 8;
+  else if (win && deaths <= 1 && kdaValue >= 8) bonus += 5;
+  else if (deaths <= 2 && kdaValue >= 6) bonus += 2;
+
+  if (kdaValue >= 12) bonus += 4;
+  else if (kdaValue >= 8) bonus += 2;
+
+  if (queueKind === "rift" && !support && cspm != null) {
+    if (cspm >= 8.5) bonus += 6;
+    else if (cspm >= 7.5) bonus += 4;
+  } else if (queueKind === "aram" && assists >= 18) {
+    bonus += 4;
+  } else if (queueKind === "arena" && takedowns >= 14) {
+    bonus += 4;
+  }
+
+  if (gpm != null) {
+    if (gpm >= 520) bonus += 5;
+    else if (gpm >= 430) bonus += 3;
+  }
+
+  if (kills >= 10) bonus += 4;
+  else if (kills >= 8) bonus += 3;
+
+  if (largestMultiKill >= 5) bonus += 6;
+  else if (largestMultiKill >= 4) bonus += 4;
+  else if (largestMultiKill >= 2) bonus += 2;
+
+  return bonus;
+}
+
+function queueKind(queueId: number | null | undefined): MatchQueueKind {
+  if (queueId != null && ARENA_QUEUE_IDS.has(queueId)) return "arena";
+  if (queueId != null && ARAM_QUEUE_IDS.has(queueId)) return "aram";
+  return "rift";
+}
+
+function verdictTitle(label: string, kind: MatchQueueKind) {
+  if (label === "Limit Break") return "LEGENDARY output. Riftboard found a carry signal above the normal scale.";
+  if (label === "Final Boss") return "Primary threat confirmed. The enemy team had to answer this player first.";
+  if (label === "Carry Threat") return "High-impact game. Damage, tempo, and gold pointed at one dangerous player.";
+  if (label === "Tempo Lead") return "Strong match control. Plays started to move around this player.";
+  if (label === "Power Spike") return kind === "arena" ? "Arena impact online. Rounds found a real threat here." : "Pressure online. This player became a real win condition.";
+  if (label === "Stable") return "Steady game. Enough value landed to keep the line intact.";
+  if (label === "Low Impact") return "Low pressure signal. The match needed more damage, gold, or takedown presence.";
+  if (label === "Quiet Game") return "Quiet scoreboard. The match barely heard this player call.";
+  return "Danger state. Deaths and low output pulled the read into red.";
+}
+
+function ratePerMinute(value: number, minutes: number | null) {
+  if (!minutes || minutes <= 0) return null;
+  return value / minutes;
+}
+
+function fmtRate(value: number | null) {
+  return value == null ? "--" : value.toFixed(2);
 }
 
 export function csPerMinute(cs: number | null | undefined, durationSeconds: number | null | undefined) {
@@ -54,92 +168,136 @@ export function analyzeMatchPerformance(match: MatchPerformanceInput): MatchPerf
   const support = String(match.teamPosition ?? "").toUpperCase() === "UTILITY";
   const win = match.win === true;
   const minutes = match.gameDuration ? match.gameDuration / 60 : null;
+  const kind = queueKind(match.queueId);
+
+  const largestMultiKill = match.largestMultiKill ?? 0;
 
   let score = 0;
   score += Math.min(32, kdaValue * 8);
-  score += Math.max(0, 18 - Math.min(18, deaths * 2.7));
-  score += support ? 9 : Math.min(18, (cspm ?? 0) * 2.25);
+  score += Math.max(0, 18 - Math.min(18, deaths * (kind === "aram" ? 1.9 : 2.7)));
+  score +=
+    kind === "arena"
+      ? Math.min(18, kdaValue * 1.25 + kills * 0.7)
+      : kind === "aram"
+        ? Math.min(18, (kills + assists) * 0.55 + ((gpm ?? 0) / 500) * 4)
+        : support
+          ? 9
+          : Math.min(18, (cspm ?? 0) * 2.25);
   score += Math.min(18, ((gpm ?? 0) / 430) * 18);
-  score += win ? 12 : -2;
-  score = Math.round(Math.max(0, Math.min(100, score)));
+  score += win ? (kind === "rift" ? 12 : 10) : -2;
+  score += scoreBonus({
+    kills,
+    deaths,
+    assists,
+    kdaValue,
+    cspm,
+    gpm,
+    support,
+    win,
+    largestMultiKill,
+    queueKind: kind,
+  });
+  score = Math.round(Math.max(0, Math.min(MAX_RIFTBOARD_SCORE, score)));
 
   const facts: MatchPerformanceBadge[] = [];
-  const explanation = `${MATCH_ANALYSIS_VERSION}: ${score}/100 from KDA, deaths, CS/min, gold/min, role, and result. Same thresholds are used for every player.`;
+  const scoringBasis =
+    kind === "arena"
+      ? "KDA, deaths, takedowns, gold/min, result, and Arena bonuses"
+      : kind === "aram"
+        ? "KDA, deaths, takedowns, gold/min, result, and ARAM bonuses"
+        : "KDA, deaths, CS/min, gold/min, role, result, and carry bonuses";
+  const explanation = `${MATCH_ANALYSIS_VERSION}: ${score}/${MAX_RIFTBOARD_SCORE} from ${scoringBasis}.`;
+  const makeVerdict = (label: string, tone: MatchPerformanceTone): MatchPerformanceBadge => ({
+    label,
+    tone,
+    title: verdictTitle(label, kind),
+    kind: "verdict",
+  });
+  const scoreBadge: MatchPerformanceBadge = {
+    label: `Score ${score}`,
+    tone: scoreTone(score),
+    title: explanation,
+    kind: "score",
+  };
   const verdict: MatchPerformanceBadge =
-    score >= 88
-      ? { label: "Raid Boss", tone: "elite", title: explanation, kind: "verdict" }
-      : score >= 78
-        ? { label: "Match Driver", tone: "elite", title: explanation, kind: "verdict" }
-        : score >= 66
-          ? { label: "Heavy Lift", tone: "good", title: explanation, kind: "verdict" }
-          : score >= 54
-            ? { label: "Serviceable", tone: "neutral", title: explanation, kind: "verdict" }
-            : score >= 42
-              ? { label: "Low Output", tone: "warn", title: explanation, kind: "verdict" }
-              : score >= 28
-                ? { label: "Passenger", tone: "bad", title: explanation, kind: "verdict" }
-                : { label: "Dead Weight", tone: "awful", title: explanation, kind: "verdict" };
+    score >= 112
+      ? makeVerdict("Limit Break", "rainbow")
+      : score >= 100
+        ? makeVerdict("Final Boss", "elite")
+        : score >= 88
+          ? makeVerdict("Carry Threat", "elite")
+          : score >= 78
+            ? makeVerdict("Tempo Lead", "elite")
+            : score >= 66
+              ? makeVerdict("Power Spike", "good")
+              : score >= 54
+                ? makeVerdict("Stable", "neutral")
+                : score >= 42
+                  ? makeVerdict("Low Impact", "warn")
+                  : score >= 28
+                    ? makeVerdict("Quiet Game", "bad")
+                    : makeVerdict("Danger State", "awful");
 
   const pentaKills = match.pentaKills ?? 0;
   const quadraKills = match.quadraKills ?? 0;
   const tripleKills = match.tripleKills ?? 0;
   const doubleKills = match.doubleKills ?? 0;
-  const largestMultiKill = match.largestMultiKill ?? 0;
+  const deathsPerMinute = ratePerMinute(deaths, minutes);
 
   if (pentaKills > 0 || largestMultiKill >= 5) {
-    facts.push({ label: "Pentakill", tone: "elite", title: "Recorded a pentakill.", kind: "fact" });
+    facts.push({ label: "Pentakill", tone: "elite", title: "Five takedowns in one surge. The fight ended under one name.", kind: "fact" });
   } else if (quadraKills > 0 || largestMultiKill >= 4) {
-    facts.push({ label: "Quadra", tone: "elite", title: "Recorded a quadra kill.", kind: "fact" });
+    facts.push({ label: "Quadra Kill", tone: "elite", title: "Four takedowns before the enemy could reset the fight.", kind: "fact" });
   } else if (tripleKills > 0 || largestMultiKill >= 3) {
-    facts.push({ label: "Triple", tone: "good", title: "Recorded a triple kill.", kind: "fact" });
+    facts.push({ label: "Triple Kill", tone: "good", title: "Three takedowns chained into one fight swing.", kind: "fact" });
   } else if (doubleKills > 0 || largestMultiKill >= 2) {
-    facts.push({ label: "Double", tone: "good", title: "Recorded a double kill.", kind: "fact" });
+    facts.push({ label: "Double Kill", tone: "good", title: "Two takedowns in one window. Clean fight conversion.", kind: "fact" });
   }
 
   if (deaths === 0 && kills + assists >= 8) {
-    facts.push({ label: "Undying", tone: "elite", title: "Zero deaths with meaningful takedown contribution.", kind: "fact" });
+    facts.push({ label: "Survivor", tone: "elite", title: `0 deaths across ${minutes ? Math.round(minutes) : "the"} minutes. Shutdown denied.`, kind: "fact" });
   } else if (deaths <= 2 && kdaValue >= 5) {
-    facts.push({ label: "No Leaks", tone: "good", title: "Low deaths with strong KDA control.", kind: "fact" });
+    facts.push({ label: "Clean Escape", tone: "good", title: `${deaths} deaths, ${fmtRate(deathsPerMinute)} deaths/min. Low-risk pressure stayed alive.`, kind: "fact" });
   } else if (deaths >= 9) {
-    facts.push({ label: "Bleeder", tone: "awful", title: "Very high deaths likely gave away pressure and tempo.", kind: "fact" });
+    facts.push({ label: "Death Magnet", tone: "awful", title: `${deaths} deaths, ${fmtRate(deathsPerMinute)} deaths/min. The enemy kept finding the timer.`, kind: "fact" });
   } else if (deaths >= 7) {
-    facts.push({ label: "Leak Point", tone: "bad", title: "High deaths likely hurt map pressure.", kind: "fact" });
+    facts.push({ label: "High Risk", tone: "bad", title: `${deaths} deaths, ${fmtRate(deathsPerMinute)} deaths/min. Too much tempo leaked through death timers.`, kind: "fact" });
   }
 
-  if (!support && cspm != null && cspm >= 8.2) {
-    facts.push({ label: "Vacuum Farm", tone: "good", title: `${cspm.toFixed(1)} CS/min.`, kind: "fact" });
-  } else if (!support && cspm != null && cspm <= 4.4 && minutes != null && minutes >= 18) {
-    facts.push({ label: "Starved", tone: "bad", title: `${cspm.toFixed(1)} CS/min over ${Math.round(minutes)} minutes.`, kind: "fact" });
+  if (kind === "rift" && !support && cspm != null && cspm >= 8.2) {
+    facts.push({ label: "Farm Lead", tone: "good", title: `${cspm.toFixed(1)} CS/min. Strong resource control kept the build moving.`, kind: "fact" });
+  } else if (kind === "rift" && !support && cspm != null && cspm <= 4.4 && minutes != null && minutes >= 18) {
+    facts.push({ label: "Low Farm", tone: "bad", title: `${cspm.toFixed(1)} CS/min over ${Math.round(minutes)} minutes. The resource line fell behind.`, kind: "fact" });
   }
 
   if (gpm != null && gpm >= 520) {
-    facts.push({ label: "Gold Engine", tone: "elite", title: `${Math.round(gpm)} gold/min.`, kind: "fact" });
+    facts.push({ label: "Gold Lead", tone: "elite", title: `${Math.round(gpm)} gold/min. Major item tempo came online.`, kind: "fact" });
   } else if (gpm != null && gpm >= 460) {
-    facts.push({ label: "Paid", tone: "good", title: `${Math.round(gpm)} gold/min.`, kind: "fact" });
+    facts.push({ label: "Item Tempo", tone: "good", title: `${Math.round(gpm)} gold/min. Item spikes arrived on schedule.`, kind: "fact" });
   } else if (gpm != null && gpm < 310 && minutes != null && minutes >= 18) {
-    facts.push({ label: "Broke", tone: "bad", title: `${Math.round(gpm)} gold/min.`, kind: "fact" });
+    facts.push({ label: "Gold Starved", tone: "bad", title: `${Math.round(gpm)} gold/min. The build path had to fight uphill.`, kind: "fact" });
   }
 
   if (kills >= 10 && win) {
-    facts.push({ label: "Executioner", tone: "elite", title: "Double-digit kills in a win.", kind: "fact" });
+    facts.push({ label: "Finisher", tone: "elite", title: `${kills} kills in a win. Fight cleanup belonged here.`, kind: "fact" });
   } else if (kills === 0 && assists <= 4 && minutes != null && minutes >= 18) {
-    facts.push({ label: "No Threat", tone: "awful", title: "Almost no direct kill pressure.", kind: "fact" });
+    facts.push({ label: "No Threat", tone: "awful", title: "Almost no direct takedown pressure reached the scoreboard.", kind: "fact" });
   } else if (assists >= 14) {
-    facts.push({ label: "Connector", tone: "good", title: "High assist involvement.", kind: "fact" });
+    facts.push({ label: "Teamfight Link", tone: "good", title: `${assists} assists. This player kept connecting fights.`, kind: "fact" });
   }
 
   if (kills + assists <= 4 && minutes != null && minutes >= 25) {
-    facts.push({ label: "Invisible", tone: "awful", title: "Low takedown involvement in a long game.", kind: "fact" });
+    facts.push({ label: "Low Presence", tone: "awful", title: `${kills + assists} takedowns over ${Math.round(minutes)} minutes. The map barely saw the signal.`, kind: "fact" });
   }
   if (deaths >= kills + assists && deaths >= 5) {
-    facts.push({ label: "Feeder Line", tone: "awful", title: "Deaths outweighed takedown contribution.", kind: "fact" });
+    facts.push({ label: "Timer Debt", tone: "awful", title: `${deaths} deaths against ${kills + assists} takedowns. The death clock won too many trades.`, kind: "fact" });
   }
   if (!win && score >= 68) {
-    facts.push({ label: "Lost Cause", tone: "warn", title: "Good personal output in a losing game.", kind: "fact" });
+    facts.push({ label: "Strong Loss", tone: "warn", title: "The nexus fell, but the personal output stayed strong.", kind: "fact" });
   }
   if (win && score < 42) {
-    facts.push({ label: "Carried Along", tone: "warn", title: "Win with low personal output.", kind: "fact" });
+    facts.push({ label: "Team Covered", tone: "warn", title: "Victory secured while allies held most of the spotlight.", kind: "fact" });
   }
 
-  return [verdict, ...facts.slice(0, 3)];
+  return [scoreBadge, verdict, ...facts.slice(0, 2)];
 }

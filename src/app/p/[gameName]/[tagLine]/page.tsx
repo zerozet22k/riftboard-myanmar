@@ -1144,7 +1144,9 @@ function RecentQueueCard({
         {summary.badges.map((badge) => (
           <span
             key={`${badge.kind}-${badge.label}`}
-            className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] leading-none ${matchPerformanceToneClass(badge.tone)} ${badge.kind === "verdict" ? "font-semibold" : ""}`}
+            className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] leading-none ${matchPerformanceToneClass(badge.tone)} ${
+              badge.kind === "score" || badge.kind === "verdict" ? "font-semibold" : ""
+            }`}
             title={badge.title}
           >
             {badge.label}

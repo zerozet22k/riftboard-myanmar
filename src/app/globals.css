@@ -48,3 +48,31 @@ body {
   background: rgba(113, 113, 122, 0.9);
   border-radius: 999px;
 }
+
+.riftboard-rainbow-badge {
+  background-size: 220% 100%;
+  animation: riftboard-rainbow-flow 2.4s linear infinite;
+}
+
+@keyframes riftboard-rainbow-flow {
+  0% {
+    background-position: 0% 50%;
+    filter: saturate(1.05);
+  }
+
+  50% {
+    background-position: 100% 50%;
+    filter: saturate(1.35);
+  }
+
+  100% {
+    background-position: 0% 50%;
+    filter: saturate(1.05);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .riftboard-rainbow-badge {
+    animation: none;
+  }
+}

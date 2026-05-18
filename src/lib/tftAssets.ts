@@ -88,12 +88,19 @@ function labelFromId(value: string | null | undefined) {
 function cdragonAssetUrl(path: unknown) {
   const raw = String(path ?? "").trim();
   if (!raw) return null;
-  if (/^https?:\/\//i.test(raw)) return raw;
+  if (/^https?:\/\//i.test(raw)) return proxiedCdragonImageUrl(raw);
   const gameDataPrefix = "/lol-game-data/assets/";
+  let url: string;
   if (raw.toLowerCase().startsWith(gameDataPrefix)) {
-    return `${GAME_DATA_BASE}/${raw.slice(gameDataPrefix.length).toLowerCase()}`;
+    url = `${GAME_DATA_BASE}/${raw.slice(gameDataPrefix.length).toLowerCase()}`;
+  } else {
+    url = `${CDRAGON_BASE}/${raw.replace(/^\/+/, "").toLowerCase()}`;
   }
-  return `${CDRAGON_BASE}/${raw.replace(/^\/+/, "").toLowerCase()}`;
+  return proxiedCdragonImageUrl(url);
+}
+
+function proxiedCdragonImageUrl(url: string) {
+  return `/api/cdragon/image?src=${encodeURIComponent(url)}`;
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -159,10 +166,38 @@ async function getTftAssetIndex() {
 
 type HydratableTftBoard = { augments?: unknown[]; traits?: unknown[]; units?: unknown[] };
 
+function cdragonVersionForTftSet(setNumber: unknown) {
+  const set = typeof setNumber === "number" && Number.isFinite(setNumber) ? setNumber : null;
+  if (set === 16) return "16.9";
+  if (set === 15) return "15.24";
+  return "latest";
+}
+
+function fallbackUnitIconUrl(characterId: unknown, setNumber: unknown) {
+  const id = String(characterId ?? "").trim();
+  if (!/^TFT\d+_/i.test(id)) return null;
+
+  const setMatch = id.match(/^TFT(\d+)_/i);
+  const set = typeof setNumber === "number" && Number.isFinite(setNumber) ? setNumber : Number(setMatch?.[1]);
+  if (!Number.isFinite(set)) return null;
+
+  const lower = id.toLowerCase();
+  const version = cdragonVersionForTftSet(set);
+  return proxiedCdragonImageUrl(
+    `https://raw.communitydragon.org/${version}/plugins/rcp-be-lol-game-data/global/default/assets/characters/${lower}/hud/${lower}_square.tft_set${set}.png`
+  );
+}
+
 function hydrateBoard<T extends HydratableTftBoard>(
   board: T,
-  index: Awaited<ReturnType<typeof getTftAssetIndex>>
+  index: Awaited<ReturnType<typeof getTftAssetIndex>>,
+  fallbackSetNumber?: number | null
 ): T & Pick<TftHydratedMatch, "augments" | "traits" | "units"> {
+  const boardSetNumber =
+    board && typeof board === "object" && "setNumber" in board && typeof (board as { setNumber?: unknown }).setNumber === "number"
+      ? (board as { setNumber?: number }).setNumber
+      : fallbackSetNumber;
+
   return {
     ...board,
     augments: Array.isArray(board.augments)
@@ -195,7 +230,7 @@ function hydrateBoard<T extends HydratableTftBoard>(
           return {
             ...row,
             displayName: asset?.displayName ?? labelFromId(row.characterId ?? row.name),
-            iconUrl: asset?.iconUrl ?? null,
+            iconUrl: asset?.iconUrl ?? fallbackUnitIconUrl(row.characterId ?? row.name, boardSetNumber),
             rarity: row.rarity ?? asset?.rarity ?? null,
             itemIcons: Array.isArray(row.itemNames)
               ? row.itemNames.map((itemName) => {
@@ -238,11 +273,15 @@ export async function hydrateTftMatches<T extends HydratableTftBoard & { partici
   }
 
   return matches.map((match) => {
-    const hydrated = hydrateBoard(match, index);
+    const matchSetNumber =
+      match && typeof match === "object" && "setNumber" in match && typeof (match as { setNumber?: unknown }).setNumber === "number"
+        ? (match as { setNumber?: number }).setNumber
+        : null;
+    const hydrated = hydrateBoard(match, index, matchSetNumber);
     return {
       ...hydrated,
       participants: Array.isArray(match.participants)
-        ? match.participants.map((participant) => hydrateBoard(participant, index))
+        ? match.participants.map((participant) => hydrateBoard(participant, index, matchSetNumber))
         : undefined,
     };
   }) as Array<T & TftHydratedMatch>;

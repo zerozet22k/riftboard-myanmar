@@ -1,0 +1,47 @@
+- generic [active] [ref=e1] [box=0,0,1350,2745]:
+  - generic [ref=e6] [box=0,0,1350,2745]:
+    - banner [ref=e7] [box=0,0,1350,69]:
+      - generic [ref=e8] [box=0,0,1350,69]:
+        - link "RiftBoard Myanmar logo Myanmar Community RiftBoard" [ref=e10] [cursor=pointer] [box=32,12,235,45]:
+          - /url: /
+          - img "RiftBoard Myanmar logo" [ref=e11] [box=32,12,44,44]
+          - generic [ref=e12] [box=88,12,179,45]:
+            - generic [ref=e13] [box=88,12,179,17]: Myanmar Community
+            - generic [ref=e14] [box=88,29,179,28]: RiftBoard
+        - generic [ref=e15] [box=914,16,404,37]:
+          - navigation [ref=e16] [box=914,16,266,36]:
+            - link "Leaderboard" [ref=e17] [cursor=pointer] [box=914,16,103,36]:
+              - /url: /leaderboard
+            - link "TFT" [ref=e18] [cursor=pointer] [box=1022,16,50,36]:
+              - /url: /tft
+            - link "Tournaments" [ref=e19] [cursor=pointer] [box=1075,16,105,36]:
+              - /url: /tournaments
+          - link "Join Community" [ref=e21] [cursor=pointer] [box=1192,16,126,37]:
+            - /url: /discord/linked-roles
+    - main [ref=e22] [box=0,69,1350,2532]:
+      - generic [ref=e23] [box=0,69,1350,2532]:
+        - generic [ref=e25] [box=44,105,1262,280]:
+          - generic [ref=e26] [box=44,105,990,280]:
+            - generic [ref=e27] [box=44,201,88,88]
+            - generic [ref=e30] [box=144,150,333,191]
+          - generic [ref=e53] [box=1046,105,260,280]:
+            - button "Refresh" [ref=e56] [box=1229,105,77,36]
+            - generic [ref=e57] [box=1046,149,260,152]
+            - link "Katarina Main champion Katarina 1,101,757 mastery" [ref=e72] [cursor=pointer] [box=1046,309,260,77]:
+              - /url: /p/Zet/kat22/mastery
+        - generic [ref=e78] [box=24,417,1302,2168]:
+          - complementary [ref=e79] [box=24,417,1302,584]:
+            - 'generic "Peak rank: DIAMOND IV - 63 LP, recorded May 12, 2026, 07:30:27 PM" [ref=e80] [box=24,417,1302,286]'
+            - 'generic "Peak rank: GOLD I - 78 LP, recorded Dec 19, 2025, 02:59:54 AM" [ref=e137] [box=24,715,1302,286]'
+          - generic [ref=e184] [box=24,1013,1302,1572]:
+            - generic [ref=e185] [box=24,1013,1302,189]
+            - generic [ref=e211] [box=24,1218,1302,269]
+            - generic [ref=e225] [box=24,1502,1302,1083]
+    - contentinfo [ref=e721] [box=0,2601,1350,144]:
+      - generic [ref=e722] [box=24,2641,1302,20]:
+        - link "Terms" [ref=e723] [cursor=pointer] [box=625,2641,38,20]:
+          - /url: /terms
+        - link "Privacy" [ref=e724] [cursor=pointer] [box=679,2641,46,20]:
+          - /url: /privacy
+      - generic [ref=e725] [box=24,2673,1302,32]: RiftBoard Myanmar is not endorsed by Riot Games and does not reflect the views or opinions of Riot Games or anyone officially involved in producing or managing League of Legends. League of Legends and Riot Games are trademarks or registered trademarks of Riot Games, Inc. League of Legends Copyright Riot Games, Inc.
+  - alert [ref=e828] [box=-1,2744,1,1]
