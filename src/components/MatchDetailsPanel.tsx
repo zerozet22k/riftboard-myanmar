@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import RankEmblem from "@/components/RankEmblem";
 import { formatNumber } from "@/lib/displayTime";
-import { bestHighEloRead, highEloBadgeClass, highEloCardClass, type HighEloRead } from "@/lib/highElo";
+import { bestHighEloRead, highEloCardClass, type HighEloRead } from "@/lib/highElo";
 import { analyzeMatchPerformance, matchPerformanceToneClass, type MatchPerformanceBadge } from "@/lib/matchAnalysis";
 
 type RankSnapshot = {
@@ -685,11 +685,6 @@ function MobileTeamList({
         >
           {teamWon ? "VICTORY" : "DEFEAT"}
         </Pill>
-        {lobbyRead ? (
-          <Pill className={`${highEloBadgeClass(lobbyRead)} font-semibold`} title={lobbyRead.title}>
-            {lobbyRead.label}
-          </Pill>
-        ) : null}
       </div>
 
       <div className="divide-y divide-white/6 px-1.5 py-1">
@@ -763,11 +758,6 @@ function TeamTable({
         >
           {teamWon ? "VICTORY" : "DEFEAT"}
         </Pill>
-        {lobbyRead ? (
-          <Pill className={`${highEloBadgeClass(lobbyRead)} font-semibold`} title={lobbyRead.title}>
-            {lobbyRead.label}
-          </Pill>
-        ) : null}
       </div>
 
       <table className="w-full border-collapse text-[9px] text-zinc-300">

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import MatchDetailsPanel, { type MatchDetailsResponse } from "@/components/MatchDetailsPanel";
 import { formatCompactDateTime, formatNumber, formatRelativeTime } from "@/lib/displayTime";
-import { bestHighEloRead, highEloBadgeClass, highEloCardClass, type RankLike } from "@/lib/highElo";
+import { bestHighEloRead, highEloCardClass, type RankLike } from "@/lib/highElo";
 import { analyzeMatchPerformance, csPerMinute, matchPerformanceToneClass, type MatchPerformanceBadge } from "@/lib/matchAnalysis";
 
 export type MatchRow = {
@@ -881,11 +881,6 @@ export default function MatchHistory({
                       <span className="text-zinc-500">{duration}</span>
                     </div>
                     <div className="mt-1.5 text-xs text-zinc-200">{queueName(match.queueId)}</div>
-                    {highElo ? (
-                      <Pill className={`mt-1 ${highEloBadgeClass(highElo)} font-semibold`} title={highElo.title}>
-                        {highElo.label}
-                      </Pill>
-                    ) : null}
                     <div className="mt-1 text-[11px] text-zinc-500">{ago ?? "Unknown time"}</div>
                   </div>
 
@@ -1035,11 +1030,6 @@ export default function MatchHistory({
                       <span className="text-zinc-500">{duration}</span>
                     </div>
                     <div className="mt-1.5 text-xs text-zinc-200">{queueName(match.queueId)}</div>
-                    {highElo ? (
-                      <Pill className={`mt-1 ${highEloBadgeClass(highElo)} font-semibold`} title={highElo.title}>
-                        {highElo.label}
-                      </Pill>
-                    ) : null}
                     <div className="mt-1 text-[11px] text-zinc-500">{ago ?? "Unknown time"}</div>
                   </div>
 
