@@ -104,7 +104,7 @@ export default function TftLeaderboardTable({ rows, renderedAt }: { rows: TftLea
   const [query, setQuery] = useState("");
   const [rankFilter, setRankFilter] = useState<RankFilter>("all");
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
+  const [pageSize, setPageSize] = useState(10);
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -245,9 +245,9 @@ export default function TftLeaderboardTable({ rows, renderedAt }: { rows: TftLea
         ))}
       </div>
 
-      <div className="hidden overflow-x-auto rounded-[24px] bg-zinc-900/22 ring-1 ring-white/5 xl:block">
+      <div className="hidden overflow-x-auto rounded-[24px] bg-zinc-900/22 xl:block">
         <table className="min-w-full text-sm">
-          <thead className="border-b border-white/8 bg-zinc-950/85 text-zinc-300">
+          <thead className="sticky top-0 border-b border-white/8 bg-zinc-950/85 text-zinc-300 backdrop-blur">
             <tr>
               <th className="w-14 p-4 text-left">#</th>
               <th className="min-w-[320px] p-4 text-left">Player</th>

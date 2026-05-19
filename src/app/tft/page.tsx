@@ -230,28 +230,34 @@ export default async function TftPage() {
       />
 
       <div className="mx-auto max-w-full space-y-6 p-4 sm:p-6">
-        <header className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+        <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="space-y-2">
-            <div className="text-[11px] uppercase tracking-[0.26em] text-zinc-500">Teamfight Tactics</div>
             <h1 className="text-2xl font-semibold tracking-tight text-zinc-50 sm:text-3xl">
               Myanmar TFT Leaderboard
             </h1>
             <p className="max-w-3xl text-sm text-zinc-400">
-              Track official TFT ladder placements for RiftBoard Myanmar players. This page only
-              shows official Riot rank data and does not create alternative rating systems.
+              Track current TFT ladder placements, ranked snapshots, playstyle reads, and player profiles across the
+              RiftBoard Myanmar community.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-400">
-            <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-3 py-1">
-              Tracked: <span className="text-zinc-200">{rows.length}</span>
-            </span>
-            <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-3 py-1">
-              Ranked: <span className="text-zinc-200">{rankedRows.length}</span>
-            </span>
-            <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-3 py-1">
-              Synced: <span className="text-zinc-200">{syncedRows.length}</span>
-            </span>
+          <div className="flex flex-col gap-2 sm:items-end">
+            <div className="flex items-center gap-2 text-xs text-zinc-400">
+              <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-3 py-1">
+                Players: <span className="text-zinc-200">{rows.length}</span>
+              </span>
+              <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-3 py-1">
+                Ranked: <span className="text-zinc-200">{rankedRows.length}</span>
+              </span>
+              <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-3 py-1">
+                Synced: <span className="text-zinc-200">{syncedRows.length}</span>
+              </span>
+            </div>
+
+            <p className="text-xs text-zinc-500 sm:text-right">
+              Profiles refresh from each player page. The leaderboard syncs automatically in the
+              background.
+            </p>
           </div>
         </header>
 
