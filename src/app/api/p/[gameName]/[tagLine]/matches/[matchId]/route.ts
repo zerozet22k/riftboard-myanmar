@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { dbConnect } from "@/lib/mongodb";
 import { enrichMatchParticipants } from "@/lib/participantProfiles";
 import { buildPlayerLookupQuery } from "@/lib/playerIdentity";
+import { getMatchById, platformToMatchRegion } from "@/lib/riot";
 import { Match } from "@/models/match";
 import { Player } from "@/models/player";
 import { PlayerMatch } from "@/models/playerMatch";
@@ -84,6 +85,7 @@ type PlayerView = {
   gameName?: string | null;
   tagLine?: string | null;
   platform?: string | null;
+  matchRegion?: string | null;
   profileIconId?: number | null;
   summonerLevel?: number | null;
   solo?: Record<string, unknown> | null;
@@ -217,6 +219,55 @@ function participantSummary(participant: MatchParticipantRaw, mePuuidLower: stri
   };
 }
 
+function playerMatchDocFromRaw(params: {
+  matchId: string;
+  region: string;
+  playerId: mongoose.Types.ObjectId;
+  puuid: string | null;
+  raw: { info?: MatchInfoRaw } | null | undefined;
+}) {
+  const info = params.raw?.info ?? {};
+  const participantsRaw = Array.isArray(info.participants) ? info.participants : [];
+  const me = participantsRaw.find(
+    (participant) =>
+      params.puuid &&
+      typeof participant?.puuid === "string" &&
+      participant.puuid.toLowerCase() === params.puuid.toLowerCase()
+  );
+  if (!me) return null;
+
+  const summary = participantSummary(me, params.puuid?.toLowerCase() ?? null);
+
+  return {
+    playerId: params.playerId,
+    matchId: params.matchId,
+    region: params.region,
+    queueId: safeNum(info.queueId),
+    gameCreation: safeNum(info.gameCreation),
+    gameDuration: safeNum(info.gameDuration),
+    championId: summary.championId,
+    teamId: summary.teamId,
+    teamPosition: summary.teamPosition,
+    primaryStyle: summary.primaryStyle,
+    primaryRune: summary.primaryRune,
+    subStyle: summary.subStyle,
+    win: summary.win,
+    kills: summary.kills,
+    deaths: summary.deaths,
+    assists: summary.assists,
+    largestMultiKill: summary.largestMultiKill,
+    doubleKills: summary.doubleKills,
+    tripleKills: summary.tripleKills,
+    quadraKills: summary.quadraKills,
+    pentaKills: summary.pentaKills,
+    cs: summary.cs,
+    gold: summary.gold,
+    items: summary.items,
+    summonerSpells: summary.summonerSpells,
+    fetchedAt: new Date(),
+  };
+}
+
 export async function GET(
   req: NextRequest,
   ctx: { params: RouteParams | Promise<RouteParams> }
@@ -243,6 +294,7 @@ export async function GET(
         gameName: 1,
         tagLine: 1,
         platform: 1,
+        matchRegion: 1,
         profileIconId: 1,
         summonerLevel: 1,
         solo: 1,
@@ -256,8 +308,9 @@ export async function GET(
 
     const playerId = new mongoose.Types.ObjectId(String(player._id));
     const mePuuidLower = typeof player.puuid === "string" ? player.puuid.toLowerCase() : null;
+    const matchRegion = String(player.matchRegion ?? platformToMatchRegion(String(player.platform ?? "sg2"))).toLowerCase();
 
-    const my = (await PlayerMatch.findOne(
+    let my = (await PlayerMatch.findOne(
       { playerId, matchId },
       {
         matchId: 1,
@@ -287,19 +340,70 @@ export async function GET(
       }
     ).lean()) as PlayerMatchView | null;
 
-    const matchDoc = (await Match.findOne(
+    let matchDoc = (await Match.findOne(
       { matchId },
       { matchId: 1, region: 1, queueId: 1, gameCreation: 1, gameDuration: 1, raw: 1 }
     ).lean()) as MatchDocView | null;
 
     if (!matchDoc?.raw?.info) {
+      const raw = (await getMatchById(matchId, matchRegion)) as { info?: MatchInfoRaw } | null;
+      const info = raw?.info ?? {};
+      const now = new Date();
+
+      await Match.updateOne(
+        { matchId },
+        {
+          $set: {
+            region: matchRegion,
+            queueId: safeNum(info.queueId),
+            gameCreation: safeNum(info.gameCreation),
+            gameDuration: safeNum(info.gameDuration),
+            raw,
+            fetchedAt: now,
+          },
+          $setOnInsert: { matchId },
+        },
+        { upsert: true }
+      );
+
+      matchDoc = {
+        matchId,
+        region: matchRegion,
+        queueId: safeNum(info.queueId),
+        gameCreation: safeNum(info.gameCreation),
+        gameDuration: safeNum(info.gameDuration),
+        raw,
+      };
+    }
+
+    if (!my && matchDoc?.raw?.info) {
+      const playerMatchDoc = playerMatchDocFromRaw({
+        matchId,
+        region: safeStr(matchDoc.region) ?? matchRegion,
+        playerId,
+        puuid: typeof player.puuid === "string" ? player.puuid : null,
+        raw: matchDoc.raw,
+      });
+
+      if (playerMatchDoc) {
+        await PlayerMatch.updateOne(
+          { playerId, matchId },
+          { $set: playerMatchDoc },
+          { upsert: true }
+        );
+        my = playerMatchDoc;
+      }
+    }
+
+    const cachedRaw = matchDoc?.raw;
+    const info = cachedRaw?.info;
+    if (!info) {
       return NextResponse.json(
-        { ok: false, error: "Match not cached yet (no raw). Refresh / load more first." },
+        { ok: false, error: "Match details could not be stored for this match." },
         { status: 404 }
       );
     }
 
-    const info = matchDoc.raw.info;
     const participantsRaw = Array.isArray(info.participants) ? info.participants : [];
     const participants = participantsRaw.map((participant) => participantSummary(participant, mePuuidLower));
     const enrichedParticipants = await enrichMatchParticipants({

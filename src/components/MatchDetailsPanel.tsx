@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import RankEmblem from "@/components/RankEmblem";
 import { formatNumber } from "@/lib/displayTime";
-import { bestHighEloRead, highEloBadgeClass, highEloCardClass } from "@/lib/highElo";
+import { bestHighEloRead, highEloBadgeClass, highEloCardClass, type HighEloRead } from "@/lib/highElo";
 import { analyzeMatchPerformance, matchPerformanceToneClass, type MatchPerformanceBadge } from "@/lib/matchAnalysis";
 
 type RankSnapshot = {
@@ -228,6 +228,10 @@ function laneOpponentFor(participant: MatchParticipant, opponents: MatchParticip
   return opponents.find((opponent) => normalizedRole(opponent) === role) ?? null;
 }
 
+function lobbyHighElo(participants: MatchParticipant[]) {
+  return bestHighEloRead(...participants.flatMap((participant) => [participant.solo, participant.flex]));
+}
+
 function analysisInput(participant: MatchParticipant, opponent: MatchParticipant | null, matchDuration: number | null | undefined, queueId: number | null | undefined) {
   return {
     ...participant,
@@ -298,16 +302,6 @@ function RankLine({
   );
 }
 
-function HighEloPill({ participant }: { participant: MatchParticipant }) {
-  const read = bestHighEloRead(participant.solo, participant.flex);
-  if (!read) return null;
-  return (
-    <Pill className={`${highEloBadgeClass(read)} font-semibold`} title={read.title}>
-      {read.shortLabel}
-    </Pill>
-  );
-}
-
 function CompactSoloRank({ snapshot }: { snapshot: RankSnapshot | null | undefined }) {
   return (
     <div className="inline-flex items-center gap-1 rounded-full bg-zinc-900/55 px-1.5 py-0.5 text-[10px] font-medium text-zinc-100">
@@ -343,14 +337,9 @@ function PlayerSummaryCell({
   ddragonVersion: string;
 }) {
   const position = prettyPos(participant.teamPosition);
-  const highElo = bestHighEloRead(participant.solo, participant.flex);
 
   return (
-    <div
-      className={`flex min-w-[170px] items-start gap-1.5 rounded-lg ${
-        highElo ? "bg-white/[0.025] px-1 py-0.5 ring-1 ring-white/8" : ""
-      }`}
-    >
+    <div className="flex min-w-[170px] items-start gap-1.5">
       <div className="relative shrink-0">
         {championIcon ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -382,7 +371,6 @@ function PlayerSummaryCell({
           {participant.isMe ? (
             <Pill className="border-blue-500/30 bg-blue-500/10 text-blue-100">YOU</Pill>
           ) : null}
-          <HighEloPill participant={participant} />
           {position ? (
             <Pill className="border-transparent bg-zinc-900/60 text-zinc-300">{position}</Pill>
           ) : null}
@@ -498,7 +486,6 @@ function MobileParticipantRow({
   const csPm = csPerMinute(participant.cs, matchDuration);
   const position = prettyPos(participant.teamPosition);
   const badges = analyzeMatchPerformance(analysisInput(participant, laneOpponentFor(participant, opponents), matchDuration, queueId));
-  const highElo = bestHighEloRead(participant.solo, participant.flex);
   const rowTone =
     participant.isMe && tone === "blue"
       ? "rounded-xl bg-blue-500/8"
@@ -507,14 +494,7 @@ function MobileParticipantRow({
         : "";
 
   return (
-    <div className={`px-2.5 py-2.5 ${rowTone} ${highElo ? highEloCardClass(highElo) : ""}`}>
-      {highElo ? (
-        <div className="mb-1 flex justify-end">
-          <Pill className={`${highEloBadgeClass(highElo)} font-semibold`} title={highElo.title}>
-            {highElo.label}
-          </Pill>
-        </div>
-      ) : null}
+    <div className={`px-2.5 py-2.5 ${rowTone}`}>
       <div className="flex items-start gap-2.5">
         <div className="relative shrink-0">
           {championIcon ? (
@@ -548,7 +528,6 @@ function MobileParticipantRow({
             {participant.isMe ? (
               <Pill className="border-blue-500/30 bg-blue-500/10 text-blue-100">YOU</Pill>
             ) : null}
-            <HighEloPill participant={participant} />
             {position ? (
               <Pill className="border-transparent bg-zinc-900/60 text-zinc-300">{position}</Pill>
             ) : null}
@@ -671,6 +650,7 @@ function MobileTeamList({
   matchDuration,
   queueId,
   tone,
+  lobbyRead,
 }: {
   title: string;
   participants: MatchParticipant[];
@@ -684,12 +664,15 @@ function MobileTeamList({
   matchDuration: number | null | undefined;
   queueId: number | null | undefined;
   tone: "blue" | "red";
+  lobbyRead: HighEloRead | null;
 }) {
   const teamWon = participants.some((participant) => participant.win === true);
 
   return (
     <section
-      className={tone === "blue" ? "rounded-[18px] bg-blue-500/[0.038]" : "rounded-[18px] bg-red-500/[0.038]"}
+      className={`rounded-[18px] ${
+        lobbyRead ? highEloCardClass(lobbyRead) : tone === "blue" ? "bg-blue-500/[0.038]" : "bg-red-500/[0.038]"
+      }`}
     >
       <div className="flex items-center gap-2 border-b border-white/6 px-3 py-2">
         <div className="text-xs font-semibold text-zinc-100">{title}</div>
@@ -702,6 +685,11 @@ function MobileTeamList({
         >
           {teamWon ? "VICTORY" : "DEFEAT"}
         </Pill>
+        {lobbyRead ? (
+          <Pill className={`${highEloBadgeClass(lobbyRead)} font-semibold`} title={lobbyRead.title}>
+            {lobbyRead.label}
+          </Pill>
+        ) : null}
       </div>
 
       <div className="divide-y divide-white/6 px-1.5 py-1">
@@ -739,6 +727,7 @@ function TeamTable({
   matchDuration,
   queueId,
   tone,
+  lobbyRead,
 }: {
   title: string;
   participants: MatchParticipant[];
@@ -752,13 +741,16 @@ function TeamTable({
   matchDuration: number | null | undefined;
   queueId: number | null | undefined;
   tone: "blue" | "red";
+  lobbyRead: HighEloRead | null;
 }) {
   const teamWon = participants.some((participant) => participant.win === true);
   const maxDamage = Math.max(1, ...participants.map((participant) => participant.damage ?? 0));
 
   return (
     <section
-      className={tone === "blue" ? "rounded-xl bg-blue-500/[0.032]" : "rounded-xl bg-red-500/[0.032]"}
+      className={`rounded-xl ${
+        lobbyRead ? highEloCardClass(lobbyRead) : tone === "blue" ? "bg-blue-500/[0.032]" : "bg-red-500/[0.032]"
+      }`}
     >
       <div className="flex items-center gap-2 border-b border-white/6 px-2.5 py-1.5">
         <div className="text-[11px] font-semibold text-zinc-100">{title}</div>
@@ -771,6 +763,11 @@ function TeamTable({
         >
           {teamWon ? "VICTORY" : "DEFEAT"}
         </Pill>
+        {lobbyRead ? (
+          <Pill className={`${highEloBadgeClass(lobbyRead)} font-semibold`} title={lobbyRead.title}>
+            {lobbyRead.label}
+          </Pill>
+        ) : null}
       </div>
 
       <table className="w-full border-collapse text-[9px] text-zinc-300">
@@ -813,7 +810,6 @@ function TeamTable({
             const vision = participant.visionScore ?? null;
             const csPm = csPerMinute(participant.cs, matchDuration);
             const badges = analyzeMatchPerformance(analysisInput(participant, laneOpponentFor(participant, opponents), matchDuration, queueId));
-            const highElo = bestHighEloRead(participant.solo, participant.flex);
             const rowTone =
               participant.isMe && tone === "blue"
                 ? "bg-blue-500/7"
@@ -824,7 +820,7 @@ function TeamTable({
             return (
               <tr
                 key={`${participant.puuid ?? participant.riotId ?? participant.summonerName ?? title}-${index}`}
-                className={`align-top ${rowTone} ${highElo ? "bg-gradient-to-r from-white/[0.045] via-white/[0.015] to-transparent" : ""}`}
+                className={`align-top ${rowTone}`}
               >
                 <td className="border-t border-white/6 px-2 py-1">
                   <PlayerSummaryCell
@@ -963,6 +959,8 @@ export default function MatchDetailsPanel({
   runeMap: Record<string, RuneInfo>;
   styleMap: Record<string, RuneInfo>;
 }) {
+  const highEloLobby = details?.teams ? lobbyHighElo([...details.teams.blue, ...details.teams.red]) : null;
+
   return (
     <div className="mt-1.5 space-y-1.5">
       <div className="px-5 sm:px-6">
@@ -1001,6 +999,7 @@ export default function MatchDetailsPanel({
               matchDuration={details.match?.gameDuration ?? null}
               queueId={details.match?.queueId ?? null}
               tone="blue"
+              lobbyRead={highEloLobby}
             />
             <MobileTeamList
               title="Red side"
@@ -1015,6 +1014,7 @@ export default function MatchDetailsPanel({
               matchDuration={details.match?.gameDuration ?? null}
               queueId={details.match?.queueId ?? null}
               tone="red"
+              lobbyRead={highEloLobby}
             />
           </div>
 
@@ -1034,6 +1034,7 @@ export default function MatchDetailsPanel({
                   matchDuration={details.match?.gameDuration ?? null}
                   queueId={details.match?.queueId ?? null}
                   tone="blue"
+                  lobbyRead={highEloLobby}
                 />
                 <TeamTable
                   title="Red side"
@@ -1048,6 +1049,7 @@ export default function MatchDetailsPanel({
                   matchDuration={details.match?.gameDuration ?? null}
                   queueId={details.match?.queueId ?? null}
                   tone="red"
+                  lobbyRead={highEloLobby}
                 />
               </div>
             </div>

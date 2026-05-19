@@ -55,33 +55,33 @@ export function highEloRead(rank: RankLike): HighEloRead | null {
   if (tier === "CHALLENGER") {
     return {
       level: "challenger",
-      label: "Challenger Table",
-      shortLabel: "Challenger",
-      title: "Challenger rank detected. This match gets the apex treatment.",
+      label: "Apex Lobby",
+      shortLabel: "Apex",
+      title: "Top-end lobby detected. RiftBoard gives this match a cleaner spotlight.",
     };
   }
   if (tier === "GRANDMASTER") {
     return {
       level: "grandmaster",
-      label: "Grandmaster Table",
-      shortLabel: "Grandmaster",
-      title: "Grandmaster rank detected. This one deserves extra respect.",
+      label: "Elite Lobby",
+      shortLabel: "Elite",
+      title: "Elite lobby detected. The match card gets a stronger frame.",
     };
   }
   if (tier === "MASTER") {
     return {
       level: "master",
-      label: "Master+ Game",
-      shortLabel: "Master+",
-      title: "Master tier detected. High-pressure lobby styling is active.",
+      label: "Pressure Lobby",
+      shortLabel: "Pressure",
+      title: "High-pressure lobby detected. The match card gets a stronger frame.",
     };
   }
   if (tier === "DIAMOND" && ["I", "II", "III"].includes(division)) {
     return {
       level: "diamond",
-      label: "High Elo Game",
-      shortLabel: "D3+",
-      title: "Diamond III or higher detected. RiftBoard is giving the card more presence.",
+      label: "Sharp Lobby",
+      shortLabel: "Sharp",
+      title: "Sharper ranked lobby detected. RiftBoard gives this match a little more presence.",
     };
   }
 

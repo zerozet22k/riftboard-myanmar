@@ -2110,23 +2110,12 @@ internal sealed class CSharpRefreshService
             if (cached is not null && cached.TryGetValue("raw", out var raw) && raw.IsBsonDocument)
             {
                 match = JsonDocument.Parse(raw.AsBsonDocument.ToJson()).RootElement.Clone();
+                await StoreLolMatchDetailAsync(matchId, matchRegion, match, now, cancellationToken);
             }
             else
             {
                 match = await RiotGetJsonAsync($"https://{matchRegion}.api.riotgames.com/lol/match/v5/matches/{Uri.EscapeDataString(matchId)}", "lol", cancellationToken);
-                var info = match.GetProperty("info");
-                await _matches.UpdateOneAsync(
-                    Builders<BsonDocument>.Filter.Eq("matchId", matchId),
-                    Builders<BsonDocument>.Update.Combine(
-                        Builders<BsonDocument>.Update.Set("matchId", matchId),
-                        Builders<BsonDocument>.Update.Set("region", matchRegion),
-                        Builders<BsonDocument>.Update.Set("queueId", BsonIntOrNull(info, "queueId")),
-                        Builders<BsonDocument>.Update.Set("gameCreation", BsonLongOrNull(info, "gameCreation")),
-                        Builders<BsonDocument>.Update.Set("gameDuration", BsonLongOrNull(info, "gameDuration")),
-                        Builders<BsonDocument>.Update.Set("raw", BsonDocument.Parse(match.GetRawText())),
-                        Builders<BsonDocument>.Update.Set("fetchedAt", now)),
-                    new UpdateOptions { IsUpsert = true },
-                    cancellationToken);
+                await StoreLolMatchDetailAsync(matchId, matchRegion, match, now, cancellationToken);
             }
 
             var doc = ExtractLolPlayerMatch(playerId, matchId, matchRegion, puuid, match, now);
@@ -2141,6 +2130,25 @@ internal sealed class CSharpRefreshService
         }
 
         return saved;
+    }
+
+    private async Task StoreLolMatchDetailAsync(string matchId, string matchRegion, JsonElement match, DateTime now, CancellationToken cancellationToken)
+    {
+        if (!match.TryGetProperty("info", out var info)) return;
+
+        await _matches.UpdateOneAsync(
+            Builders<BsonDocument>.Filter.Eq("matchId", matchId),
+            Builders<BsonDocument>.Update.Combine(
+                Builders<BsonDocument>.Update.Set("matchId", matchId),
+                Builders<BsonDocument>.Update.Set("region", matchRegion),
+                Builders<BsonDocument>.Update.Set("queueId", BsonIntOrNull(info, "queueId")),
+                Builders<BsonDocument>.Update.Set("gameCreation", BsonLongOrNull(info, "gameCreation")),
+                Builders<BsonDocument>.Update.Set("gameDuration", BsonLongOrNull(info, "gameDuration")),
+                Builders<BsonDocument>.Update.Set("raw", BsonDocument.Parse(match.GetRawText())),
+                Builders<BsonDocument>.Update.Set("detailStoredAt", now),
+                Builders<BsonDocument>.Update.Set("fetchedAt", now)),
+            new UpdateOptions { IsUpsert = true },
+            cancellationToken);
     }
 
     private static BsonDocument? ExtractLolPlayerMatch(ObjectId playerId, string matchId, string region, string puuid, JsonElement match, DateTime now)

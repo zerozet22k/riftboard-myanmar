@@ -197,6 +197,13 @@ function highEloForMatch(queueId: number | null, solo: ProfileRank, flex: Profil
   return bestHighEloRead(solo, flex);
 }
 
+function highEloForDetails(details: MatchDetailsResponse | undefined) {
+  if (!details?.teams) return null;
+  return bestHighEloRead(
+    ...[...details.teams.blue, ...details.teams.red].flatMap((participant) => [participant.solo, participant.flex]),
+  );
+}
+
 function positionAssetName(position: string) {
   const normalized = position.toUpperCase();
   if (normalized === "SUP" || normalized === "UTILITY") return "support";
@@ -461,6 +468,7 @@ export default function MatchHistory({
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
   const [detailErrors, setDetailErrors] = useState<Record<string, string>>({});
   const [detailsByMatchId, setDetailsByMatchId] = useState<Record<string, MatchDetailsResponse>>({});
+  const [autoDetailIds, setAutoDetailIds] = useState<Record<string, true>>({});
   const [copyingId, setCopyingId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [queueFilter, setQueueFilter] = useState<QueueFilter>("all");
@@ -483,6 +491,7 @@ export default function MatchHistory({
     setDetailLoadingId(null);
     setDetailErrors({});
     setDetailsByMatchId({});
+    setAutoDetailIds({});
   }, [gameName, tagLine]);
 
   useEffect(() => {
@@ -753,6 +762,38 @@ export default function MatchHistory({
         : items.filter((match) => queueFilterFor(match.queueId) === queueFilter),
     [items, queueFilter],
   );
+  const visibleMatchIdKey = useMemo(
+    () => visibleItems.slice(0, 10).map((match) => match.matchId).join("|"),
+    [visibleItems],
+  );
+
+  useEffect(() => {
+    const ids = visibleMatchIdKey.split("|").filter(Boolean);
+    const missingIds = ids.filter((id) => !detailsByMatchId[id] && !autoDetailIds[id]);
+    if (!missingIds.length) return;
+
+    let alive = true;
+    setAutoDetailIds((previous) => {
+      const next = { ...previous };
+      for (const id of missingIds) next[id] = true;
+      return next;
+    });
+
+    for (const matchId of missingIds) {
+      fetch(matchDetailsUrl(gameName, tagLine, matchId), { cache: "no-store" })
+        .then(async (response) => {
+          const json = (await response.json().catch(() => ({}))) as MatchDetailsResponse;
+          if (!response.ok || !json?.ok || !alive) return;
+          setDetailsByMatchId((previous) => (previous[matchId] ? previous : { ...previous, [matchId]: json }));
+        })
+        .catch(() => {});
+    }
+
+    return () => {
+      alive = false;
+    };
+  }, [autoDetailIds, detailsByMatchId, gameName, tagLine, visibleMatchIdKey]);
+
   const shownCount = visibleItems.length;
 
   return (
@@ -810,7 +851,9 @@ export default function MatchHistory({
             const subStyle = match.subStyle != null ? styleMap[String(match.subStyle)] ?? null : null;
             const isOpen = openMatchId === match.matchId;
             const badges = analyzeMatchPerformance(match);
-            const highElo = highEloForMatch(match.queueId, profileSoloRank, profileFlexRank);
+            const highElo =
+              highEloForDetails(detailsByMatchId[match.matchId]) ??
+              highEloForMatch(match.queueId, profileSoloRank, profileFlexRank);
 
             return (
               <article
