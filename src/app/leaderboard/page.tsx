@@ -21,8 +21,7 @@ export const revalidate = 300;
 
 export const metadata: Metadata = {
   title: "Leaderboard",
-  description:
-    "Browse the RiftBoard Myanmar leaderboard for tracked League of Legends players, current solo queue LP, flex rank, champion mains, and profile links.",
+  description: "Myanmar ranked LoL players, current LP, recent form, and main champions in one board.",
   alternates: {
     canonical: "/",
   },
@@ -30,15 +29,13 @@ export const metadata: Metadata = {
     type: "website",
     url: absoluteUrl("/"),
     title: "RiftBoard Myanmar Leaderboard",
-    description:
-      "Browse tracked League of Legends players in Myanmar with current LP, rank snapshots, champion mains, and profile links.",
+    description: "Myanmar ranked LoL players, current LP, recent form, and main champions in one board.",
     images: getSiteOpenGraphImages(),
   },
   twitter: {
     card: "summary_large_image",
     title: "RiftBoard Myanmar Leaderboard",
-    description:
-      "Browse tracked League of Legends players in Myanmar with current LP, rank snapshots, champion mains, and profile links.",
+    description: "Myanmar ranked LoL players, current LP, recent form, and main champions in one board.",
     images: getSiteOpenGraphImages().map((image) => image.url),
   },
 };
@@ -405,8 +402,7 @@ export default async function LeaderboardPage() {
               Myanmar League of Legends Leaderboard
             </h1>
             <p className="max-w-3xl text-sm text-zinc-400">
-              Track current LP, ranked snapshots, champion mains, and player profiles across the
-              RiftBoard Myanmar community.
+              Myanmar ranked players, current LP, recent form, and main champions in one board.
             </p>
           </div>
 

@@ -19,8 +19,7 @@ export const revalidate = 300;
 
 export const metadata: Metadata = {
   title: "TFT Leaderboard",
-  description:
-    "Browse the RiftBoard Myanmar TFT leaderboard for tracked Myanmar players, current ladder placements, LP, and ranked records.",
+  description: "Myanmar TFT players, current LP, recent form, and ladder rank in one board.",
   alternates: {
     canonical: "/tft",
   },
@@ -28,15 +27,13 @@ export const metadata: Metadata = {
     type: "website",
     url: absoluteUrl("/tft"),
     title: "RiftBoard Myanmar TFT Leaderboard",
-    description:
-      "Browse tracked Myanmar TFT players with current ladder rank, LP, and ranked records.",
+    description: "Myanmar TFT players, current LP, recent form, and ladder rank in one board.",
     images: getSiteOpenGraphImages(),
   },
   twitter: {
     card: "summary_large_image",
     title: "RiftBoard Myanmar TFT Leaderboard",
-    description:
-      "Browse tracked Myanmar TFT players with current ladder rank, LP, and ranked records.",
+    description: "Myanmar TFT players, current LP, recent form, and ladder rank in one board.",
     images: getSiteOpenGraphImages().map((image) => image.url),
   },
 };
@@ -236,7 +233,7 @@ export default async function TftPage() {
               Myanmar TFT Leaderboard
             </h1>
             <p className="max-w-3xl text-sm text-zinc-400">
-              Track current TFT ladder placements, ranked snapshots, and player profiles.
+              Myanmar TFT players, current LP, recent form, and ladder rank in one board.
             </p>
           </div>
 

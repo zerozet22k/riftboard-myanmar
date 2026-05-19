@@ -69,12 +69,32 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   const playerPages: MetadataRoute.Sitemap = players
     .filter((player) => player.gameName && player.tagLine)
-    .map((player) => ({
-      url: absoluteUrl(canonicalPlayerPath(player.gameName, player.tagLine)),
-      lastModified: player.lastRefreshAt ?? player.updatedAt ?? new Date(),
-      changeFrequency: "daily" as const,
-      priority: 0.7,
-    }));
+    .flatMap((player) => {
+      const canonicalPath = canonicalPlayerPath(player.gameName, player.tagLine);
+      const tftPath = `/tft${canonicalPath}`;
+      const lastModified = player.lastRefreshAt ?? player.updatedAt ?? new Date();
+
+      return [
+        {
+          url: absoluteUrl(canonicalPath),
+          lastModified,
+          changeFrequency: "daily" as const,
+          priority: 0.7,
+        },
+        {
+          url: absoluteUrl(`${canonicalPath}/mastery`),
+          lastModified,
+          changeFrequency: "weekly" as const,
+          priority: 0.45,
+        },
+        {
+          url: absoluteUrl(tftPath),
+          lastModified,
+          changeFrequency: "daily" as const,
+          priority: 0.6,
+        },
+      ];
+    });
 
   const tournamentPages: MetadataRoute.Sitemap = tournaments
     .filter((tournament) => tournament.slug)

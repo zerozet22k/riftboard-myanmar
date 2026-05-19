@@ -2,7 +2,7 @@ import { getAppBaseUrl } from "@/lib/runtimeConfig";
 
 export const SITE_NAME = "RiftBoard Myanmar";
 export const SITE_DESCRIPTION =
-  "Myanmar League of Legends and TFT leaderboards, player profiles, rank tracking, match history, champion mastery, and community tournaments.";
+  "RiftBoard Myanmar tracks LoL and TFT ranks, player profiles, match history, champion mastery, and community tournaments.";
 export const SITE_PUBLISHER = SITE_NAME;
 export const SITE_LOGO_PATH = "/logo.png";
 export const SITE_BANNER_PATH = "/banner.png";
@@ -71,6 +71,11 @@ export function getWebsiteJsonLd() {
     image: [getSiteBannerUrl()],
     publisher: {
       "@id": organizationSchemaId(),
+    },
+    potentialAction: {
+      "@type": "SearchAction",
+      target: `${getSiteUrl()}/?q={search_term_string}`,
+      "query-input": "required name=search_term_string",
     },
   };
 }

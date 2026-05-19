@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
 import LeaderboardPage from "./leaderboard/page";
-import { absoluteUrl, getSiteOpenGraphImages, SITE_DESCRIPTION } from "@/lib/seo";
+import { absoluteUrl, getSiteOpenGraphImages } from "@/lib/seo";
 
 export const runtime = "nodejs";
 export const revalidate = 300;
 
 export const metadata: Metadata = {
   title: "Myanmar League of Legends Leaderboard",
-  description: SITE_DESCRIPTION,
+  description: "Myanmar ranked LoL players, current LP, recent form, and main champions in one board.",
   alternates: {
     canonical: "/",
   },
@@ -15,13 +15,13 @@ export const metadata: Metadata = {
     type: "website",
     url: absoluteUrl("/"),
     title: "Myanmar League of Legends Leaderboard",
-    description: SITE_DESCRIPTION,
+    description: "Myanmar ranked LoL players, current LP, recent form, and main champions in one board.",
     images: getSiteOpenGraphImages(),
   },
   twitter: {
     card: "summary_large_image",
     title: "Myanmar League of Legends Leaderboard",
-    description: SITE_DESCRIPTION,
+    description: "Myanmar ranked LoL players, current LP, recent form, and main champions in one board.",
     images: getSiteOpenGraphImages().map((image) => image.url),
   },
 };
