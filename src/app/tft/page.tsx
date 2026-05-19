@@ -236,8 +236,7 @@ export default async function TftPage() {
               Myanmar TFT Leaderboard
             </h1>
             <p className="max-w-3xl text-sm text-zinc-400">
-              Track current TFT ladder placements, ranked snapshots, playstyle reads, and player profiles across the
-              RiftBoard Myanmar community.
+              Track current TFT ladder placements, ranked snapshots, and player profiles.
             </p>
           </div>
 
