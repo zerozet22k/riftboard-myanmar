@@ -1,0 +1,9 @@
+local-refresh-agent/
+.codex*
+.playwright-mcp/
+.agents/
+.cursor/
+.windsurf/
+.claude/
+*.local-ai.log
+*.pid

@@ -1,6 +1,0 @@
-[      99ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3000/_next/static/chunks/e80b20302a098587.css:0
-[     161ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3000/_next/static/chunks/5572ca42c08f1d73.js:0
-[     186ms] Error: Failed to load chunk /_next/static/chunks/5572ca42c08f1d73.js from module 64893
-    at http://localhost:3000/_next/static/chunks/turbopack-a82699e994277470.js:1:5708
-[    3657ms] [WARNING] The resource http://localhost:3000/_next/static/media/797e433ab948586e-s.p.dbea232f.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally. @ http://localhost:3000/tft:0
-[    3658ms] [WARNING] The resource http://localhost:3000/_next/static/media/caa3a2e1cccd8315-s.p.853070df.woff2 was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally. @ http://localhost:3000/tft:0

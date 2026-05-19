@@ -13,8 +13,8 @@
 # testing
 /coverage
 
-#cron
-/local-refresh-agent
+# local tray app
+/local-refresh-agent/
 
 
 # next.js
@@ -33,12 +33,16 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
-local-refresh-agent/*.log
-local-refresh-agent/*.pid
-local-refresh-agent/*.exe
-local-refresh-agent/src/**/bin/
-local-refresh-agent/src/**/obj/
 .standalone-refresh-server*.log
+
+# local AI / agent artifacts
+/.codex*
+/.playwright-mcp/
+/.agents/
+/.cursor/
+/.windsurf/
+/.claude/
+*.local-ai.log
 
 # env files (can opt-in for committing if needed)
 .env*
