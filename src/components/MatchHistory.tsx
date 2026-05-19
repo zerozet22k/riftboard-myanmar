@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import MatchDetailsPanel, { type MatchDetailsResponse } from "@/components/MatchDetailsPanel";
 import { formatCompactDateTime, formatNumber, formatRelativeTime } from "@/lib/displayTime";
+import { bestHighEloRead, highEloBadgeClass, highEloCardClass, type RankLike } from "@/lib/highElo";
 import { analyzeMatchPerformance, csPerMinute, matchPerformanceToneClass, type MatchPerformanceBadge } from "@/lib/matchAnalysis";
 
 export type MatchRow = {
@@ -56,6 +57,7 @@ type RuneReforgedStyle = {
 
 type DetailsParticipant = NonNullable<MatchDetailsResponse["teams"]>["blue"][number];
 type QueueFilter = "all" | "solo" | "flex" | "arena" | "aram" | "normal" | "other";
+type ProfileRank = NonNullable<RankLike>;
 
 const QUEUE_NAMES: Record<number, string> = {
   420: "Ranked Solo/Duo",
@@ -135,6 +137,13 @@ function matchesUrl(gameName: string, tagLine: string, limit: number, cursor?: s
   return `${base}?${qs.toString()}`;
 }
 
+function shouldRefreshTopMatches(matches: MatchRow[], renderedAtMs: number) {
+  const newest = matches[0]?.gameCreation;
+  if (typeof newest !== "number" || !Number.isFinite(newest)) return true;
+  const renderedAt = Number.isFinite(renderedAtMs) ? renderedAtMs : Date.now();
+  return renderedAt - newest > 6 * 60 * 60 * 1000;
+}
+
 function matchDetailsUrl(gameName: string, tagLine: string, matchId: string) {
   const gn = String(gameName ?? "").trim();
   const tl = String(tagLine ?? "").trim().toLowerCase();
@@ -170,6 +179,22 @@ function prettyPos(teamPosition?: string | null) {
   if (position === "MIDDLE") return "MID";
   if (position === "BOTTOM") return "BOT";
   return position;
+}
+
+function normalizedRole(teamPosition?: string | null) {
+  return prettyPos(teamPosition) ?? "";
+}
+
+function laneOpponentFor(participant: DetailsParticipant, opponents: DetailsParticipant[]) {
+  const role = normalizedRole(participant.teamPosition);
+  if (!role) return null;
+  return opponents.find((opponent) => normalizedRole(opponent.teamPosition) === role) ?? null;
+}
+
+function highEloForMatch(queueId: number | null, solo: ProfileRank, flex: ProfileRank) {
+  if (queueId === 420) return bestHighEloRead(solo);
+  if (queueId === 440) return bestHighEloRead(flex);
+  return bestHighEloRead(solo, flex);
 }
 
 function positionAssetName(position: string) {
@@ -311,6 +336,7 @@ function readableBadges(badges: MatchPerformanceBadge[]) {
 
 function serializeParticipantForAi(
   participant: DetailsParticipant,
+  opponents: DetailsParticipant[],
   matchDuration: number | null | undefined,
   queueId: number | null | undefined,
   itemMap: Record<string, ItemInfo>,
@@ -320,7 +346,22 @@ function serializeParticipantForAi(
   const deaths = participant.deaths ?? 0;
   const assists = participant.assists ?? 0;
   const kda = deaths === 0 ? kills + assists : Number(((kills + assists) / deaths).toFixed(2));
-  const badges = analyzeMatchPerformance({ ...participant, gameDuration: matchDuration ?? null, queueId });
+  const opponent = laneOpponentFor(participant, opponents);
+  const badges = analyzeMatchPerformance({
+    ...participant,
+    gameDuration: matchDuration ?? null,
+    queueId,
+    laneOpponent: opponent
+      ? {
+          kills: opponent.kills,
+          deaths: opponent.deaths,
+          assists: opponent.assists,
+          cs: opponent.cs,
+          gold: opponent.gold,
+          damage: opponent.damage,
+        }
+      : null,
+  });
 
   return {
     player: participant.riotId ?? participant.summonerName ?? "Unknown player",
@@ -357,6 +398,7 @@ function serializeMatchForAi(
   const assists = match.assists ?? 0;
   const badges = analyzeMatchPerformance(match);
   const matchDuration = details?.match?.gameDuration ?? match.gameDuration ?? null;
+  const teams = details?.teams;
 
   return {
     copiedFor: "AI brag / match review",
@@ -379,13 +421,13 @@ function serializeMatchForAi(
       items: readableItems(match.items, itemMap),
       riftboard: readableBadges(badges),
     },
-    teams: details?.teams
+    teams: teams
       ? {
-          blue: details.teams.blue.map((participant) =>
-            serializeParticipantForAi(participant, matchDuration, details.match?.queueId ?? match.queueId, itemMap, champMap),
+          blue: teams.blue.map((participant) =>
+            serializeParticipantForAi(participant, teams.red, matchDuration, details.match?.queueId ?? match.queueId, itemMap, champMap),
           ),
-          red: details.teams.red.map((participant) =>
-            serializeParticipantForAi(participant, matchDuration, details.match?.queueId ?? match.queueId, itemMap, champMap),
+          red: teams.red.map((participant) =>
+            serializeParticipantForAi(participant, teams.blue, matchDuration, details.match?.queueId ?? match.queueId, itemMap, champMap),
           ),
         }
       : null,
@@ -399,6 +441,8 @@ export default function MatchHistory({
   initialMatches,
   initialCursor,
   renderedAtMs,
+  profileSoloRank,
+  profileFlexRank,
 }: {
   gameName: string;
   tagLine: string;
@@ -406,6 +450,8 @@ export default function MatchHistory({
   initialMatches: MatchRow[];
   initialCursor: string | null;
   renderedAtMs: number;
+  profileSoloRank: ProfileRank;
+  profileFlexRank: ProfileRank;
 }) {
   const [items, setItems] = useState<MatchRow[]>(initialMatches);
   const [cursor, setCursor] = useState<string | null>(initialCursor);
@@ -438,6 +484,40 @@ export default function MatchHistory({
     setDetailErrors({});
     setDetailsByMatchId({});
   }, [gameName, tagLine]);
+
+  useEffect(() => {
+    if (!shouldRefreshTopMatches(initialMatches, renderedAtMs)) return;
+
+    let alive = true;
+    setLoading(true);
+    setErr(null);
+
+    fetch(matchesUrl(gameName, tagLine, 10), { cache: "no-store" })
+      .then(async (response) => {
+        const json = (await response.json().catch(() => ({}))) as {
+          ok?: boolean;
+          error?: string;
+          matches?: MatchRow[];
+          nextCursor?: string | null;
+        };
+        if (!response.ok || !json?.ok) {
+          throw new Error(json?.error ?? `Failed (${response.status})`);
+        }
+        if (!alive) return;
+        setItems(Array.isArray(json.matches) ? json.matches : []);
+        setCursor(json.nextCursor ?? null);
+      })
+      .catch((error) => {
+        if (alive) setErr(error instanceof Error ? error.message : "Sync failed");
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [gameName, tagLine, initialMatches, renderedAtMs]);
 
   useEffect(() => {
     let alive = true;
@@ -730,12 +810,18 @@ export default function MatchHistory({
             const subStyle = match.subStyle != null ? styleMap[String(match.subStyle)] ?? null : null;
             const isOpen = openMatchId === match.matchId;
             const badges = analyzeMatchPerformance(match);
+            const highElo = highEloForMatch(match.queueId, profileSoloRank, profileFlexRank);
 
             return (
               <article
                 key={match._id}
-                className={`overflow-hidden rounded-[18px] ${win ? "bg-blue-500/[0.035]" : "bg-red-500/[0.035]"}`}
+                className={`relative overflow-hidden rounded-[18px] ${
+                  highElo ? highEloCardClass(highElo) : win ? "bg-blue-500/[0.035]" : "bg-red-500/[0.035]"
+                }`}
               >
+                {highElo ? (
+                  <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/40 to-transparent" />
+                ) : null}
                 <div className="space-y-2 p-2.5 sm:p-3 lg:hidden">
                   <div
                     className={
@@ -752,6 +838,11 @@ export default function MatchHistory({
                       <span className="text-zinc-500">{duration}</span>
                     </div>
                     <div className="mt-1.5 text-xs text-zinc-200">{queueName(match.queueId)}</div>
+                    {highElo ? (
+                      <Pill className={`mt-1 ${highEloBadgeClass(highElo)} font-semibold`} title={highElo.title}>
+                        {highElo.label}
+                      </Pill>
+                    ) : null}
                     <div className="mt-1 text-[11px] text-zinc-500">{ago ?? "Unknown time"}</div>
                   </div>
 
@@ -901,6 +992,11 @@ export default function MatchHistory({
                       <span className="text-zinc-500">{duration}</span>
                     </div>
                     <div className="mt-1.5 text-xs text-zinc-200">{queueName(match.queueId)}</div>
+                    {highElo ? (
+                      <Pill className={`mt-1 ${highEloBadgeClass(highElo)} font-semibold`} title={highElo.title}>
+                        {highElo.label}
+                      </Pill>
+                    ) : null}
                     <div className="mt-1 text-[11px] text-zinc-500">{ago ?? "Unknown time"}</div>
                   </div>
 

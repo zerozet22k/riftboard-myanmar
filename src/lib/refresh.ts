@@ -547,7 +547,22 @@ export async function refreshPlayerById(
         opts?.syncTftMatches === true &&
         hasTftApiKey() &&
         player?.tftMatchSync?.enabled !== false;
+      const wantsLolMatchSync =
+        opts?.syncMatches === true &&
+        player?.matchSync?.enabled !== false;
+      let shouldBypassCooldownForLolMatches = false;
       let shouldBypassCooldownForTftMatches = false;
+
+      if (wantsLolMatchSync) {
+        const lastMatchSync = player.matchSync?.lastSyncAt
+          ? new Date(player.matchSync.lastSyncAt).getTime()
+          : 0;
+        const hasStoredMatches = await PlayerMatch.exists({ playerId: player._id });
+        shouldBypassCooldownForLolMatches =
+          !hasStoredMatches ||
+          !Number.isFinite(lastMatchSync) ||
+          now - lastMatchSync >= cooldownMs;
+      }
 
       if (wantsTftMatchSync) {
         const lastTftMatchSync = player.tftMatchSync?.lastSyncAt
@@ -561,8 +576,8 @@ export async function refreshPlayerById(
       }
 
       if (age < cooldownMs) {
-        if (shouldBypassCooldownForTftMatches) {
-          // Continue the refresh so a rank-only update does not block initial TFT match history.
+        if (shouldBypassCooldownForLolMatches || shouldBypassCooldownForTftMatches) {
+          // Continue so a rank-only cooldown does not block match-history sync.
         } else {
         const next = new Date(last.getTime() + cooldownMs);
         return {

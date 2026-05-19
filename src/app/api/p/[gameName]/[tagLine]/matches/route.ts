@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { dbConnect } from "@/lib/mongodb";
 import { Player } from "@/models/player";
+import { Match } from "@/models/match";
 import { PlayerMatch } from "@/models/playerMatch";
 import { buildPlayerLookupQuery } from "@/lib/playerIdentity";
 
@@ -222,8 +223,27 @@ async function syncOlderMatchesFromRiot(opts: {
 
   if (newIds.length === 0) return 0;
 
+  const now = new Date();
   const matches = await mapLimit(newIds, 3, async (id) => {
     const match = await riotFetchJson<any>(`${base}/lol/match/v5/matches/${encodeURIComponent(id)}`);
+    const info = match?.info ?? {};
+
+    await Match.updateOne(
+      { matchId: id },
+      {
+        $set: {
+          region: routing,
+          queueId: safeNum(info.queueId),
+          gameCreation: safeNum(info.gameCreation),
+          gameDuration: safeNum(info.gameDuration),
+          raw: match,
+          fetchedAt: now,
+        },
+        $setOnInsert: { matchId: id },
+      },
+      { upsert: true }
+    );
+
     return { id, match };
   });
 
@@ -246,6 +266,13 @@ async function syncOlderMatchesFromRiot(opts: {
 }
 
 type Params = { gameName: string; tagLine: string };
+const TOP_MATCH_AUTOSYNC_STALE_MS = 6 * 60 * 60 * 1000;
+
+function newestMatchIsStale(docs: any[]) {
+  const newest = docs[0]?.gameCreation;
+  if (typeof newest !== "number" || !Number.isFinite(newest)) return true;
+  return Date.now() - newest > TOP_MATCH_AUTOSYNC_STALE_MS;
+}
 
 export async function GET(req: NextRequest, { params }: { params: Promise<Params> }) {
   try {
@@ -343,7 +370,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
     let inserted = 0;
     let docs = await queryPage();
 
-    if (autosync && docs.length <= limit) {
+    const shouldAutosyncTop = autosync && !cursor && newestMatchIsStale(docs);
+    const shouldAutosyncOlder = autosync && !!cursor && docs.length <= limit;
+
+    if (shouldAutosyncTop || shouldAutosyncOlder) {
       if (!puuid) {
         return NextResponse.json(
           { ok: false, error: "Player missing puuid (needed for autosync)" },
@@ -356,7 +386,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
         puuid,
         matchRegion,
         batch: limit,
-        afterMatchId: cursor?.matchId ?? null,
+        afterMatchId: shouldAutosyncOlder ? cursor?.matchId ?? null : null,
       });
 
       if (inserted > 0) {

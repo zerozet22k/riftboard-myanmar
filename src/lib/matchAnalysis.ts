@@ -32,6 +32,15 @@ export type MatchPerformanceInput = {
   pentaKills?: number | null;
   cs?: number | null;
   gold?: number | null;
+  damage?: number | null;
+  laneOpponent?: {
+    kills?: number | null;
+    deaths?: number | null;
+    assists?: number | null;
+    cs?: number | null;
+    gold?: number | null;
+    damage?: number | null;
+  } | null;
 };
 
 export const MATCH_ANALYSIS_VERSION = "RiftBoard read v1";
@@ -148,6 +157,30 @@ function fmtRate(value: number | null) {
   return value == null ? "--" : value.toFixed(2);
 }
 
+function signedNumber(value: number) {
+  return `${value >= 0 ? "+" : ""}${Math.round(value)}`;
+}
+
+function laneSignal(match: MatchPerformanceInput, support: boolean) {
+  const opponent = match.laneOpponent;
+  if (!opponent) return null;
+  const kills = match.kills ?? 0;
+  const deaths = match.deaths ?? 0;
+  const assists = match.assists ?? 0;
+  const takedownDiff = kills + assists - ((opponent.kills ?? 0) + (opponent.assists ?? 0));
+  const deathDiff = (opponent.deaths ?? 0) - deaths;
+  const csDiff = (match.cs ?? 0) - (opponent.cs ?? 0);
+  const goldDiff = (match.gold ?? 0) - (opponent.gold ?? 0);
+  const damageDiff = (match.damage ?? 0) - (opponent.damage ?? 0);
+  const score =
+    takedownDiff * 1.6 +
+    deathDiff * 2.2 +
+    goldDiff / 900 +
+    damageDiff / 4200 +
+    (support ? 0 : csDiff / 18);
+  return { score, takedownDiff, deathDiff, csDiff, goldDiff, damageDiff };
+}
+
 export function csPerMinute(cs: number | null | undefined, durationSeconds: number | null | undefined) {
   if (cs == null || !durationSeconds || durationSeconds <= 0) return null;
   return cs / (durationSeconds / 60);
@@ -166,6 +199,7 @@ export function analyzeMatchPerformance(match: MatchPerformanceInput): MatchPerf
   const cspm = csPerMinute(match.cs, match.gameDuration);
   const gpm = goldPerMinute(match.gold, match.gameDuration);
   const support = String(match.teamPosition ?? "").toUpperCase() === "UTILITY";
+  const matchup = laneSignal(match, support);
   const win = match.win === true;
   const minutes = match.gameDuration ? match.gameDuration / 60 : null;
   const kind = queueKind(match.queueId);
@@ -197,6 +231,13 @@ export function analyzeMatchPerformance(match: MatchPerformanceInput): MatchPerf
     largestMultiKill,
     queueKind: kind,
   });
+  if (kind === "rift" && matchup) {
+    if (matchup.score >= 9) score += 8;
+    else if (matchup.score >= 5) score += 5;
+    else if (matchup.score >= 2.5) score += 2;
+    else if (matchup.score <= -7) score -= 5;
+    else if (matchup.score <= -4) score -= 3;
+  }
   score = Math.round(Math.max(0, Math.min(MAX_RIFTBOARD_SCORE, score)));
 
   const facts: MatchPerformanceBadge[] = [];
@@ -205,7 +246,7 @@ export function analyzeMatchPerformance(match: MatchPerformanceInput): MatchPerf
       ? "KDA, deaths, takedowns, gold/min, result, and Arena bonuses"
       : kind === "aram"
         ? "KDA, deaths, takedowns, gold/min, result, and ARAM bonuses"
-        : "KDA, deaths, CS/min, gold/min, role, result, and carry bonuses";
+        : "KDA, deaths, CS/min, gold/min, role, result, matchup diff, and carry bonuses";
   const explanation = `${MATCH_ANALYSIS_VERSION}: ${score}/${MAX_RIFTBOARD_SCORE} from ${scoringBasis}.`;
   const makeVerdict = (label: string, tone: MatchPerformanceTone): MatchPerformanceBadge => ({
     label,
@@ -252,6 +293,38 @@ export function analyzeMatchPerformance(match: MatchPerformanceInput): MatchPerf
     facts.push({ label: "Triple Kill", tone: "good", title: "Three takedowns chained into one fight swing.", kind: "fact" });
   } else if (doubleKills > 0 || largestMultiKill >= 2) {
     facts.push({ label: "Double Kill", tone: "good", title: "Two takedowns in one window. Clean fight conversion.", kind: "fact" });
+  }
+
+  if (kind === "rift" && matchup) {
+    if (matchup.score >= 9) {
+      facts.push({
+        label: "Lane Gap",
+        tone: "elite",
+        title: `Direct matchup won hard: ${signedNumber(matchup.takedownDiff)} takedowns, ${signedNumber(matchup.deathDiff)} death diff, ${signedNumber(matchup.goldDiff)} gold.`,
+        kind: "fact",
+      });
+    } else if (matchup.score >= 5 || (matchup.takedownDiff >= 6 && matchup.damageDiff >= 4000)) {
+      facts.push({
+        label: "Lane Win",
+        tone: "good",
+        title: `Beat the role opponent on pressure: ${signedNumber(matchup.takedownDiff)} takedowns, ${signedNumber(matchup.damageDiff)} damage.`,
+        kind: "fact",
+      });
+    } else if (matchup.score >= 2.5 || (matchup.damageDiff >= 5000 && matchup.takedownDiff >= 2)) {
+      facts.push({
+        label: "Lane Pressure",
+        tone: "good",
+        title: `Out-pressured the role opponent: ${signedNumber(matchup.damageDiff)} damage, ${signedNumber(matchup.takedownDiff)} takedowns.`,
+        kind: "fact",
+      });
+    } else if (matchup.score <= -7) {
+      facts.push({
+        label: "Lane Lost",
+        tone: "bad",
+        title: `Role matchup fell behind: ${signedNumber(matchup.takedownDiff)} takedowns, ${signedNumber(matchup.csDiff)} CS, ${signedNumber(matchup.goldDiff)} gold.`,
+        kind: "fact",
+      });
+    }
   }
 
   if (deaths === 0 && kills + assists >= 8) {

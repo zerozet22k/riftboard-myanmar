@@ -28,7 +28,7 @@ Behavior:
 - the app shows a rough Riot-load hint so it is easier to stay gentle on the API
 - shows Windows notifications for start, stop, and failures
 - refreshes `5` players every `5` minutes by default
-- includes rank refresh and latest match sync
+- includes rank refresh, latest LoL match sync, and progressive older-match backfill
 
 Edit `config.json` if you want to change interval or batch size.
 

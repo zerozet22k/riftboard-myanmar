@@ -9,7 +9,8 @@
     "force": false,
     "syncMatches": true,
     "syncTftMatches": false,
-    "matchesCount": 20
+    "matchesCount": 20,
+    "matchBackfillCount": 20
   },
   "tftJob": {
     "enabled": true,
@@ -20,7 +21,8 @@
     "force": false,
     "syncMatches": false,
     "syncTftMatches": true,
-    "matchesCount": 20
+    "matchesCount": 20,
+    "matchBackfillCount": 0
   },
   "liveJob": {
     "enabled": true,
@@ -31,7 +33,8 @@
     "force": false,
     "syncMatches": false,
     "syncTftMatches": false,
-    "matchesCount": 1
+    "matchesCount": 1,
+    "matchBackfillCount": 0
   },
   "startupTimeoutSec": 900
 }

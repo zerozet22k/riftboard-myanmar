@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import RankEmblem from "@/components/RankEmblem";
 import { formatNumber } from "@/lib/displayTime";
+import { bestHighEloRead, highEloBadgeClass, highEloCardClass } from "@/lib/highElo";
 import { analyzeMatchPerformance, matchPerformanceToneClass, type MatchPerformanceBadge } from "@/lib/matchAnalysis";
 
 type RankSnapshot = {
@@ -213,6 +214,38 @@ function PerformanceBadges({ badges }: { badges: MatchPerformanceBadge[] }) {
   );
 }
 
+function normalizedRole(participant: MatchParticipant) {
+  const role = String(participant.teamPosition ?? "").toUpperCase();
+  if (role === "MIDDLE") return "MID";
+  if (role === "BOTTOM") return "BOT";
+  if (role === "UTILITY") return "SUP";
+  return role;
+}
+
+function laneOpponentFor(participant: MatchParticipant, opponents: MatchParticipant[]) {
+  const role = normalizedRole(participant);
+  if (!role || role === "NONE" || role === "INVALID") return null;
+  return opponents.find((opponent) => normalizedRole(opponent) === role) ?? null;
+}
+
+function analysisInput(participant: MatchParticipant, opponent: MatchParticipant | null, matchDuration: number | null | undefined, queueId: number | null | undefined) {
+  return {
+    ...participant,
+    gameDuration: matchDuration ?? null,
+    queueId,
+    laneOpponent: opponent
+      ? {
+          kills: opponent.kills,
+          deaths: opponent.deaths,
+          assists: opponent.assists,
+          cs: opponent.cs,
+          gold: opponent.gold,
+          damage: opponent.damage,
+        }
+      : null,
+  };
+}
+
 function ItemIcon({ id, url, info }: { id: number; url: string; info: ItemInfo | null }) {
   const title = info?.name ? info.name : `Item ${id}`;
   return (
@@ -265,6 +298,16 @@ function RankLine({
   );
 }
 
+function HighEloPill({ participant }: { participant: MatchParticipant }) {
+  const read = bestHighEloRead(participant.solo, participant.flex);
+  if (!read) return null;
+  return (
+    <Pill className={`${highEloBadgeClass(read)} font-semibold`} title={read.title}>
+      {read.shortLabel}
+    </Pill>
+  );
+}
+
 function CompactSoloRank({ snapshot }: { snapshot: RankSnapshot | null | undefined }) {
   return (
     <div className="inline-flex items-center gap-1 rounded-full bg-zinc-900/55 px-1.5 py-0.5 text-[10px] font-medium text-zinc-100">
@@ -300,9 +343,14 @@ function PlayerSummaryCell({
   ddragonVersion: string;
 }) {
   const position = prettyPos(participant.teamPosition);
+  const highElo = bestHighEloRead(participant.solo, participant.flex);
 
   return (
-    <div className="flex min-w-[170px] items-start gap-1.5">
+    <div
+      className={`flex min-w-[170px] items-start gap-1.5 rounded-lg ${
+        highElo ? "bg-white/[0.025] px-1 py-0.5 ring-1 ring-white/8" : ""
+      }`}
+    >
       <div className="relative shrink-0">
         {championIcon ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -334,6 +382,7 @@ function PlayerSummaryCell({
           {participant.isMe ? (
             <Pill className="border-blue-500/30 bg-blue-500/10 text-blue-100">YOU</Pill>
           ) : null}
+          <HighEloPill participant={participant} />
           {position ? (
             <Pill className="border-transparent bg-zinc-900/60 text-zinc-300">{position}</Pill>
           ) : null}
@@ -412,6 +461,7 @@ function MobileParticipantRow({
   matchDuration,
   queueId,
   tone,
+  opponents,
 }: {
   participant: MatchParticipant;
   ddragonVersion: string;
@@ -423,6 +473,7 @@ function MobileParticipantRow({
   matchDuration: number | null | undefined;
   queueId: number | null | undefined;
   tone: "blue" | "red";
+  opponents: MatchParticipant[];
 }) {
   const championName =
     participant.championId != null ? champMap[String(participant.championId)] : null;
@@ -446,7 +497,8 @@ function MobileParticipantRow({
   const kda = deaths === 0 ? `${kills + assists}.00` : ((kills + assists) / deaths).toFixed(2);
   const csPm = csPerMinute(participant.cs, matchDuration);
   const position = prettyPos(participant.teamPosition);
-  const badges = analyzeMatchPerformance({ ...participant, gameDuration: matchDuration ?? null, queueId });
+  const badges = analyzeMatchPerformance(analysisInput(participant, laneOpponentFor(participant, opponents), matchDuration, queueId));
+  const highElo = bestHighEloRead(participant.solo, participant.flex);
   const rowTone =
     participant.isMe && tone === "blue"
       ? "rounded-xl bg-blue-500/8"
@@ -455,7 +507,14 @@ function MobileParticipantRow({
         : "";
 
   return (
-    <div className={`px-2.5 py-2.5 ${rowTone}`}>
+    <div className={`px-2.5 py-2.5 ${rowTone} ${highElo ? highEloCardClass(highElo) : ""}`}>
+      {highElo ? (
+        <div className="mb-1 flex justify-end">
+          <Pill className={`${highEloBadgeClass(highElo)} font-semibold`} title={highElo.title}>
+            {highElo.label}
+          </Pill>
+        </div>
+      ) : null}
       <div className="flex items-start gap-2.5">
         <div className="relative shrink-0">
           {championIcon ? (
@@ -489,6 +548,7 @@ function MobileParticipantRow({
             {participant.isMe ? (
               <Pill className="border-blue-500/30 bg-blue-500/10 text-blue-100">YOU</Pill>
             ) : null}
+            <HighEloPill participant={participant} />
             {position ? (
               <Pill className="border-transparent bg-zinc-900/60 text-zinc-300">{position}</Pill>
             ) : null}
@@ -601,6 +661,7 @@ function MobileParticipantRow({
 function MobileTeamList({
   title,
   participants,
+  opponents,
   ddragonVersion,
   itemMap,
   spellMap,
@@ -613,6 +674,7 @@ function MobileTeamList({
 }: {
   title: string;
   participants: MatchParticipant[];
+  opponents: MatchParticipant[];
   ddragonVersion: string;
   itemMap: Record<string, ItemInfo>;
   spellMap: Record<string, SpellInfo>;
@@ -656,6 +718,7 @@ function MobileTeamList({
             matchDuration={matchDuration}
             queueId={queueId}
             tone={tone}
+            opponents={opponents}
           />
         ))}
       </div>
@@ -666,6 +729,7 @@ function MobileTeamList({
 function TeamTable({
   title,
   participants,
+  opponents,
   ddragonVersion,
   itemMap,
   spellMap,
@@ -678,6 +742,7 @@ function TeamTable({
 }: {
   title: string;
   participants: MatchParticipant[];
+  opponents: MatchParticipant[];
   ddragonVersion: string;
   itemMap: Record<string, ItemInfo>;
   spellMap: Record<string, SpellInfo>;
@@ -747,7 +812,8 @@ function TeamTable({
             const damage = participant.damage ?? null;
             const vision = participant.visionScore ?? null;
             const csPm = csPerMinute(participant.cs, matchDuration);
-            const badges = analyzeMatchPerformance({ ...participant, gameDuration: matchDuration ?? null, queueId });
+            const badges = analyzeMatchPerformance(analysisInput(participant, laneOpponentFor(participant, opponents), matchDuration, queueId));
+            const highElo = bestHighEloRead(participant.solo, participant.flex);
             const rowTone =
               participant.isMe && tone === "blue"
                 ? "bg-blue-500/7"
@@ -758,7 +824,7 @@ function TeamTable({
             return (
               <tr
                 key={`${participant.puuid ?? participant.riotId ?? participant.summonerName ?? title}-${index}`}
-                className={`align-top ${rowTone}`}
+                className={`align-top ${rowTone} ${highElo ? "bg-gradient-to-r from-white/[0.045] via-white/[0.015] to-transparent" : ""}`}
               >
                 <td className="border-t border-white/6 px-2 py-1">
                   <PlayerSummaryCell
@@ -925,6 +991,7 @@ export default function MatchDetailsPanel({
             <MobileTeamList
               title="Blue side"
               participants={details.teams.blue}
+              opponents={details.teams.red}
               ddragonVersion={ddragonVersion}
               itemMap={itemMap}
               spellMap={spellMap}
@@ -938,6 +1005,7 @@ export default function MatchDetailsPanel({
             <MobileTeamList
               title="Red side"
               participants={details.teams.red}
+              opponents={details.teams.blue}
               ddragonVersion={ddragonVersion}
               itemMap={itemMap}
               spellMap={spellMap}
@@ -956,6 +1024,7 @@ export default function MatchDetailsPanel({
                 <TeamTable
                   title="Blue side"
                   participants={details.teams.blue}
+                  opponents={details.teams.red}
                   ddragonVersion={ddragonVersion}
                   itemMap={itemMap}
                   spellMap={spellMap}
@@ -969,6 +1038,7 @@ export default function MatchDetailsPanel({
                 <TeamTable
                   title="Red side"
                   participants={details.teams.red}
+                  opponents={details.teams.blue}
                   ddragonVersion={ddragonVersion}
                   itemMap={itemMap}
                   spellMap={spellMap}

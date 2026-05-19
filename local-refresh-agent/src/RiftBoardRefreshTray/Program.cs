@@ -1197,6 +1197,7 @@ internal sealed class RefreshLoop
         {
             query.Add($"syncMatches={(jobConfig.SyncMatches ? "1" : "0")}");
             query.Add("syncTftMatches=0");
+            query.Add($"matchBackfillCount={jobConfig.MatchBackfillCount}");
         }
 
         url.Query = string.Join("&", query);
@@ -1439,6 +1440,9 @@ internal sealed class CSharpRefreshService
     private readonly HttpClient _http = new();
     private readonly IMongoCollection<BsonDocument> _players;
     private readonly IMongoCollection<BsonDocument> _rankEntries;
+    private readonly IMongoCollection<BsonDocument> _matches;
+    private readonly IMongoCollection<BsonDocument> _playerMatches;
+    private readonly IMongoCollection<BsonDocument> _tftMatches;
     private readonly IMongoCollection<BsonDocument> _tftPlayerMatches;
     private readonly IMongoCollection<BsonDocument> _discordLinks;
     private readonly IMongoCollection<BsonDocument> _liveGamePosts;
@@ -1458,6 +1462,9 @@ internal sealed class CSharpRefreshService
         var db = new MongoClient(mongoUrl).GetDatabase(databaseName);
         _players = db.GetCollection<BsonDocument>("players");
         _rankEntries = db.GetCollection<BsonDocument>("rankentries");
+        _matches = db.GetCollection<BsonDocument>("matches");
+        _playerMatches = db.GetCollection<BsonDocument>("playermatches");
+        _tftMatches = db.GetCollection<BsonDocument>("tftmatches");
         _tftPlayerMatches = db.GetCollection<BsonDocument>("tftplayermatches");
         _discordLinks = db.GetCollection<BsonDocument>("discordlinks");
         _liveGamePosts = db.GetCollection<BsonDocument>("livegameposts");
@@ -1476,7 +1483,9 @@ internal sealed class CSharpRefreshService
                      Builders<BsonDocument>.Filter.Eq("leaderboard.status", "approved");
         var sort = job == RefreshJob.Tft
             ? Builders<BsonDocument>.Sort.Ascending("tftMatchSync.lastSyncAt").Ascending("lastRefreshAt").Ascending("updatedAt")
-            : Builders<BsonDocument>.Sort.Ascending("lastRefreshAt").Ascending("updatedAt");
+            : config.SyncMatches
+                ? Builders<BsonDocument>.Sort.Ascending("matchSync.backfillLastSyncAt").Ascending("matchSync.lastSyncAt").Ascending("lastRefreshAt").Ascending("updatedAt")
+                : Builders<BsonDocument>.Sort.Ascending("lastRefreshAt").Ascending("updatedAt");
 
         var players = await _players.Find(filter).Sort(sort).Limit(config.Limit).ToListAsync(cancellationToken);
         result.Scanned = players.Count;
@@ -2038,6 +2047,146 @@ internal sealed class CSharpRefreshService
         await InsertRankEntriesAsync(playerId, entries, now, cancellationToken);
         await InsertRankEntriesAsync(playerId, tftLeague, now, cancellationToken);
         await SyncDiscordGuildRolesForPlayerAsync(playerId, cancellationToken);
+
+        if (config.SyncMatches)
+        {
+            await RefreshLolMatchesAsync(playerId, puuid, matchRegion, config, cancellationToken);
+        }
+    }
+
+    private async Task RefreshLolMatchesAsync(ObjectId playerId, string puuid, string matchRegion, JobConfig config, CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        var recentIds = await GetStringArrayAsync(
+            $"https://{matchRegion}.api.riotgames.com/lol/match/v5/matches/by-puuid/{Uri.EscapeDataString(puuid)}/ids?start=0&count={config.MatchesCount}",
+            "lol",
+            cancellationToken);
+        var recentWritten = await SaveLolMatchesAsync(playerId, puuid, matchRegion, recentIds, now, cancellationToken);
+
+        var backfillStart = 0;
+        var backfillRequested = 0;
+        var backfillWritten = 0;
+        if (config.MatchBackfillCount > 0)
+        {
+            var storedCount = (int)Math.Min(
+                int.MaxValue,
+                await _playerMatches.CountDocumentsAsync(
+                    Builders<BsonDocument>.Filter.Eq("playerId", playerId),
+                    cancellationToken: cancellationToken));
+            backfillStart = Math.Max(config.MatchesCount, storedCount);
+            var olderIds = await GetStringArrayAsync(
+                $"https://{matchRegion}.api.riotgames.com/lol/match/v5/matches/by-puuid/{Uri.EscapeDataString(puuid)}/ids?start={backfillStart}&count={config.MatchBackfillCount}",
+                "lol",
+                cancellationToken);
+            backfillRequested = olderIds.Count;
+            backfillWritten = await SaveLolMatchesAsync(playerId, puuid, matchRegion, olderIds, now, cancellationToken);
+        }
+
+        await _players.UpdateOneAsync(
+            Builders<BsonDocument>.Filter.Eq("_id", playerId),
+            Builders<BsonDocument>.Update.Combine(
+                Builders<BsonDocument>.Update.Set("matchSync.lastSyncAt", now),
+                Builders<BsonDocument>.Update.Set("matchSync.recentRequested", recentIds.Count),
+                Builders<BsonDocument>.Update.Set("matchSync.recentWritten", recentWritten),
+                backfillRequested > 0
+                    ? Builders<BsonDocument>.Update.Set("matchSync.backfillLastSyncAt", now)
+                    : Builders<BsonDocument>.Update.Unset("matchSync.backfillLastSyncAt"),
+                Builders<BsonDocument>.Update.Set("matchSync.backfillStart", backfillStart),
+                Builders<BsonDocument>.Update.Set("matchSync.backfillRequested", backfillRequested),
+                Builders<BsonDocument>.Update.Set("matchSync.backfillWritten", backfillWritten)),
+            cancellationToken: cancellationToken);
+    }
+
+    private async Task<int> SaveLolMatchesAsync(ObjectId playerId, string puuid, string matchRegion, IReadOnlyCollection<string> matchIds, DateTime now, CancellationToken cancellationToken)
+    {
+        var saved = 0;
+        foreach (var matchId in matchIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal))
+        {
+            var cached = await _matches.Find(Builders<BsonDocument>.Filter.Eq("matchId", matchId))
+                .Project(Builders<BsonDocument>.Projection.Include("raw"))
+                .FirstOrDefaultAsync(cancellationToken);
+
+            JsonElement match;
+            if (cached is not null && cached.TryGetValue("raw", out var raw) && raw.IsBsonDocument)
+            {
+                match = JsonDocument.Parse(raw.AsBsonDocument.ToJson()).RootElement.Clone();
+            }
+            else
+            {
+                match = await RiotGetJsonAsync($"https://{matchRegion}.api.riotgames.com/lol/match/v5/matches/{Uri.EscapeDataString(matchId)}", "lol", cancellationToken);
+                var info = match.GetProperty("info");
+                await _matches.UpdateOneAsync(
+                    Builders<BsonDocument>.Filter.Eq("matchId", matchId),
+                    Builders<BsonDocument>.Update.Combine(
+                        Builders<BsonDocument>.Update.Set("matchId", matchId),
+                        Builders<BsonDocument>.Update.Set("region", matchRegion),
+                        Builders<BsonDocument>.Update.Set("queueId", BsonIntOrNull(info, "queueId")),
+                        Builders<BsonDocument>.Update.Set("gameCreation", BsonLongOrNull(info, "gameCreation")),
+                        Builders<BsonDocument>.Update.Set("gameDuration", BsonLongOrNull(info, "gameDuration")),
+                        Builders<BsonDocument>.Update.Set("raw", BsonDocument.Parse(match.GetRawText())),
+                        Builders<BsonDocument>.Update.Set("fetchedAt", now)),
+                    new UpdateOptions { IsUpsert = true },
+                    cancellationToken);
+            }
+
+            var doc = ExtractLolPlayerMatch(playerId, matchId, matchRegion, puuid, match, now);
+            if (doc is null) continue;
+
+            await _playerMatches.UpdateOneAsync(
+                Builders<BsonDocument>.Filter.Eq("playerId", playerId) & Builders<BsonDocument>.Filter.Eq("matchId", matchId),
+                new BsonDocument { ["$set"] = doc },
+                new UpdateOptions { IsUpsert = true },
+                cancellationToken);
+            saved++;
+        }
+
+        return saved;
+    }
+
+    private static BsonDocument? ExtractLolPlayerMatch(ObjectId playerId, string matchId, string region, string puuid, JsonElement match, DateTime now)
+    {
+        if (!match.TryGetProperty("info", out var info)) return null;
+        var participant = GetArray(info, "participants")
+            .FirstOrDefault(p => string.Equals(GetString(p, "puuid"), puuid, StringComparison.OrdinalIgnoreCase));
+        if (participant.ValueKind == JsonValueKind.Undefined) return null;
+
+        var perks = participant.TryGetProperty("perks", out var rawPerks) ? rawPerks : default;
+        var styles = perks.ValueKind == JsonValueKind.Object ? GetArray(perks, "styles") : [];
+        var primaryStyle = styles.Count > 0 ? GetInt(styles[0], "style") : null;
+        var primaryRune = styles.Count > 0 ? GetArray(styles[0], "selections").FirstOrDefault() : default;
+        var subStyle = styles.Count > 1 ? GetInt(styles[1], "style") : null;
+        var cs = (GetInt(participant, "totalMinionsKilled") ?? 0) + (GetInt(participant, "neutralMinionsKilled") ?? 0);
+
+        return new BsonDocument
+        {
+            ["playerId"] = playerId,
+            ["matchId"] = matchId,
+            ["region"] = region,
+            ["queueId"] = BsonIntOrNull(info, "queueId"),
+            ["gameCreation"] = BsonLongOrNull(info, "gameCreation"),
+            ["gameDuration"] = BsonLongOrNull(info, "gameDuration"),
+            ["championId"] = BsonIntOrNull(participant, "championId"),
+            ["teamId"] = BsonIntOrNull(participant, "teamId"),
+            ["teamPosition"] = BsonStringOrNull(participant, "teamPosition"),
+            ["win"] = BsonBoolOrNull(participant, "win"),
+            ["kills"] = BsonIntOrNull(participant, "kills"),
+            ["deaths"] = BsonIntOrNull(participant, "deaths"),
+            ["assists"] = BsonIntOrNull(participant, "assists"),
+            ["largestMultiKill"] = BsonIntOrNull(participant, "largestMultiKill"),
+            ["doubleKills"] = BsonIntOrNull(participant, "doubleKills"),
+            ["tripleKills"] = BsonIntOrNull(participant, "tripleKills"),
+            ["quadraKills"] = BsonIntOrNull(participant, "quadraKills"),
+            ["pentaKills"] = BsonIntOrNull(participant, "pentaKills"),
+            ["largestKillingSpree"] = BsonIntOrNull(participant, "largestKillingSpree"),
+            ["cs"] = cs,
+            ["gold"] = BsonIntOrNull(participant, "goldEarned"),
+            ["items"] = new BsonArray(Enumerable.Range(0, 7).Select(i => GetInt(participant, $"item{i}") ?? 0)),
+            ["summonerSpells"] = new BsonArray(new[] { GetInt(participant, "summoner1Id") ?? 0, GetInt(participant, "summoner2Id") ?? 0 }),
+            ["primaryStyle"] = primaryStyle is { } ps ? ps : BsonNull.Value,
+            ["primaryRune"] = primaryRune.ValueKind == JsonValueKind.Object && GetInt(primaryRune, "perk") is { } pr ? pr : BsonNull.Value,
+            ["subStyle"] = subStyle is { } ss ? ss : BsonNull.Value,
+            ["fetchedAt"] = now,
+        };
     }
 
     private static BsonDocument BuildLeagueSnapshot(JsonElement entries, string queue, DateTime now)
@@ -3319,6 +3468,15 @@ internal sealed class CSharpRefreshService
         return GetLong(json, key) is { } value ? value : BsonNull.Value;
     }
 
+    private static BsonValue BsonBoolOrNull(JsonElement json, string key)
+    {
+        return json.ValueKind == JsonValueKind.Object &&
+               json.TryGetProperty(key, out var value) &&
+               value.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? value.GetBoolean()
+            : BsonNull.Value;
+    }
+
     private static BsonValue BsonDoubleOrNull(JsonElement json, string key)
     {
         return json.ValueKind == JsonValueKind.Object && json.TryGetProperty(key, out var value) && value.TryGetDouble(out var n) ? n : BsonNull.Value;
@@ -3612,6 +3770,7 @@ internal sealed record JobConfig
     public bool SyncMatches { get; init; } = true;
     public bool SyncTftMatches { get; init; } = true;
     public int MatchesCount { get; init; } = 20;
+    public int MatchBackfillCount { get; init; } = 20;
 
     public JobConfig Normalize()
     {
@@ -3622,6 +3781,7 @@ internal sealed record JobConfig
             IntervalSec = Math.Max(60, Math.Min(24 * 60 * 60, IntervalSec)),
             CooldownMs = CooldownMs is null ? null : Math.Max(0, Math.Min(60 * 60 * 1000, CooldownMs.Value)),
             MatchesCount = Math.Max(1, Math.Min(100, MatchesCount)),
+            MatchBackfillCount = Math.Max(0, Math.Min(100, MatchBackfillCount)),
         };
     }
 }

@@ -921,6 +921,16 @@ export default async function PlayerProfilePage({
                 initialMatches={initialMatches}
                 initialCursor={initialCursor}
                 renderedAtMs={renderedAtMs}
+                profileSoloRank={{
+                  tier: solo.tier ?? null,
+                  division: solo.division ?? null,
+                  lp: solo.lp ?? null,
+                }}
+                profileFlexRank={{
+                  tier: flex.tier ?? null,
+                  division: flex.division ?? null,
+                  lp: flex.lp ?? null,
+                }}
               />
             </section>
           </div>
