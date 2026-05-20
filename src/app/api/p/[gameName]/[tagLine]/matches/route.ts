@@ -5,6 +5,11 @@ import { Player } from "@/models/player";
 import { Match } from "@/models/match";
 import { PlayerMatch } from "@/models/playerMatch";
 import { buildPlayerLookupQuery } from "@/lib/playerIdentity";
+import {
+  ensureMatchDetailsForHistoryRows,
+  hydrateTrackedPlayerMatchesFromRaw,
+} from "@/lib/lolMatchHydration";
+import { prunePlayerMatches } from "@/lib/matchRetention";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,17 +26,109 @@ function safeDecode(seg: unknown) {
   }
 }
 
-function safeNum(v: any) {
+function safeNum(v: unknown) {
   return typeof v === "number" ? v : null;
 }
 
-function safeBool(v: any) {
+function safeBool(v: unknown) {
   return typeof v === "boolean" ? v : null;
 }
 
-function safeStr(v: any) {
+function safeStr(v: unknown) {
   return typeof v === "string" ? v : null;
 }
+
+type RiotParticipantRaw = {
+  puuid?: string;
+  championId?: number;
+  teamId?: number;
+  teamPosition?: string;
+  win?: boolean;
+  kills?: number;
+  deaths?: number;
+  assists?: number;
+  largestMultiKill?: number;
+  doubleKills?: number;
+  tripleKills?: number;
+  quadraKills?: number;
+  pentaKills?: number;
+  largestKillingSpree?: number;
+  goldEarned?: number;
+  totalMinionsKilled?: number;
+  neutralMinionsKilled?: number;
+  summoner1Id?: number;
+  summoner2Id?: number;
+  item0?: number;
+  item1?: number;
+  item2?: number;
+  item3?: number;
+  item4?: number;
+  item5?: number;
+  item6?: number;
+  perks?: {
+    styles?: Array<{
+      style?: number;
+      selections?: Array<{ perk?: number }>;
+    }>;
+  };
+};
+
+type RiotMatchRaw = {
+  info?: {
+    queueId?: number;
+    gameCreation?: number;
+    gameDuration?: number;
+    participants?: RiotParticipantRaw[];
+  };
+};
+
+type PlayerLookup = {
+  _id?: unknown;
+  puuid?: string | null;
+  riotPuuid?: string | null;
+  matchRegion?: string | null;
+  raw?: {
+    puuid?: string | null;
+    matchRegion?: string | null;
+  } | null;
+};
+
+type PlayerMatchRow = {
+  _id?: unknown;
+  matchId?: string | null;
+  region?: string | null;
+  queueId?: number | null;
+  gameCreation?: number | null;
+  gameDuration?: number | null;
+  championId?: number | null;
+  teamId?: number | null;
+  teamPosition?: string | null;
+  primaryStyle?: number | null;
+  primaryRune?: number | null;
+  subStyle?: number | null;
+  win?: boolean | null;
+  kills?: number | null;
+  deaths?: number | null;
+  assists?: number | null;
+  largestMultiKill?: number | null;
+  doubleKills?: number | null;
+  tripleKills?: number | null;
+  quadraKills?: number | null;
+  pentaKills?: number | null;
+  largestKillingSpree?: number | null;
+  cs?: number | null;
+  gold?: number | null;
+  items?: unknown[];
+  summonerSpells?: unknown[];
+};
+
+type PlayerMatchFilter = {
+  playerId: mongoose.Types.ObjectId;
+  $or?: Array<{
+    gameCreation?: number | { $lt: number };
+    _id?: { $lt: mongoose.Types.ObjectId };
+  }>;
+};
 
 function b64urlDecodeToString(input: string) {
   const s = input.replace(/-/g, "+").replace(/_/g, "/");
@@ -53,7 +150,7 @@ function parseCursor(cursor: string | null): { gc: number; id: string; matchId: 
   }
 }
 
-function makeCursorFromDoc(last: any): string | null {
+function makeCursorFromDoc(last: PlayerMatchRow | null | undefined): string | null {
   if (!last) return null;
   const gc = typeof last.gameCreation === "number" ? last.gameCreation : null;
   if (gc == null) return null;
@@ -113,10 +210,16 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T) => Promise<R
   return out;
 }
 
-function extractPlayerRowFromMatch(matchId: string, matchRegion: string, playerId: any, puuid: string, match: any) {
+function extractPlayerRowFromMatch(
+  matchId: string,
+  matchRegion: string,
+  playerId: mongoose.Types.ObjectId,
+  puuid: string,
+  match: RiotMatchRaw
+) {
   const info = match?.info;
   const participants = Array.isArray(info?.participants) ? info.participants : [];
-  const me = participants.find((p: any) => String(p?.puuid ?? "") === puuid) ?? null;
+  const me = participants.find((p) => String(p?.puuid ?? "") === puuid) ?? null;
   if (!me) return null;
 
   const perks = me?.perks ?? {};
@@ -135,9 +238,7 @@ function extractPlayerRowFromMatch(matchId: string, matchRegion: string, playerI
     safeNum(me?.item6),
   ].filter((x): x is number => typeof x === "number" && x > 0);
 
-  const summonerSpells = [safeNum(me?.summoner1Id), safeNum(me?.summoner2Id)].filter(
-    (x): x is number => typeof x === "number" && x > 0
-  );
+  const summonerSpells = [safeNum(me?.summoner1Id), safeNum(me?.summoner2Id)].filter((x): x is number => x != null && x > 0);
 
   const cs =
     (typeof me?.totalMinionsKilled === "number" ? me.totalMinionsKilled : 0) +
@@ -218,14 +319,14 @@ async function syncOlderMatchesFromRiot(opts: {
     { matchId: 1 }
   ).lean();
 
-  const have = new Set(existing.map((x: any) => String(x.matchId)));
+  const have = new Set(existing.map((x: { matchId?: unknown }) => String(x.matchId)));
   const newIds = ids.filter((id) => !have.has(id));
 
   if (newIds.length === 0) return 0;
 
   const now = new Date();
   const matches = await mapLimit(newIds, 3, async (id) => {
-    const match = await riotFetchJson<any>(`${base}/lol/match/v5/matches/${encodeURIComponent(id)}`);
+    const match = await riotFetchJson<RiotMatchRaw>(`${base}/lol/match/v5/matches/${encodeURIComponent(id)}`);
     const info = match?.info ?? {};
 
     await Match.updateOne(
@@ -244,13 +345,20 @@ async function syncOlderMatchesFromRiot(opts: {
       { upsert: true }
     );
 
+    await hydrateTrackedPlayerMatchesFromRaw({
+      matchId: id,
+      region: routing,
+      raw: match,
+    });
+
     return { id, match };
   });
 
-  const ops = matches
+  const docs = matches
     .map(({ id, match }) => extractPlayerRowFromMatch(id, routing, playerId, puuid, match))
-    .filter(Boolean)
-    .map((doc: any) => ({
+    .filter((doc): doc is NonNullable<ReturnType<typeof extractPlayerRowFromMatch>> => doc != null);
+
+  const ops = docs.map((doc) => ({
       updateOne: {
         filter: { playerId: doc.playerId, matchId: doc.matchId },
         update: { $set: doc },
@@ -259,8 +367,11 @@ async function syncOlderMatchesFromRiot(opts: {
     }));
 
   if (ops.length) {
-    await PlayerMatch.bulkWrite(ops, { ordered: false });
+    await PlayerMatch.bulkWrite(ops as unknown as Parameters<typeof PlayerMatch.bulkWrite>[0], {
+      ordered: false,
+    });
   }
+  await prunePlayerMatches(playerId);
 
   return ops.length;
 }
@@ -268,7 +379,7 @@ async function syncOlderMatchesFromRiot(opts: {
 type Params = { gameName: string; tagLine: string };
 const TOP_MATCH_AUTOSYNC_STALE_MS = 6 * 60 * 60 * 1000;
 
-function newestMatchIsStale(docs: any[]) {
+function newestMatchIsStale(docs: PlayerMatchRow[]) {
   const newest = docs[0]?.gameCreation;
   if (typeof newest !== "number" || !Number.isFinite(newest)) return true;
   return Date.now() - newest > TOP_MATCH_AUTOSYNC_STALE_MS;
@@ -296,10 +407,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
 
     await dbConnect();
 
-    const player: any = await Player.findOne(
+    const player = (await Player.findOne(
       buildPlayerLookupQuery(gameNameRaw, tagLineRaw),
       { _id: 1, puuid: 1, riotPuuid: 1, matchRegion: 1, raw: 1 }
-    ).lean();
+    ).lean()) as PlayerLookup | null;
 
     if (!player?._id) {
       return NextResponse.json({ ok: false, error: "Player not found" }, { status: 404 });
@@ -312,7 +423,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
       .toLowerCase();
 
     function buildFilter() {
-      const filter: any = { playerId };
+      const filter: PlayerMatchFilter = { playerId };
 
       if (cursor) {
         let oid: mongoose.Types.ObjectId | null = null;
@@ -331,8 +442,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
       return filter;
     }
 
-    async function queryPage() {
-      return PlayerMatch.find(
+    async function queryPage(): Promise<PlayerMatchRow[]> {
+      return (await PlayerMatch.find(
         buildFilter(),
         {
           matchId: 1,
@@ -364,7 +475,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
       )
         .sort({ gameCreation: -1, _id: -1 })
         .limit(limit + 1)
-        .lean();
+        .lean()) as PlayerMatchRow[];
     }
 
     let inserted = 0;
@@ -394,6 +505,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
       }
     }
 
+    const pageHydration = await ensureMatchDetailsForHistoryRows({
+      rows: docs.slice(0, limit),
+      matchRegion,
+      maxFetch: Math.min(limit, 10),
+    });
+
+    if (pageHydration.fetched > 0) {
+      docs = await queryPage();
+    }
+
     const hasMore = docs.length > limit;
     const page = hasMore ? docs.slice(0, limit) : docs;
     const nextCursor =
@@ -405,7 +526,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
             ? makeCursorFromDoc(page[page.length - 1])
             : null;
 
-    const matches = page.map((m: any) => ({
+    const matches = page.map((m) => ({
       _id: String(m._id),
       matchId: String(m.matchId ?? ""),
       region: safeStr(m.region),
@@ -430,9 +551,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
       largestKillingSpree: safeNum(m.largestKillingSpree),
       cs: safeNum(m.cs),
       gold: safeNum(m.gold),
-      items: Array.isArray(m.items) ? m.items.filter((x: any) => typeof x === "number") : [],
+      items: Array.isArray(m.items) ? m.items.filter((x): x is number => typeof x === "number") : [],
       summonerSpells: Array.isArray(m.summonerSpells)
-        ? m.summonerSpells.filter((x: any) => typeof x === "number")
+        ? m.summonerSpells.filter((x): x is number => typeof x === "number")
         : [],
     }));
 
@@ -446,7 +567,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
       matches,
       nextCursor,
     });
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message ?? "Error" }, { status: 500 });
+  } catch (e: unknown) {
+    return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : "Error" }, { status: 500 });
   }
 }

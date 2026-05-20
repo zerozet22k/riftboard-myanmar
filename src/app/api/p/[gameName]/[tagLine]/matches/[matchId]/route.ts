@@ -1,10 +1,13 @@
 import mongoose from "mongoose";
 import { NextRequest, NextResponse } from "next/server";
+import {
+  ensureMatchDetailStored,
+  playerMatchDocFromRaw,
+} from "@/lib/lolMatchHydration";
 import { dbConnect } from "@/lib/mongodb";
 import { enrichMatchParticipants } from "@/lib/participantProfiles";
 import { buildPlayerLookupQuery } from "@/lib/playerIdentity";
-import { getMatchById, platformToMatchRegion } from "@/lib/riot";
-import { Match } from "@/models/match";
+import { platformToMatchRegion } from "@/lib/riot";
 import { Player } from "@/models/player";
 import { PlayerMatch } from "@/models/playerMatch";
 
@@ -222,109 +225,6 @@ function participantSummary(participant: MatchParticipantRaw, mePuuidLower: stri
   };
 }
 
-function playerMatchDocFromRaw(params: {
-  matchId: string;
-  region: string;
-  playerId: mongoose.Types.ObjectId;
-  puuid: string | null;
-  raw: { info?: MatchInfoRaw } | null | undefined;
-}) {
-  const info = params.raw?.info ?? {};
-  const participantsRaw = Array.isArray(info.participants) ? info.participants : [];
-  const me = participantsRaw.find(
-    (participant) =>
-      params.puuid &&
-      typeof participant?.puuid === "string" &&
-      participant.puuid.toLowerCase() === params.puuid.toLowerCase()
-  );
-  if (!me) return null;
-
-  const summary = participantSummary(me, params.puuid?.toLowerCase() ?? null);
-
-  return {
-    playerId: params.playerId,
-    matchId: params.matchId,
-    region: params.region,
-    queueId: safeNum(info.queueId),
-    gameCreation: safeNum(info.gameCreation),
-    gameDuration: safeNum(info.gameDuration),
-    championId: summary.championId,
-    teamId: summary.teamId,
-    teamPosition: summary.teamPosition,
-    primaryStyle: summary.primaryStyle,
-    primaryRune: summary.primaryRune,
-    subStyle: summary.subStyle,
-    win: summary.win,
-    kills: summary.kills,
-    deaths: summary.deaths,
-    assists: summary.assists,
-    largestMultiKill: summary.largestMultiKill,
-    doubleKills: summary.doubleKills,
-    tripleKills: summary.tripleKills,
-    quadraKills: summary.quadraKills,
-    pentaKills: summary.pentaKills,
-    largestKillingSpree: summary.largestKillingSpree,
-    cs: summary.cs,
-    gold: summary.gold,
-    items: summary.items,
-    summonerSpells: summary.summonerSpells,
-    fetchedAt: new Date(),
-  };
-}
-
-async function hydrateTrackedPlayerMatchesFromRaw(params: {
-  matchId: string;
-  region: string;
-  raw: { info?: MatchInfoRaw } | null | undefined;
-}) {
-  const info = params.raw?.info ?? {};
-  const participantsRaw = Array.isArray(info.participants) ? info.participants : [];
-  const puuids = [
-    ...new Set(
-      participantsRaw
-        .map((participant) => safeStr(participant.puuid)?.trim())
-        .filter((puuid): puuid is string => !!puuid)
-    ),
-  ];
-
-  if (!puuids.length) return 0;
-
-  const trackedPlayers = (await Player.find(
-    { puuid: { $in: puuids } },
-    { _id: 1, puuid: 1 }
-  ).lean()) as Array<{ _id: unknown; puuid?: string | null }>;
-
-  const ops = trackedPlayers
-    .map((trackedPlayer) => {
-      const playerId = new mongoose.Types.ObjectId(String(trackedPlayer._id));
-      const doc = playerMatchDocFromRaw({
-        matchId: params.matchId,
-        region: params.region,
-        playerId,
-        puuid: safeStr(trackedPlayer.puuid),
-        raw: params.raw,
-      });
-
-      if (!doc) return null;
-
-      return {
-        updateOne: {
-          filter: { playerId, matchId: params.matchId },
-          update: { $set: doc },
-          upsert: true,
-        },
-      };
-    })
-    .filter((op): op is NonNullable<typeof op> => op != null);
-
-  if (!ops.length) return 0;
-
-  await PlayerMatch.bulkWrite(ops as unknown as Parameters<typeof PlayerMatch.bulkWrite>[0], {
-    ordered: false,
-  });
-  return ops.length;
-}
-
 export async function GET(
   req: NextRequest,
   ctx: { params: RouteParams | Promise<RouteParams> }
@@ -397,49 +297,7 @@ export async function GET(
       }
     ).lean()) as PlayerMatchView | null;
 
-    let matchDoc = (await Match.findOne(
-      { matchId },
-      { matchId: 1, region: 1, queueId: 1, gameCreation: 1, gameDuration: 1, raw: 1 }
-    ).lean()) as MatchDocView | null;
-
-    if (!matchDoc?.raw?.info) {
-      const raw = (await getMatchById(matchId, matchRegion)) as { info?: MatchInfoRaw } | null;
-      const info = raw?.info ?? {};
-      const now = new Date();
-
-      await Match.updateOne(
-        { matchId },
-        {
-          $set: {
-            region: matchRegion,
-            queueId: safeNum(info.queueId),
-            gameCreation: safeNum(info.gameCreation),
-            gameDuration: safeNum(info.gameDuration),
-            raw,
-            fetchedAt: now,
-          },
-          $setOnInsert: { matchId },
-        },
-        { upsert: true }
-      );
-
-      matchDoc = {
-        matchId,
-        region: matchRegion,
-        queueId: safeNum(info.queueId),
-        gameCreation: safeNum(info.gameCreation),
-        gameDuration: safeNum(info.gameDuration),
-        raw,
-      };
-    }
-
-    if (matchDoc?.raw?.info) {
-      await hydrateTrackedPlayerMatchesFromRaw({
-        matchId,
-        region: safeStr(matchDoc.region) ?? matchRegion,
-        raw: matchDoc.raw,
-      });
-    }
+    const matchDoc = (await ensureMatchDetailStored({ matchId, matchRegion })) as MatchDocView | null;
 
     if (!my && matchDoc?.raw?.info) {
       const playerMatchDoc = playerMatchDocFromRaw({
@@ -462,7 +320,7 @@ export async function GET(
 
     const cachedRaw = matchDoc?.raw;
     const info = cachedRaw?.info;
-    if (!info) {
+    if (!matchDoc || !info) {
       return NextResponse.json(
         { ok: false, error: "Match details could not be stored for this match." },
         { status: 404 }

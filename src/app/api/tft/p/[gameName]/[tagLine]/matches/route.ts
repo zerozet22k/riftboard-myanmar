@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { dbConnect } from "@/lib/mongodb";
+import { pruneTftPlayerMatches } from "@/lib/matchRetention";
 import { buildPlayerLookupQuery } from "@/lib/playerIdentity";
 import { getTftMatchById, getTftMatchIdsByPuuid, platformToMatchRegion } from "@/lib/riot";
 import { hydrateTftMatches } from "@/lib/tftAssets";
@@ -201,6 +202,7 @@ async function syncOlderTftMatches(opts: {
     }));
 
   if (ops.length) await TftPlayerMatch.bulkWrite(ops, { ordered: false });
+  await pruneTftPlayerMatches(playerId);
   return ops.length;
 }
 

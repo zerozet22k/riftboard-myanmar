@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
     assertCronAuth(req);
     const result = await publishLiveGamesToDiscord({
       channelId: req.nextUrl.searchParams.get("channelId") || undefined,
-      limit: intParam(req, "limit", 80, 1, 200),
+      limit: intParam(req, "limit", 200, 1, 200),
       delayMs: intParam(req, "delayMs", 350, 0, 5000),
     });
 

@@ -5,6 +5,7 @@ import { dbConnect } from "@/lib/mongodb";
 import { getAppBaseUrl } from "@/lib/runtimeConfig";
 import { findActiveGameByPuuid, isRiot404 } from "@/lib/riot";
 import { canonicalPlayerPath } from "@/lib/playerIdentity";
+import { DiscordLink } from "@/models/discordLink";
 import { LiveGamePost } from "@/models/liveGamePost";
 import { Player } from "@/models/player";
 
@@ -166,18 +167,55 @@ export async function publishLiveGamesToDiscord(opts?: {
   const limit = Math.max(1, Math.min(200, Math.floor(Number(opts?.limit ?? 80) || 80)));
   const delayMs = Math.max(0, Math.min(5000, Math.floor(Number(opts?.delayMs ?? 350) || 0)));
   const now = new Date();
-  const players = await Player.find(
+  const verifiedLinks = await DiscordLink.find(
     {
-      puuid: { $type: "string", $ne: "" },
-      "leaderboard.group": "burmese",
-      "leaderboard.status": "approved",
-      "track.lol": { $ne: false },
+      verifiedBinding: true,
+      verificationSource: { $in: ["discord_connections", "riot_rso", "legacy_manual"] },
     },
-    { gameName: 1, tagLine: 1, platform: 1, puuid: 1 }
-  )
-    .sort({ lastRefreshAt: -1, updatedAt: -1 })
-    .limit(limit)
-    .lean<LivePlayer[]>();
+    { playerId: 1 }
+  ).lean();
+  const linkedPlayerIds = verifiedLinks
+    .map((link) => String(link.playerId ?? "").trim())
+    .filter((id) => mongoose.Types.ObjectId.isValid(id))
+    .map((id) => new mongoose.Types.ObjectId(id));
+
+  const approvedFilter = {
+    puuid: { $type: "string" as const, $ne: "" },
+    "leaderboard.group": "burmese",
+    "leaderboard.status": "approved",
+    "track.lol": { $ne: false },
+  };
+
+  const linkedPlayers = linkedPlayerIds.length
+    ? await Player.find(
+        {
+          _id: { $in: linkedPlayerIds },
+          puuid: { $type: "string" as const, $ne: "" },
+          "track.lol": { $ne: false },
+        },
+        { gameName: 1, tagLine: 1, platform: 1, puuid: 1 }
+      )
+        .sort({ lastRefreshAt: -1, updatedAt: -1 })
+        .limit(limit)
+        .lean<LivePlayer[]>()
+    : [];
+  const linkedIds = new Set(linkedPlayers.map((player) => String(player._id ?? "")));
+  const remaining = Math.max(0, limit - linkedPlayers.length);
+  const approvedPlayers = remaining
+    ? await Player.find(
+        linkedIds.size
+          ? {
+              ...approvedFilter,
+              _id: { $nin: [...linkedIds].map((id) => new mongoose.Types.ObjectId(id)) },
+            }
+          : approvedFilter,
+        { gameName: 1, tagLine: 1, platform: 1, puuid: 1 }
+      )
+        .sort({ lastRefreshAt: -1, updatedAt: -1 })
+        .limit(remaining)
+        .lean<LivePlayer[]>()
+    : [];
+  const players = [...linkedPlayers, ...approvedPlayers];
 
   const games = new Map<
     string,
@@ -244,25 +282,19 @@ export async function publishLiveGamesToDiscord(opts?: {
       .filter((id): id is mongoose.Types.ObjectId => !!id);
     const riotIds = item.players.map(compactRiotId);
 
-    try {
-      await LiveGamePost.create({
-        channelId,
-        platform: item.platform,
-        gameId: item.game.gameId,
-        playerIds,
-        riotIds,
-        lastSeenAt: now,
-      });
-    } catch (error) {
-      if (error && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === 11000) {
-        skipped++;
-        await LiveGamePost.updateOne(
-          { channelId, platform: item.platform, gameId: item.game.gameId },
-          { $set: { lastSeenAt: now, playerIds, riotIds } }
-        );
-        continue;
-      }
-      throw error;
+    const existing = await LiveGamePost.findOne({
+      channelId,
+      platform: item.platform,
+      gameId: item.game.gameId,
+    }).lean();
+
+    if (existing?.messageId) {
+      skipped++;
+      await LiveGamePost.updateOne(
+        { channelId, platform: item.platform, gameId: item.game.gameId },
+        { $set: { lastSeenAt: now, playerIds, riotIds } }
+      );
+      continue;
     }
 
     try {
@@ -281,16 +313,38 @@ export async function publishLiveGamesToDiscord(opts?: {
         { channelId, platform: item.platform, gameId: item.game.gameId },
         {
           $set: {
+            playerIds,
+            riotIds,
+            lastSeenAt: now,
             messageId: typeof sent.id === "string" ? sent.id : null,
             postedAt: new Date(),
             error: null,
           },
-        }
+          $setOnInsert: {
+            channelId,
+            platform: item.platform,
+            gameId: item.game.gameId,
+          },
+        },
+        { upsert: true }
       );
     } catch (error) {
       await LiveGamePost.updateOne(
         { channelId, platform: item.platform, gameId: item.game.gameId },
-        { $set: { error: error instanceof Error ? error.message : String(error) } }
+        {
+          $set: {
+            playerIds,
+            riotIds,
+            lastSeenAt: now,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          $setOnInsert: {
+            channelId,
+            platform: item.platform,
+            gameId: item.game.gameId,
+          },
+        },
+        { upsert: true }
       );
       errors.push(`Discord post ${item.platform}:${item.game.gameId}: ${error instanceof Error ? error.message : String(error)}`);
     }

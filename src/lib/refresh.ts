@@ -28,6 +28,7 @@ import {
 import { normalizeRiotIdPart, syncCanonicalRiotId } from "@/lib/playerIdentity";
 import { mergePlayers } from "@/lib/playerMerge";
 import { approvedCommunityLeaderboardQuery } from "@/lib/communityLeaderboard";
+import { prunePlayerMatches, pruneTftPlayerMatches } from "@/lib/matchRetention";
 
 const SOLO = "RANKED_SOLO_5x5";
 const FLEX = "RANKED_FLEX_SR";
@@ -382,6 +383,8 @@ async function syncMatchIdsForPlayer(params: {
     }
   });
 
+  await prunePlayerMatches(player._id);
+
   return { requested: uniqueIds.length, written };
 }
 
@@ -520,6 +523,8 @@ async function syncRecentTftMatches(params: { player: any; puuid: string; matchR
   if (writtenSummaries === 0) {
     throw new Error("TFT match sync found matches, but none matched this player's TFT puuid");
   }
+
+  await pruneTftPlayerMatches(player._id);
 
   player.tftMatchSync = { ...(player.tftMatchSync ?? {}), lastSyncAt: now };
   await player.save();

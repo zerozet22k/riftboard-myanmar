@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "cleanup:matches": "node scripts/cleanup-match-storage.mjs",
     "discord:register": "node scripts/register-discord.mjs",
     "discord:worker": "node scripts/discord-worker.mjs"
   },
