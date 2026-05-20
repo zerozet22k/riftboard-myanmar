@@ -7,6 +7,7 @@ import {
   absoluteUrl,
   getSiteOpenGraphImages,
   organizationSchemaId,
+  SITE_NAME,
   websiteSchemaId,
 } from "@/lib/seo";
 import { approvedCommunityLeaderboardQuery } from "@/lib/communityLeaderboard";
@@ -28,6 +29,7 @@ export const metadata: Metadata = {
     url: absoluteUrl("/tft"),
     title: "RiftBoard Myanmar TFT Leaderboard",
     description: "Myanmar TFT players, current LP, recent form, and ladder rank in one board.",
+    siteName: SITE_NAME,
     images: getSiteOpenGraphImages(),
   },
   twitter: {

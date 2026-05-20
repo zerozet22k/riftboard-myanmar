@@ -1,5 +1,4 @@
 import Link from "next/link";
-import Image from "next/image";
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import SiteHeader from "@/components/SiteHeader";
@@ -10,7 +9,6 @@ import {
   getOrganizationJsonLd,
   getSiteUrl,
   getWebsiteJsonLd,
-  SITE_LOGO_PATH,
   SITE_DESCRIPTION,
   SITE_NAME,
   SITE_PUBLISHER,
@@ -39,6 +37,8 @@ export const metadata: Metadata = {
   },
   description: SITE_DESCRIPTION,
   applicationName: SITE_NAME,
+  generator: SITE_NAME,
+  creator: SITE_NAME,
   publisher: SITE_PUBLISHER,
   keywords: [
     "Myanmar League of Legends",

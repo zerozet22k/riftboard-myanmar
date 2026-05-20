@@ -29,6 +29,7 @@ import {
   getSiteBannerUrl,
   getSiteOpenGraphImages,
   organizationSchemaId,
+  SITE_NAME,
   websiteSchemaId,
 } from "@/lib/seo";
 import { Player } from "@/models/player";
@@ -461,12 +462,16 @@ export async function generateMetadata({
     alternates: {
       canonical: canonicalPath,
     },
+    robots: {
+      index: true,
+      follow: true,
+    },
     openGraph: {
       type: "profile",
       url: absoluteUrl(canonicalPath),
       title,
       description,
-      siteName: "RiftBoard Myanmar",
+      siteName: SITE_NAME,
       images: getSiteOpenGraphImages(),
     },
     twitter: {

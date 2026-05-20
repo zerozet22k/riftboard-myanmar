@@ -16,6 +16,7 @@ import {
   getSiteBannerUrl,
   getSiteOpenGraphImages,
   organizationSchemaId,
+  SITE_NAME,
   websiteSchemaId,
 } from "@/lib/seo";
 import {
@@ -92,11 +93,16 @@ export async function generateMetadata({
     alternates: {
       canonical: canonicalPath,
     },
+    robots: {
+      index: true,
+      follow: true,
+    },
     openGraph: {
       type: "website",
       url: absoluteUrl(canonicalPath),
       title: tournament.name,
       description,
+      siteName: SITE_NAME,
       images: getSiteOpenGraphImages(),
     },
     twitter: {

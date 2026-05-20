@@ -5,7 +5,7 @@ import MasteryTable, { type MasteryRow } from "@/components/MasteryTable";
 import { formatFullDateTime } from "@/lib/displayTime";
 import { dbConnect } from "@/lib/mongodb";
 import { buildPlayerLookupQuery, canonicalPlayerPath } from "@/lib/playerIdentity";
-import { absoluteUrl, getSiteOpenGraphImages } from "@/lib/seo";
+import { absoluteUrl, getSiteOpenGraphImages, SITE_NAME } from "@/lib/seo";
 import { Player } from "@/models/player";
 import { PlayerMastery } from "@/models/playerMastery";
 
@@ -94,11 +94,16 @@ export async function generateMetadata({
     alternates: {
       canonical: canonicalPath,
     },
+    robots: {
+      index: true,
+      follow: true,
+    },
     openGraph: {
       type: "article",
       url: absoluteUrl(canonicalPath),
       title,
       description,
+      siteName: SITE_NAME,
       images: getSiteOpenGraphImages(),
     },
     twitter: {

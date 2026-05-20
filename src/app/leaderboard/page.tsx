@@ -7,6 +7,7 @@ import {
   getSiteBannerUrl,
   getSiteOpenGraphImages,
   organizationSchemaId,
+  SITE_NAME,
   websiteSchemaId,
 } from "@/lib/seo";
 import { approvedCommunityLeaderboardQuery } from "@/lib/communityLeaderboard";
@@ -30,6 +31,7 @@ export const metadata: Metadata = {
     url: absoluteUrl("/"),
     title: "RiftBoard Myanmar Leaderboard",
     description: "Myanmar ranked LoL players, current LP, recent form, and main champions in one board.",
+    siteName: SITE_NAME,
     images: getSiteOpenGraphImages(),
   },
   twitter: {

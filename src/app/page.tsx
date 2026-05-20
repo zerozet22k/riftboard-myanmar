@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import LeaderboardPage from "./leaderboard/page";
-import { absoluteUrl, getSiteOpenGraphImages } from "@/lib/seo";
+import { absoluteUrl, getSiteOpenGraphImages, SITE_NAME } from "@/lib/seo";
 
 export const runtime = "nodejs";
 export const revalidate = 300;
@@ -16,6 +16,7 @@ export const metadata: Metadata = {
     url: absoluteUrl("/"),
     title: "Myanmar League of Legends Leaderboard",
     description: "Myanmar ranked LoL players, current LP, recent form, and main champions in one board.",
+    siteName: SITE_NAME,
     images: getSiteOpenGraphImages(),
   },
   twitter: {
