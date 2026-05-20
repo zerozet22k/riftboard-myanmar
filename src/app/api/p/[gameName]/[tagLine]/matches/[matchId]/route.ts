@@ -39,6 +39,7 @@ type MatchParticipantRaw = {
   tripleKills?: number;
   quadraKills?: number;
   pentaKills?: number;
+  largestKillingSpree?: number;
   goldEarned?: number;
   totalDamageDealtToChampions?: number;
   visionScore?: number;
@@ -113,6 +114,7 @@ type PlayerMatchView = {
   tripleKills?: number | null;
   quadraKills?: number | null;
   pentaKills?: number | null;
+  largestKillingSpree?: number | null;
   cs?: number | null;
   gold?: number | null;
   items?: unknown[];
@@ -206,6 +208,7 @@ function participantSummary(participant: MatchParticipantRaw, mePuuidLower: stri
     tripleKills: safeNum(participant.tripleKills),
     quadraKills: safeNum(participant.quadraKills),
     pentaKills: safeNum(participant.pentaKills),
+    largestKillingSpree: safeNum(participant.largestKillingSpree),
     cs: Number.isFinite(cs) ? cs : null,
     gold: safeNum(participant.goldEarned),
     damage: safeNum(participant.totalDamageDealtToChampions),
@@ -260,12 +263,66 @@ function playerMatchDocFromRaw(params: {
     tripleKills: summary.tripleKills,
     quadraKills: summary.quadraKills,
     pentaKills: summary.pentaKills,
+    largestKillingSpree: summary.largestKillingSpree,
     cs: summary.cs,
     gold: summary.gold,
     items: summary.items,
     summonerSpells: summary.summonerSpells,
     fetchedAt: new Date(),
   };
+}
+
+async function hydrateTrackedPlayerMatchesFromRaw(params: {
+  matchId: string;
+  region: string;
+  raw: { info?: MatchInfoRaw } | null | undefined;
+}) {
+  const info = params.raw?.info ?? {};
+  const participantsRaw = Array.isArray(info.participants) ? info.participants : [];
+  const puuids = [
+    ...new Set(
+      participantsRaw
+        .map((participant) => safeStr(participant.puuid)?.trim())
+        .filter((puuid): puuid is string => !!puuid)
+    ),
+  ];
+
+  if (!puuids.length) return 0;
+
+  const trackedPlayers = (await Player.find(
+    { puuid: { $in: puuids } },
+    { _id: 1, puuid: 1 }
+  ).lean()) as Array<{ _id: unknown; puuid?: string | null }>;
+
+  const ops = trackedPlayers
+    .map((trackedPlayer) => {
+      const playerId = new mongoose.Types.ObjectId(String(trackedPlayer._id));
+      const doc = playerMatchDocFromRaw({
+        matchId: params.matchId,
+        region: params.region,
+        playerId,
+        puuid: safeStr(trackedPlayer.puuid),
+        raw: params.raw,
+      });
+
+      if (!doc) return null;
+
+      return {
+        updateOne: {
+          filter: { playerId, matchId: params.matchId },
+          update: { $set: doc },
+          upsert: true,
+        },
+      };
+    })
+    .filter((op): op is NonNullable<typeof op> => op != null);
+
+  if (!ops.length) return 0;
+
+  await PlayerMatch.bulkWrite(ops as unknown as Parameters<typeof PlayerMatch.bulkWrite>[0], {
+    ordered: false,
+  });
+  return ops.length;
 }
 
 export async function GET(
@@ -376,6 +433,14 @@ export async function GET(
       };
     }
 
+    if (matchDoc?.raw?.info) {
+      await hydrateTrackedPlayerMatchesFromRaw({
+        matchId,
+        region: safeStr(matchDoc.region) ?? matchRegion,
+        raw: matchDoc.raw,
+      });
+    }
+
     if (!my && matchDoc?.raw?.info) {
       const playerMatchDoc = playerMatchDocFromRaw({
         matchId,
@@ -454,6 +519,7 @@ export async function GET(
             tripleKills: safeNum(my.tripleKills),
             quadraKills: safeNum(my.quadraKills),
             pentaKills: safeNum(my.pentaKills),
+            largestKillingSpree: safeNum(my.largestKillingSpree),
             cs: safeNum(my.cs),
             gold: safeNum(my.gold),
             items: Array.isArray(my.items)

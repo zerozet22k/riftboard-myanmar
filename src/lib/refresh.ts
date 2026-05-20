@@ -398,7 +398,14 @@ async function syncRecentMatches(params: {
 
   const ids = await getMatchIdsByPuuid({ puuid, matchRegion, start: 0, count });
   if (!Array.isArray(ids) || ids.length === 0) {
-    player.matchSync = { ...(player.matchSync ?? {}), lastSyncAt: now };
+    player.matchSync = {
+      ...(player.matchSync ?? {}),
+      lastSyncAt: now,
+      backfillLastSyncAt: backfillCount > 0 ? now : player.matchSync?.backfillLastSyncAt,
+      backfillRequested: 0,
+      backfillWritten: 0,
+      backfillExhausted: backfillCount > 0 ? true : player.matchSync?.backfillExhausted,
+    };
     await player.save();
     return;
   }
@@ -424,10 +431,11 @@ async function syncRecentMatches(params: {
     lastSyncAt: now,
     recentRequested: recent.requested,
     recentWritten: recent.written,
-    backfillLastSyncAt: backfill.requested > 0 ? now : player.matchSync?.backfillLastSyncAt,
+    backfillLastSyncAt: backfillCount > 0 ? now : player.matchSync?.backfillLastSyncAt,
     backfillStart: backfill.start,
     backfillRequested: backfill.requested,
     backfillWritten: backfill.written,
+    backfillExhausted: backfillCount > 0 ? backfill.requested === 0 : player.matchSync?.backfillExhausted,
   };
   await player.save();
 }

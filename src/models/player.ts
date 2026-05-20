@@ -70,6 +70,7 @@ export type PlayerDoc = {
     backfillStart?: number;
     backfillRequested?: number;
     backfillWritten?: number;
+    backfillExhausted?: boolean;
   };
 
   tftMatchSync?: {
@@ -168,6 +169,7 @@ const PlayerSchema = new Schema<PlayerDoc>(
       backfillStart: Number,
       backfillRequested: Number,
       backfillWritten: Number,
+      backfillExhausted: Boolean,
     },
 
     tftMatchSync: {
