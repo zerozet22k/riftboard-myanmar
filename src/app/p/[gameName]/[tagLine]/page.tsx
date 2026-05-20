@@ -454,11 +454,20 @@ export async function generateMetadata({
 
   const canonicalPath = canonicalPlayerPath(player.gameName, player.tagLine);
   const description = playerMetaDescription(player);
-  const title = `${player.gameName}#${player.tagLine} LoL Profile`;
+  const riotId = `${player.gameName}#${player.tagLine}`;
+  const title = `${riotId} LoL Profile`;
 
   return {
     title,
     description,
+    keywords: [
+      riotId,
+      `${player.gameName} ${player.tagLine}`,
+      `${riotId} RiftBoard Myanmar`,
+      `${riotId} League of Legends`,
+      `${riotId} match history`,
+      `${riotId} champion mastery`,
+    ],
     alternates: {
       canonical: canonicalPath,
     },
@@ -659,7 +668,13 @@ export default async function PlayerProfilePage({
     "@context": "https://schema.org",
     "@type": "ProfilePage",
     url: absoluteUrl(canonicalPath),
-    name: `${player.gameName}#${player.tagLine}`,
+    name: nameShown,
+    alternateName: [
+      nameShown,
+      `${player.gameName} ${player.tagLine}`,
+      `${player.gameName} / ${player.tagLine}`,
+    ],
+    identifier: nameShown,
     description: playerMetaDescription(player),
     image: [getSiteBannerUrl()],
     isPartOf: {
@@ -670,7 +685,9 @@ export default async function PlayerProfilePage({
     },
     mainEntity: {
       "@type": "Thing",
-      name: `${player.gameName}#${player.tagLine}`,
+      name: nameShown,
+      alternateName: [`${player.gameName} ${player.tagLine}`, `${player.gameName} / ${player.tagLine}`],
+      identifier: nameShown,
     },
   };
 

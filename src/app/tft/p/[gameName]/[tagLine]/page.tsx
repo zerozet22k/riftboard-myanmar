@@ -234,12 +234,21 @@ export async function generateMetadata({
   }
 
   const canonicalPath = canonicalTftPlayerPath(player.gameName, player.tagLine);
-  const title = `${player.gameName}#${player.tagLine} TFT Profile`;
+  const riotId = `${player.gameName}#${player.tagLine}`;
+  const title = `${riotId} TFT Profile`;
   const description = playerMetaDescription(player);
 
   return {
     title,
     description,
+    keywords: [
+      riotId,
+      `${player.gameName} ${player.tagLine}`,
+      `${riotId} RiftBoard Myanmar`,
+      `${riotId} Teamfight Tactics`,
+      `${riotId} TFT profile`,
+      `${riotId} TFT match history`,
+    ],
     alternates: { canonical: canonicalPath },
     robots: {
       index: true,
@@ -354,11 +363,22 @@ export default async function TftPlayerProfilePage({
     "@type": "ProfilePage",
     url: absoluteUrl(canonicalPath),
     name: `${player.gameName}#${player.tagLine} TFT`,
+    alternateName: [
+      nameShown,
+      `${player.gameName} ${player.tagLine}`,
+      `${player.gameName} / ${player.tagLine}`,
+    ],
+    identifier: nameShown,
     description: playerMetaDescription(player),
     image: [getSiteBannerUrl()],
     isPartOf: { "@id": websiteSchemaId() },
     publisher: { "@id": organizationSchemaId() },
-    mainEntity: { "@type": "Thing", name: `${player.gameName}#${player.tagLine}` },
+    mainEntity: {
+      "@type": "Thing",
+      name: nameShown,
+      alternateName: [`${player.gameName} ${player.tagLine}`, `${player.gameName} / ${player.tagLine}`],
+      identifier: nameShown,
+    },
   };
 
   return (
