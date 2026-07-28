@@ -121,6 +121,54 @@ if (realLogShape.Code != RefreshErrorCodes.RiotUpstream)
         $"real 520 log: expected {RefreshErrorCodes.RiotUpstream}, got {realLogShape.Code}");
 }
 
+var envFixtureRoot = Path.Combine(
+    Path.GetTempPath(),
+    $"riftboard-tray-env-smoke-{Guid.NewGuid():N}");
+var envOnlyKey = $"RIFTBOARD_SMOKE_ENV_ONLY_{Guid.NewGuid():N}";
+var localWinsKey = $"RIFTBOARD_SMOKE_LOCAL_WINS_{Guid.NewGuid():N}";
+var processWinsKey = $"RIFTBOARD_SMOKE_PROCESS_WINS_{Guid.NewGuid():N}";
+var processBlankKey = $"RIFTBOARD_SMOKE_PROCESS_BLANK_{Guid.NewGuid():N}";
+Directory.CreateDirectory(envFixtureRoot);
+try
+{
+    File.WriteAllLines(
+        Path.Combine(envFixtureRoot, ".env"),
+        [
+            $"{envOnlyKey}=env",
+            $"{localWinsKey}=env",
+            $"{processWinsKey}=env",
+            $"{processBlankKey}=env",
+        ]);
+    File.WriteAllLines(
+        Path.Combine(envFixtureRoot, ".env.local"),
+        [
+            $"{localWinsKey}=local",
+            $"{processWinsKey}=local",
+            $"{processBlankKey}=local",
+        ]);
+
+    var loadedEnv = CSharpRefreshService.LoadEnv(
+        envFixtureRoot,
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [processWinsKey] = "process",
+            [processBlankKey] = "",
+        });
+    CheckEnvValue(".env fallback", loadedEnv, envOnlyKey, "env");
+    CheckEnvValue(".env.local precedence", loadedEnv, localWinsKey, "local");
+    CheckEnvValue("process env precedence", loadedEnv, processWinsKey, "process");
+    CheckEnvValue("blank process env revocation", loadedEnv, processBlankKey, "");
+
+    if (Environment.GetEnvironmentVariable(envOnlyKey) is not null)
+    {
+        failures.Add("env parsing: file values leaked into the process environment");
+    }
+}
+finally
+{
+    Directory.Delete(envFixtureRoot, recursive: true);
+}
+
 if (failures.Count > 0)
 {
     Console.Error.WriteLine("RiftBoard tray smoke tests failed:");
@@ -131,7 +179,7 @@ if (failures.Count > 0)
     return 1;
 }
 
-Console.WriteLine("RiftBoard tray smoke tests passed (14 checks).");
+Console.WriteLine("RiftBoard tray smoke tests passed (19 checks).");
 return 0;
 
 void Check(
@@ -149,5 +197,17 @@ void Check(
         failures.Add(
             $"{name}: expected {expectedCode}/{retryable}/{stopBatch}, " +
             $"got {actual.Code}/{actual.Retryable}/{actual.StopBatch}");
+    }
+}
+
+void CheckEnvValue(
+    string name,
+    IReadOnlyDictionary<string, string> values,
+    string key,
+    string expected)
+{
+    if (!values.TryGetValue(key, out var actual) || actual != expected)
+    {
+        failures.Add($"{name}: effective environment did not contain the expected source");
     }
 }

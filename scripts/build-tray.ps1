@@ -11,6 +11,16 @@ $agentRoot = Join-Path $repoRoot "local-refresh-agent"
 $projectPath = Join-Path $agentRoot "src\RiftBoardRefreshTray\RiftBoardRefreshTray.csproj"
 $publishDir = Join-Path $agentRoot "publish"
 $resolvedAgentRoot = (Resolve-Path $agentRoot).Path
+$dotnetCommand = Get-Command dotnet -ErrorAction SilentlyContinue
+$dotnetExe = if ($dotnetCommand) {
+  $dotnetCommand.Source
+} else {
+  Join-Path ([Environment]::GetFolderPath("ProgramFiles")) "dotnet\dotnet.exe"
+}
+
+if (-not (Test-Path -LiteralPath $dotnetExe)) {
+  throw "The .NET SDK was not found. Install it or add dotnet to PATH."
+}
 
 function Remove-AgentPath {
   param([string]$Path)
@@ -30,7 +40,7 @@ function Remove-AgentPath {
 function Publish-Tray {
   Remove-AgentPath $publishDir
 
-  dotnet publish $projectPath `
+  & $dotnetExe publish $projectPath `
     --configuration $Configuration `
     --runtime win-x64 `
     --self-contained true `

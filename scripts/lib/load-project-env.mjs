@@ -1,35 +1,28 @@
 import fs from "node:fs";
 import path from "node:path";
-
-function parseValue(rawValue) {
-  const trimmed = rawValue.trim();
-  if (trimmed.length >= 2) {
-    const first = trimmed[0];
-    const last = trimmed.at(-1);
-    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
-      return trimmed.slice(1, -1);
-    }
-  }
-  return trimmed;
-}
+import {
+  normalizePortableEnvValue,
+  parsePortableEnvText,
+} from "./env-format.mjs";
 
 export function parseEnvText(text) {
+  const parsed = parsePortableEnvText(text);
+  if (parsed.malformedLines.length > 0) {
+    throw new Error(
+      `Malformed environment assignments on lines ${parsed.malformedLines.join(", ")}.`,
+    );
+  }
+  if (parsed.invalidValueLines.length > 0) {
+    throw new Error(
+      `Non-portable environment values on lines ${parsed.invalidValueLines
+        .map(({ line }) => line)
+        .join(", ")}.`,
+    );
+  }
+
   const values = new Map();
-  for (const [index, line] of text.split(/\r?\n/).entries()) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-
-    const separator = line.indexOf("=");
-    if (separator <= 0) {
-      throw new Error(`Malformed environment assignment on line ${index + 1}.`);
-    }
-
-    const key = line.slice(0, separator).trim();
-    if (!/^[A-Z][A-Z0-9_]*$/.test(key)) {
-      throw new Error(`Invalid environment key on line ${index + 1}.`);
-    }
-
-    values.set(key, parseValue(line.slice(separator + 1)));
+  for (const entry of parsed.entries) {
+    values.set(entry.key, normalizePortableEnvValue(entry.rhs));
   }
   return values;
 }

@@ -20,6 +20,16 @@ export function getLeaderboardAdSlotId() {
   return normalizeAdSenseSlotId(process.env.NEXT_PUBLIC_GOOGLE_ADSENSE_LEADERBOARD_SLOT_ID);
 }
 
+export function getTftAdSlotId() {
+  return normalizeAdSenseSlotId(process.env.NEXT_PUBLIC_GOOGLE_ADSENSE_TFT_SLOT_ID);
+}
+
+export function getAdSenseSlotIdForPathname(pathname: string) {
+  if (pathname === "/" || pathname === "/leaderboard") return getLeaderboardAdSlotId();
+  if (pathname === "/tft") return getTftAdSlotId();
+  return null;
+}
+
 export function getGoogleAdsTxtRecord() {
   const clientId = getAdSenseClientId();
   if (!clientId) return null;

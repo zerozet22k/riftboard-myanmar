@@ -2,17 +2,17 @@
 
 import Script from "next/script";
 import { usePathname } from "next/navigation";
-import { getAdSenseClientId } from "@/lib/adsense";
-
-function hasAdPlacement(pathname: string) {
-  return pathname === "/" || pathname === "/leaderboard";
-}
+import {
+  getAdSenseClientId,
+  getAdSenseSlotIdForPathname,
+} from "@/lib/adsense";
 
 export default function AdSenseScript() {
   const pathname = usePathname();
   const clientId = getAdSenseClientId();
+  const slotId = getAdSenseSlotIdForPathname(pathname);
 
-  if (!clientId || !hasAdPlacement(pathname)) return null;
+  if (!clientId || !slotId) return null;
 
   return (
     <Script

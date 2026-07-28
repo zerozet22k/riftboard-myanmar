@@ -47,7 +47,7 @@ Built independently as a product-focused community app, covering UI design, data
 
 ### Requirements
 
-- Node.js 20 or newer
+- Node.js 20.9 or newer
 - npm
 - MongoDB connection string
 - Riot API credentials for live Riot data
@@ -74,7 +74,8 @@ RiftBoard uses three environment profiles:
 - `.env.local` is the private local-development override.
 
 Both private files are ignored by Git and stored as plaintext. Keep secrets out of
-`.env.example`. Synchronize the profiles after adding or renaming a setting:
+`.env.example`. Synchronize the profiles after adding a setting. When renaming one, replace the old
+key in both private files first so the safety check does not mistake it for an unknown secret:
 
 ```powershell
 npm.cmd run env:sync
@@ -86,6 +87,8 @@ copies a local-only value into `.env`. A missing `.env` key receives the example
 `.env.local` key inherits `.env` and then the example default. Harmless duplicate declarations are
 collapsed, while conflicting non-empty duplicates or unknown keys stop the sync without deleting
 anything. Command output contains key names only, never values.
+The shared website/tray format intentionally uses portable `KEY=value` assignments. Quote the whole
+value when it contains `#`, and do not use `$` interpolation inside these files.
 
 Important variables:
 
@@ -120,15 +123,17 @@ tray agent active for the same deployment.
 
 ### Google AdSense
 
-AdSense is opt-in. Until both values below are configured, RiftBoard loads no Google advertising
-script, renders no empty ad box, and returns `404` for `/ads.txt`.
+AdSense is opt-in. A page loads Google’s advertising script and renders an ad only when the client
+ID and that page’s slot ID are both valid, so incomplete configuration leaves no empty ad box.
+`/ads.txt` publishes the seller record as soon as the client ID is valid.
 
 - `NEXT_PUBLIC_GOOGLE_ADSENSE_CLIENT_ID`: the approved `ca-pub-...` publisher ID
 - `NEXT_PUBLIC_GOOGLE_ADSENSE_LEADERBOARD_SLOT_ID`: the numeric display-ad slot ID
+- `NEXT_PUBLIC_GOOGLE_ADSENSE_TFT_SLOT_ID`: the numeric TFT leaderboard ad slot ID
 
 After AdSense approves the site:
 
-1. Add both values to the production environment and redeploy.
+1. Add the client ID and the slot ID for each enabled page to the production environment, then redeploy.
 2. Confirm `/ads.txt` returns the generated Google seller record.
 3. Configure a Google-certified consent management platform for visitors where consent is required.
 4. Keep ads away from controls and do not add more units solely to increase clicks.

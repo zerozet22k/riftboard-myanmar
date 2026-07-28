@@ -5126,9 +5126,9 @@ internal sealed class CSharpRefreshService
                 : TimeSpan.FromHours(1);
     }
 
-    private static string AccountRegion()
+    private string AccountRegion()
     {
-        var raw = EnvStatic("RIOT_ACCOUNT_REGION")?.ToLowerInvariant() ?? "asia";
+        var raw = Env("RIOT_ACCOUNT_REGION")?.ToLowerInvariant() ?? "asia";
         return raw == "sea" ? "asia" : raw;
     }
 
@@ -5142,14 +5142,14 @@ internal sealed class CSharpRefreshService
         return MustEnv("RIOT_API_KEY");
     }
 
-    private static string PlatformToMatchRegion(string? platform)
+    private string PlatformToMatchRegion(string? platform)
     {
         var p = (platform ?? "").ToLowerInvariant();
         if (SeaPlatforms.Contains(p)) return "sea";
         if (new[] { "na1", "br1", "la1", "la2", "oc1" }.Contains(p)) return "americas";
         if (new[] { "euw1", "eun1", "tr1", "ru" }.Contains(p)) return "europe";
         if (new[] { "kr", "jp1" }.Contains(p)) return "asia";
-        return EnvStatic("RIOT_MATCH_REGION")?.ToLowerInvariant() ?? "sea";
+        return Env("RIOT_MATCH_REGION")?.ToLowerInvariant() ?? "sea";
     }
 
     private string MustEnv(string key)
@@ -5159,15 +5159,28 @@ internal sealed class CSharpRefreshService
 
     private string? Env(string key)
     {
-        return _env.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value) ? value : Environment.GetEnvironmentVariable(key);
-    }
-
-    private static string? EnvStatic(string key)
-    {
-        return Environment.GetEnvironmentVariable(key);
+        return _env.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value
+            : null;
     }
 
     private static Dictionary<string, string> LoadEnv(string repoRoot)
+    {
+        var inheritedEnvironment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (System.Collections.DictionaryEntry variable in Environment.GetEnvironmentVariables())
+        {
+            if (variable.Key is string key)
+            {
+                inheritedEnvironment[key] = variable.Value?.ToString() ?? "";
+            }
+        }
+
+        return LoadEnv(repoRoot, inheritedEnvironment);
+    }
+
+    internal static Dictionary<string, string> LoadEnv(
+        string repoRoot,
+        IReadOnlyDictionary<string, string> inheritedEnvironment)
     {
         var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var file in new[] { ".env", ".env.local" })
@@ -5183,8 +5196,12 @@ internal sealed class CSharpRefreshService
                 var key = line[..eq].Trim();
                 var value = line[(eq + 1)..].Trim().Trim('"', '\'');
                 values[key] = value;
-                Environment.SetEnvironmentVariable(key, value);
             }
+        }
+
+        foreach (var variable in inheritedEnvironment)
+        {
+            values[variable.Key] = variable.Value;
         }
 
         return values;

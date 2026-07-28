@@ -2,6 +2,9 @@
   "name": "burmese-lp-ranking",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20.9.0"
+  },
   "scripts": {
     "dev": "next dev",
     "server": "next dev",

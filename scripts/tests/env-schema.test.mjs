@@ -8,7 +8,9 @@ import {
   EnvSchemaError,
   findEnvironmentReferences,
   parseEnvDocument,
+  readCurrentText,
   renderTarget,
+  writeFilePreservingMetadata,
 } from "../env-schema.mjs";
 import { loadProjectEnv, parseEnvText } from "../lib/load-project-env.mjs";
 
@@ -37,6 +39,15 @@ test("renderTarget refuses conflicting non-empty duplicate values", () => {
   );
 });
 
+test("a trailing blank duplicate remains blank instead of reviving an old value", () => {
+  const schema = parseEnvDocument('ALPHA=""\n', ".env.example");
+  const target = parseEnvDocument('ALPHA="old-value"\nALPHA=\n', ".env.local");
+
+  const result = renderTarget(schema, target);
+
+  assert.equal(result.text, "ALPHA=\n");
+});
+
 test("local rendering inherits production while production never inherits local", () => {
   const schema = parseEnvDocument('PUBLIC_URL="example"\nLOCAL_ONLY=""\n', ".env.example");
   const production = parseEnvDocument('PUBLIC_URL="production"\n', ".env");
@@ -53,15 +64,30 @@ test("local rendering inherits production while production never inherits local"
 test("source reference extraction covers supported language forms", () => {
   const references = findEnvironmentReferences(`
     process.env.DIRECT_KEY;
+    process.env?.OPTIONAL_KEY;
     process.env["BRACKET_KEY"];
+    process.env[\`TEMPLATE_KEY\`];
+    const { DESTRUCTURED_KEY, RENAMED_KEY: localName } = process.env;
     mustEnv("HELPER_KEY");
+    MustEnv("CSHARP_HELPER_KEY");
     Environment.GetEnvironmentVariable("CSHARP_KEY");
     $env:POWERSHELL_KEY
   `);
 
   assert.deepEqual(
     [...references].sort(),
-    ["BRACKET_KEY", "CSHARP_KEY", "DIRECT_KEY", "HELPER_KEY", "POWERSHELL_KEY"],
+    [
+      "BRACKET_KEY",
+      "CSHARP_HELPER_KEY",
+      "CSHARP_KEY",
+      "DESTRUCTURED_KEY",
+      "DIRECT_KEY",
+      "HELPER_KEY",
+      "OPTIONAL_KEY",
+      "POWERSHELL_KEY",
+      "RENAMED_KEY",
+      "TEMPLATE_KEY",
+    ],
   );
 });
 
@@ -89,11 +115,100 @@ test("shared loader gives process variables priority, then local, then base", as
   });
 });
 
-test("shared parser rejects malformed assignments without echoing their contents", () => {
+test("safe writes refuse to overwrite a file changed after it was read", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "riftboard-env-race-test-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const file = path.join(directory, ".env");
+  await fs.writeFile(file, 'ALPHA="original"\n', { mode: 0o600 });
+  const original = await readCurrentText(file);
+  await fs.writeFile(file, 'ALPHA="newer-editor-save"\n');
+
+  await assert.rejects(
+    () => writeFilePreservingMetadata(file, 'ALPHA="pipeline"\n', original),
+    /changed while env:sync was running/,
+  );
+  assert.equal(await fs.readFile(file, "utf8"), 'ALPHA="newer-editor-save"\n');
+});
+
+test("safe writes atomically replace an existing regular file", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "riftboard-env-replace-test-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const file = path.join(directory, ".env");
+  await fs.writeFile(file, 'ALPHA="original"\n', { mode: 0o600 });
+  const original = await readCurrentText(file);
+
+  await writeFilePreservingMetadata(file, 'ALPHA="updated"\n', original);
+
+  assert.equal(await fs.readFile(file, "utf8"), 'ALPHA="updated"\n');
+  assert.deepEqual(await fs.readdir(directory), [".env"]);
+});
+
+test("safe writes create a complete missing profile without temp artifacts", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "riftboard-env-create-test-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const file = path.join(directory, ".env");
+  const missing = await readCurrentText(file);
+
+  await writeFilePreservingMetadata(file, 'ALPHA="created"\n', missing);
+
+  assert.equal(await fs.readFile(file, "utf8"), 'ALPHA="created"\n');
+  assert.deepEqual(await fs.readdir(directory), [".env"]);
+  if (process.platform !== "win32") {
+    assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
+  }
+});
+
+test(
+  "safe writes refuse symbolic-link profiles",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), "riftboard-env-link-test-"));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const target = path.join(directory, "target");
+    const link = path.join(directory, ".env");
+    await fs.writeFile(target, 'ALPHA="outside"\n');
+    await fs.symlink(target, link);
+    const snapshot = await readCurrentText(link);
+
+    await assert.rejects(
+      () => writeFilePreservingMetadata(link, 'ALPHA="pipeline"\n', snapshot),
+      /must be a regular file/,
+    );
+    assert.equal(await fs.readFile(target, "utf8"), 'ALPHA="outside"\n');
+  },
+);
+
+test(
+  "safe writes preserve existing POSIX permissions",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), "riftboard-env-mode-test-"));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const file = path.join(directory, ".env");
+    await fs.writeFile(file, 'ALPHA="original"\n', { mode: 0o600 });
+    const original = await readCurrentText(file);
+
+    await writeFilePreservingMetadata(file, 'ALPHA="updated"\n', original);
+
+    const mode = (await fs.stat(file)).mode & 0o777;
+    assert.equal(mode, 0o600);
+  },
+);
+
+test("schema and runtime parser enforce the same portable syntax", () => {
+  assert.deepEqual(
+    Object.fromEntries(parseEnvText('ALPHA="available"\nURL="https://example.test/#fragment"\n')),
+    {
+      ALPHA: "available",
+      URL: "https://example.test/#fragment",
+    },
+  );
   assert.throws(
-    () => parseEnvText("NOT AN ASSIGNMENT"),
-    (error) =>
-      /Malformed environment assignment on line 1/.test(error.message) &&
-      !error.message.includes("NOT AN ASSIGNMENT"),
+    () => parseEnvText("export ALPHA=value\n"),
+    /Malformed environment assignments on lines 1/,
+  );
+  assert.throws(
+    () => parseEnvText("FRAGMENT=https://example.test/#section\nEXPANDS=$OTHER\n"),
+    /Non-portable environment values on lines 1, 2/,
   );
 });

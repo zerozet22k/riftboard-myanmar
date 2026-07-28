@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
 import { unstable_cache } from "next/cache";
 import { Types } from "mongoose";
+import AdSenseSlot from "@/components/AdSenseSlot";
+import TftLeaderboardTable, { type TftLeaderboardRow } from "@/components/TftLeaderboardTable";
+import { getTftAdSlotId } from "@/lib/adsense";
+import { approvedCommunityLeaderboardQuery } from "@/lib/communityLeaderboard";
 import { dbConnect } from "@/lib/mongodb";
 import { hasTftApiKey } from "@/lib/riot";
 import {
@@ -10,11 +14,9 @@ import {
   SITE_NAME,
   websiteSchemaId,
 } from "@/lib/seo";
-import { approvedCommunityLeaderboardQuery } from "@/lib/communityLeaderboard";
 import { analyzeTftPlaystyle, type TftPlaystyleSummary } from "@/lib/tftPlaystyle";
 import { Player } from "@/models/player";
 import { TftPlayerMatch } from "@/models/tftPlayerMatch";
-import TftLeaderboardTable, { type TftLeaderboardRow } from "@/components/TftLeaderboardTable";
 
 export const runtime = "nodejs";
 export const revalidate = 300;
@@ -272,6 +274,14 @@ export default async function TftPage() {
             Add <code className="mx-1 rounded bg-black/25 px-1.5 py-0.5">RIOT_TFT_API_KEY</code>
             in Vercel before expecting live ladder syncs.
           </section>
+        ) : null}
+
+        {tableRows.length ? (
+          <AdSenseSlot
+            slotId={getTftAdSlotId()}
+            format="horizontal"
+            className="min-h-[120px]"
+          />
         ) : null}
 
         {tableRows.length ? (
