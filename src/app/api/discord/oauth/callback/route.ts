@@ -16,20 +16,47 @@ import {
   clearDiscordOAuthStateCookie,
   clearPendingDiscordBindCookie,
   makePendingDiscordBindPayload,
+  normalizeReturnTo,
   readDiscordOAuthStateCookieValue,
   setDiscordSessionCookie,
   setPendingDiscordBindCookie,
 } from "@/lib/discordSession";
+import { oauthProviderErrorMessage } from "@/lib/oauthRequest";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function redirectWithStatus(req: NextRequest, status: string, message?: string, riotId?: string) {
+function redirectWithStatus(
+  req: NextRequest,
+  status: string,
+  message?: string,
+  riotId?: string,
+  returnTo?: string | null
+) {
   const url = new URL("/discord/linked-roles", req.url);
   url.searchParams.set("status", status);
   if (message) url.searchParams.set("message", message);
   if (riotId) url.searchParams.set("riotId", riotId);
+  const safeReturnTo = normalizeReturnTo(returnTo);
+  if (safeReturnTo !== "/discord/linked-roles") {
+    url.searchParams.set("returnTo", safeReturnTo);
+  }
   return NextResponse.redirect(url);
+}
+
+function redirectAfterLinked(
+  req: NextRequest,
+  returnTo: string,
+  riotId: string,
+  syncFailed: boolean
+) {
+  const target = new URL(normalizeReturnTo(returnTo), req.url);
+  if (target.pathname === "/discord/linked-roles") {
+    target.searchParams.set("status", "linked");
+    target.searchParams.set("riotId", riotId);
+    if (syncFailed) target.searchParams.set("message", "discord-role-sync-failed");
+  }
+  return NextResponse.redirect(target);
 }
 
 async function syncDiscordRoles(linkId: string) {
@@ -55,9 +82,13 @@ async function syncDiscordRoles(linkId: string) {
 export async function GET(req: NextRequest) {
   const code = String(req.nextUrl.searchParams.get("code") ?? "").trim();
   const state = String(req.nextUrl.searchParams.get("state") ?? "").trim();
+  const providerError = String(req.nextUrl.searchParams.get("error") ?? "").trim();
+  const providerErrorDescription = String(
+    req.nextUrl.searchParams.get("error_description") ?? ""
+  ).trim();
   const storedState = readDiscordOAuthStateCookieValue(req.cookies.get("discord_oauth_state")?.value);
 
-  if (!code || !state || !storedState) {
+  if (!state || !storedState) {
     const response = redirectWithStatus(req, "error", "missing-oauth-state");
     clearDiscordOAuthStateCookie(response);
     clearPendingDiscordBindCookie(response);
@@ -65,7 +96,39 @@ export async function GET(req: NextRequest) {
   }
 
   if (storedState.state !== state) {
-    const response = redirectWithStatus(req, "error", "invalid-oauth-state");
+    const response = redirectWithStatus(
+      req,
+      "error",
+      "invalid-oauth-state",
+      undefined,
+      storedState.returnTo
+    );
+    clearDiscordOAuthStateCookie(response);
+    clearPendingDiscordBindCookie(response);
+    return response;
+  }
+
+  if (providerError) {
+    const response = redirectWithStatus(
+      req,
+      "error",
+      oauthProviderErrorMessage("Discord", providerError, providerErrorDescription),
+      undefined,
+      storedState.returnTo
+    );
+    clearDiscordOAuthStateCookie(response);
+    clearPendingDiscordBindCookie(response);
+    return response;
+  }
+
+  if (!code) {
+    const response = redirectWithStatus(
+      req,
+      "error",
+      "Discord returned without an authorization code. Start the link again.",
+      undefined,
+      storedState.returnTo
+    );
     clearDiscordOAuthStateCookie(response);
     clearPendingDiscordBindCookie(response);
     return response;
@@ -85,7 +148,13 @@ export async function GET(req: NextRequest) {
     }
     const guildVerified = guilds.some((guild) => String(guild?.id ?? "").trim() === requiredGuildId);
     if (!guildVerified) {
-      const response = redirectWithStatus(req, "error", "guild-membership-required");
+      const response = redirectWithStatus(
+        req,
+        "error",
+        "guild-membership-required",
+        undefined,
+        storedState.returnTo
+      );
       clearDiscordOAuthStateCookie(response);
       clearPendingDiscordBindCookie(response);
       return response;
@@ -93,7 +162,13 @@ export async function GET(req: NextRequest) {
 
     const candidates = extractRiotCandidatesFromDiscordConnections(connections);
     if (!candidates.length) {
-      const response = redirectWithStatus(req, "choose", "connect-riot-rso");
+      const response = redirectWithStatus(
+        req,
+        "choose",
+        "connect-riot-rso",
+        undefined,
+        storedState.returnTo
+      );
       setPendingDiscordBindCookie(
         response,
         makePendingDiscordBindPayload({
@@ -123,11 +198,11 @@ export async function GET(req: NextRequest) {
         candidate: candidates[0],
       });
       const syncFailed = await syncDiscordRoles(String(bound.link._id));
-      const response = redirectWithStatus(
+      const response = redirectAfterLinked(
         req,
-        "linked",
-        syncFailed ? "discord-role-sync-failed" : undefined,
-        `${bound.player.gameName}#${bound.player.tagLine}`
+        storedState.returnTo,
+        `${bound.player.gameName}#${bound.player.tagLine}`,
+        syncFailed
       );
 
       setDiscordSessionCookie(response, { discordUserId: discordUser.id }, req.nextUrl.protocol === "https:");
@@ -136,7 +211,13 @@ export async function GET(req: NextRequest) {
       return response;
     }
 
-    const response = redirectWithStatus(req, "choose");
+    const response = redirectWithStatus(
+      req,
+      "choose",
+      undefined,
+      undefined,
+      storedState.returnTo
+    );
     setPendingDiscordBindCookie(
       response,
       makePendingDiscordBindPayload({
@@ -161,7 +242,9 @@ export async function GET(req: NextRequest) {
     const response = redirectWithStatus(
       req,
       "error",
-      error instanceof Error ? error.message : "discord-link-failed"
+      error instanceof Error ? error.message : "discord-link-failed",
+      undefined,
+      storedState.returnTo
     );
     clearDiscordOAuthStateCookie(response);
     clearPendingDiscordBindCookie(response);

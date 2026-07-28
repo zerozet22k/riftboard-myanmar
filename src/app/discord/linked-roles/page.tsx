@@ -171,7 +171,7 @@ export default async function DiscordLinkedRolesPage({
                   </div>
                   <div className="mt-4 flex flex-wrap gap-3">
                     <form action="/api/discord/oauth/start" method="GET">
-                      <input type="hidden" name="returnTo" value="/discord/linked-roles" />
+                      <input type="hidden" name="returnTo" value={nextReturnTo} />
                       <button
                         type="submit"
                         className="rounded-2xl border border-white/10 px-5 py-3 text-sm text-zinc-200 transition hover:bg-white/5"
@@ -291,7 +291,7 @@ export default async function DiscordLinkedRolesPage({
                   <div className="text-sm font-semibold text-zinc-100">Discord</div>
                   <div className="mt-4 flex flex-wrap gap-3">
                     <form action="/api/discord/oauth/start" method="GET">
-                      <input type="hidden" name="returnTo" value="/discord/linked-roles" />
+                      <input type="hidden" name="returnTo" value={nextReturnTo} />
                       <button
                         type="submit"
                         className="rounded-2xl bg-emerald-500/90 px-5 py-3 text-sm font-semibold text-black transition hover:bg-emerald-400"

@@ -13,8 +13,15 @@
 # testing
 /coverage
 
-# local tray app
-/local-refresh-agent/
+# local tray app: keep source and safe templates, ignore runtime secrets/builds
+/local-refresh-agent/**
+!/local-refresh-agent/README.md
+!/local-refresh-agent/community-config.example.json
+!/local-refresh-agent/app-icon.ico
+!/local-refresh-agent/src/
+!/local-refresh-agent/src/RiftBoardRefreshTray/
+!/local-refresh-agent/src/RiftBoardRefreshTray/Program.cs
+!/local-refresh-agent/src/RiftBoardRefreshTray/RiftBoardRefreshTray.csproj
 
 
 # next.js

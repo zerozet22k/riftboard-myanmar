@@ -1,0 +1,43 @@
+{
+  "cronOnly": true,
+  "remoteAppUrl": "https://rift-board-myanmar.vercel.app",
+  "cronToken": "PASTE_SHARED_RUNNER_TOKEN_HERE",
+  "localAppUrl": "http://127.0.0.1:43117",
+  "rankJob": {
+    "enabled": true,
+    "limit": 5,
+    "delayMs": 1300,
+    "intervalSec": 600,
+    "cooldownMs": null,
+    "force": false,
+    "syncMatches": true,
+    "syncTftMatches": false,
+    "matchesCount": 5,
+    "matchBackfillCount": 0
+  },
+  "tftJob": {
+    "enabled": true,
+    "limit": 5,
+    "delayMs": 1300,
+    "intervalSec": 600,
+    "cooldownMs": null,
+    "force": false,
+    "syncMatches": false,
+    "syncTftMatches": true,
+    "matchesCount": 5,
+    "matchBackfillCount": 0
+  },
+  "liveJob": {
+    "enabled": true,
+    "limit": 5,
+    "delayMs": 2500,
+    "intervalSec": 900,
+    "cooldownMs": null,
+    "force": false,
+    "syncMatches": false,
+    "syncTftMatches": false,
+    "matchesCount": 1,
+    "matchBackfillCount": 0
+  },
+  "startupTimeoutSec": 120
+}

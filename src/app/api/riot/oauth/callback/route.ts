@@ -33,6 +33,7 @@ import { getRsoAccountMe } from "@/lib/riot";
 import { refreshPlayerById } from "@/lib/refresh";
 import { withRiotRefreshLease } from "@/lib/schedulerLease";
 import { Player } from "@/models/player";
+import { oauthProviderErrorMessage } from "@/lib/oauthRequest";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -68,6 +69,7 @@ export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
   const stateParam = req.nextUrl.searchParams.get("state");
   const errorParam = req.nextUrl.searchParams.get("error");
+  const errorDescription = req.nextUrl.searchParams.get("error_description");
 
   const savedState = readRsoOAuthStateCookieValue(
     req.cookies.get("rso_oauth_state")?.value
@@ -76,9 +78,9 @@ export async function GET(req: NextRequest) {
     req.cookies.get("discord_pending_bind")?.value
   );
 
-  /* ---- error from Riot or missing params ---- */
-  if (errorParam || !code || !stateParam || !savedState) {
-    const response = redirectOAuthError(req, savedState?.returnTo, errorParam || "missing-rso-state");
+  /* ---- missing or invalid state => incomplete/invalid OAuth flow ---- */
+  if (!stateParam || !savedState) {
+    const response = redirectOAuthError(req, savedState?.returnTo, "missing-rso-state");
     clearRsoOAuthStateCookie(response);
     return response;
   }
@@ -86,6 +88,27 @@ export async function GET(req: NextRequest) {
   /* ---- state mismatch => CSRF ---- */
   if (stateParam !== savedState.state) {
     const response = redirectOAuthError(req, savedState.returnTo, "invalid-rso-state");
+    clearRsoOAuthStateCookie(response);
+    return response;
+  }
+
+  /* ---- provider-declared errors (for example a cancelled sign-in) ---- */
+  if (errorParam) {
+    const response = redirectOAuthError(
+      req,
+      savedState.returnTo,
+      oauthProviderErrorMessage("Riot", errorParam, errorDescription)
+    );
+    clearRsoOAuthStateCookie(response);
+    return response;
+  }
+
+  if (!code) {
+    const response = redirectOAuthError(
+      req,
+      savedState.returnTo,
+      "Riot returned without an authorization code. Start Riot sign-in again."
+    );
     clearRsoOAuthStateCookie(response);
     return response;
   }

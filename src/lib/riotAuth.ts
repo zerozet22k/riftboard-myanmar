@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { getAppBaseUrl } from "@/lib/runtimeConfig";
+import { normalizeOAuthReturnTo } from "@/lib/oauthRequest";
 
 const RSO_AUTHORIZE_URL = "https://auth.riotgames.com/authorize";
 const RSO_TOKEN_URL = "https://auth.riotgames.com/token";
@@ -199,9 +200,7 @@ type RsoOAuthStatePayload = {
 };
 
 export function normalizeReturnTo(input: string | undefined | null) {
-  const value = String(input ?? "").trim();
-  if (!value || !value.startsWith("/") || value.startsWith("//")) return "/";
-  return value;
+  return normalizeOAuthReturnTo(input, "/");
 }
 
 export function setRsoOAuthStateCookie(

@@ -7,6 +7,7 @@ import {
   type DiscordRiotCandidate,
 } from "@/lib/discordLinkedRoles";
 import { decryptDiscordSecret, encryptDiscordSecret } from "@/lib/discord";
+import { normalizeOAuthReturnTo } from "@/lib/oauthRequest";
 
 const DISCORD_SESSION_COOKIE = "discord_session";
 const DISCORD_OAUTH_STATE_COOKIE = "discord_oauth_state";
@@ -114,11 +115,7 @@ function baseCookieOptions(secure: boolean, maxAge: number) {
 }
 
 export function normalizeReturnTo(input: string | undefined | null) {
-  const value = String(input ?? "").trim();
-  if (!value || !value.startsWith("/") || value.startsWith("//")) {
-    return "/discord/linked-roles";
-  }
-  return value;
+  return normalizeOAuthReturnTo(input, "/discord/linked-roles");
 }
 
 export function setDiscordSessionCookie(
