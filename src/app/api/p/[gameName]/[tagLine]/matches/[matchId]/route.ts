@@ -1,13 +1,9 @@
 import mongoose from "mongoose";
 import { NextRequest, NextResponse } from "next/server";
-import {
-  ensureMatchDetailStored,
-  playerMatchDocFromRaw,
-} from "@/lib/lolMatchHydration";
 import { dbConnect } from "@/lib/mongodb";
 import { enrichMatchParticipants } from "@/lib/participantProfiles";
 import { buildPlayerLookupQuery } from "@/lib/playerIdentity";
-import { platformToMatchRegion } from "@/lib/riot";
+import { Match } from "@/models/match";
 import { Player } from "@/models/player";
 import { PlayerMatch } from "@/models/playerMatch";
 
@@ -226,7 +222,7 @@ function participantSummary(participant: MatchParticipantRaw, mePuuidLower: stri
 }
 
 export async function GET(
-  req: NextRequest,
+  _req: NextRequest,
   ctx: { params: RouteParams | Promise<RouteParams> }
 ) {
   try {
@@ -238,8 +234,6 @@ export async function GET(
     if (!norm(gameNameRaw) || !norm(tagLineRaw) || !matchId) {
       return NextResponse.json({ ok: false, error: "Missing params" }, { status: 400 });
     }
-
-    const includeRaw = new URL(req.url).searchParams.get("raw") === "1";
 
     await dbConnect();
 
@@ -265,9 +259,8 @@ export async function GET(
 
     const playerId = new mongoose.Types.ObjectId(String(player._id));
     const mePuuidLower = typeof player.puuid === "string" ? player.puuid.toLowerCase() : null;
-    const matchRegion = String(player.matchRegion ?? platformToMatchRegion(String(player.platform ?? "sg2"))).toLowerCase();
 
-    let my = (await PlayerMatch.findOne(
+    const my = (await PlayerMatch.findOne(
       { playerId, matchId },
       {
         matchId: 1,
@@ -290,6 +283,7 @@ export async function GET(
         tripleKills: 1,
         quadraKills: 1,
         pentaKills: 1,
+        largestKillingSpree: 1,
         cs: 1,
         gold: 1,
         items: 1,
@@ -297,32 +291,28 @@ export async function GET(
       }
     ).lean()) as PlayerMatchView | null;
 
-    const matchDoc = (await ensureMatchDetailStored({ matchId, matchRegion })) as MatchDocView | null;
-
-    if (!my && matchDoc?.raw?.info) {
-      const playerMatchDoc = playerMatchDocFromRaw({
-        matchId,
-        region: safeStr(matchDoc.region) ?? matchRegion,
-        playerId,
-        puuid: typeof player.puuid === "string" ? player.puuid : null,
-        raw: matchDoc.raw,
-      });
-
-      if (playerMatchDoc) {
-        await PlayerMatch.updateOne(
-          { playerId, matchId },
-          { $set: playerMatchDoc },
-          { upsert: true }
-        );
-        my = playerMatchDoc;
-      }
+    if (!my) {
+      return NextResponse.json(
+        { ok: false, error: "Match is not stored for this player." },
+        { status: 404 }
+      );
     }
 
-    const cachedRaw = matchDoc?.raw;
-    const info = cachedRaw?.info;
+    const matchDoc = (await Match.findOne(
+      { matchId },
+      {
+        matchId: 1,
+        region: 1,
+        queueId: 1,
+        gameCreation: 1,
+        gameDuration: 1,
+        raw: 1,
+      }
+    ).lean()) as MatchDocView | null;
+    const info = matchDoc?.raw?.info;
     if (!matchDoc || !info) {
       return NextResponse.json(
-        { ok: false, error: "Match details could not be stored for this match." },
+        { ok: false, error: "Match details are not cached yet." },
         { status: 404 }
       );
     }
@@ -344,6 +334,7 @@ export async function GET(
             flex: player.flex ?? null,
           }
         : null,
+      cacheOnly: true,
     });
 
     const blue = enrichedParticipants.filter((participant) => participant.teamId === 100).sort(sortByRole);
@@ -358,41 +349,38 @@ export async function GET(
         gameCreation: safeNum(matchDoc.gameCreation) ?? safeNum(info.gameCreation),
         gameDuration: safeNum(matchDoc.gameDuration) ?? safeNum(info.gameDuration),
       },
-      my: my
-        ? {
-            matchId: String(my.matchId),
-            region: safeStr(my.region),
-            queueId: safeNum(my.queueId),
-            gameCreation: safeNum(my.gameCreation),
-            gameDuration: safeNum(my.gameDuration),
-            championId: safeNum(my.championId),
-            teamId: safeNum(my.teamId),
-            teamPosition: safeStr(my.teamPosition),
-            win: safeBool(my.win),
-            kills: safeNum(my.kills),
-            deaths: safeNum(my.deaths),
-            assists: safeNum(my.assists),
-            largestMultiKill: safeNum(my.largestMultiKill),
-            doubleKills: safeNum(my.doubleKills),
-            tripleKills: safeNum(my.tripleKills),
-            quadraKills: safeNum(my.quadraKills),
-            pentaKills: safeNum(my.pentaKills),
-            largestKillingSpree: safeNum(my.largestKillingSpree),
-            cs: safeNum(my.cs),
-            gold: safeNum(my.gold),
-            items: Array.isArray(my.items)
-              ? my.items.filter((value): value is number => typeof value === "number")
-              : [],
-            summonerSpells: Array.isArray(my.summonerSpells)
-              ? my.summonerSpells.filter((value): value is number => typeof value === "number")
-              : [],
-            primaryStyle: safeNum(my.primaryStyle),
-            primaryRune: safeNum(my.primaryRune),
-            subStyle: safeNum(my.subStyle),
-          }
-        : null,
+      my: {
+        matchId: String(my.matchId),
+        region: safeStr(my.region),
+        queueId: safeNum(my.queueId),
+        gameCreation: safeNum(my.gameCreation),
+        gameDuration: safeNum(my.gameDuration),
+        championId: safeNum(my.championId),
+        teamId: safeNum(my.teamId),
+        teamPosition: safeStr(my.teamPosition),
+        win: safeBool(my.win),
+        kills: safeNum(my.kills),
+        deaths: safeNum(my.deaths),
+        assists: safeNum(my.assists),
+        largestMultiKill: safeNum(my.largestMultiKill),
+        doubleKills: safeNum(my.doubleKills),
+        tripleKills: safeNum(my.tripleKills),
+        quadraKills: safeNum(my.quadraKills),
+        pentaKills: safeNum(my.pentaKills),
+        largestKillingSpree: safeNum(my.largestKillingSpree),
+        cs: safeNum(my.cs),
+        gold: safeNum(my.gold),
+        items: Array.isArray(my.items)
+          ? my.items.filter((value): value is number => typeof value === "number")
+          : [],
+        summonerSpells: Array.isArray(my.summonerSpells)
+          ? my.summonerSpells.filter((value): value is number => typeof value === "number")
+          : [],
+        primaryStyle: safeNum(my.primaryStyle),
+        primaryRune: safeNum(my.primaryRune),
+        subStyle: safeNum(my.subStyle),
+      },
       teams: { blue, red },
-      raw: includeRaw ? matchDoc.raw : undefined,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Error";

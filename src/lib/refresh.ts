@@ -1,7 +1,8 @@
 // src/lib/refresh.ts
+import type { HydratedDocument, Types } from "mongoose";
 import { dbConnect } from "@/lib/mongodb";
-import { Player } from "@/models/player";
-import { RankEntry, RANK_QUEUES } from "@/models/rankEntry";
+import { Player, type PlayerDoc, type RankSnapshot } from "@/models/player";
+import { RankEntry, RANK_QUEUES, type RankQueue } from "@/models/rankEntry";
 import { PlayerMastery } from "@/models/playerMastery";
 import { Match } from "@/models/match";
 import { PlayerMatch } from "@/models/playerMatch";
@@ -24,15 +25,129 @@ import {
   isRiot404,
   isRiot429,
   isRiotDecryptingBadRequest,
+  type RiotAccount,
+  type Summoner,
 } from "@/lib/riot";
 import { normalizeRiotIdPart, syncCanonicalRiotId } from "@/lib/playerIdentity";
 import { mergePlayers } from "@/lib/playerMerge";
 import { approvedCommunityLeaderboardQuery } from "@/lib/communityLeaderboard";
-import { prunePlayerMatches, pruneTftPlayerMatches } from "@/lib/matchRetention";
+import {
+  PLAYER_MATCH_RETENTION_LIMIT,
+  prunePlayerMatches,
+  pruneTftPlayerMatches,
+} from "@/lib/matchRetention";
 
 const SOLO = "RANKED_SOLO_5x5";
 const FLEX = "RANKED_FLEX_SR";
 const TFT = "RANKED_TFT";
+
+type PlayerDocument = HydratedDocument<PlayerDoc>;
+type RankComparable = Pick<RankSnapshot, "tier" | "division" | "lp" | "wins" | "losses">;
+export type RefreshPlayerResult = PlayerDoc & {
+  _id: Types.ObjectId;
+  _skipped?: boolean;
+  _cooldownSecondsLeft?: number;
+  _nextRefreshAt?: string;
+};
+
+type LolMatchParticipant = {
+  puuid?: string;
+  championId?: number;
+  teamId?: number;
+  teamPosition?: string;
+  win?: boolean;
+  kills?: number;
+  deaths?: number;
+  assists?: number;
+  largestMultiKill?: number;
+  doubleKills?: number;
+  tripleKills?: number;
+  quadraKills?: number;
+  pentaKills?: number;
+  largestKillingSpree?: number;
+  totalMinionsKilled?: number;
+  neutralMinionsKilled?: number;
+  goldEarned?: number;
+  item0?: number;
+  item1?: number;
+  item2?: number;
+  item3?: number;
+  item4?: number;
+  item5?: number;
+  item6?: number;
+  summoner1Id?: number;
+  summoner2Id?: number;
+  perks?: {
+    styles?: Array<{
+      style?: number;
+      selections?: Array<{ perk?: number }>;
+    }>;
+  };
+};
+
+type LolMatchPayload = {
+  info?: {
+    queueId?: number;
+    gameCreation?: number;
+    gameDuration?: number;
+    participants?: LolMatchParticipant[];
+  };
+};
+
+type TftRawUnit = {
+  character_id?: unknown;
+  name?: unknown;
+  rarity?: unknown;
+  tier?: unknown;
+  itemNames?: unknown;
+};
+
+type TftRawTrait = {
+  name?: unknown;
+  num_units?: unknown;
+  style?: unknown;
+  tier_current?: unknown;
+  tier_total?: unknown;
+};
+
+type TftRawParticipant = {
+  puuid?: string;
+  placement?: unknown;
+  level?: unknown;
+  last_round?: unknown;
+  players_eliminated?: unknown;
+  total_damage_to_players?: unknown;
+  gold_left?: unknown;
+  time_eliminated?: unknown;
+  companion?: { content_ID?: unknown };
+  augments?: unknown;
+  traits?: TftRawTrait[];
+  units?: TftRawUnit[];
+};
+
+type TftMatchPayload = {
+  info?: {
+    queue_id?: unknown;
+    game_datetime?: unknown;
+    game_length?: unknown;
+    tft_set_number?: unknown;
+    participants?: TftRawParticipant[];
+  };
+};
+
+function asLolMatchPayload(value: unknown): LolMatchPayload {
+  return value && typeof value === "object" ? (value as LolMatchPayload) : {};
+}
+
+function asTftMatchPayload(value: unknown): TftMatchPayload {
+  return value && typeof value === "object" ? (value as TftMatchPayload) : {};
+}
+
+function subdocumentValue<T extends object>(value: T | null | undefined): T {
+  if (!value) return {} as T;
+  const subdocument = value as T & { toObject?: () => T };
+  return typeof subdocument.toObject === "function" ? subdocument.toObject() : value;
+}
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -63,11 +178,12 @@ function errToString(e: unknown) {
 }
 
 function isRateLimit(e: unknown) {
-  return isRiot429(e) || (typeof (e as any)?.status === "number" && (e as any).status === 429);
+  const status = (e as { status?: unknown } | null)?.status;
+  return isRiot429(e) || status === 429;
 }
 
 function rateLimitWaitMs(e: unknown, fallbackMs = 2000) {
-  const ra = (e as any)?.retryAfterMs;
+  const ra = (e as { retryAfterMs?: unknown } | null)?.retryAfterMs;
   return typeof ra === "number" && ra > 0 ? ra : fallbackMs;
 }
 
@@ -79,18 +195,18 @@ const COOLDOWN_MS = 2 * 60 * 1000;
 
 // ✅ Riot matchlist supports up to 100 per request
 const MAX_MATCH_SYNC_COUNT = 100;
-const MATCH_SYNC_CONCURRENCY = 3;
+const MATCH_SYNC_CONCURRENCY = 1;
 
-function lastSuccessfulRefreshAt(p: any): Date | null {
+function lastSuccessfulRefreshAt(p: PlayerDoc): Date | null {
   const candidates = [p?.lastRefreshAt, p?.solo?.fetchedAt, p?.flex?.fetchedAt, p?.tft?.fetchedAt]
-    .filter(Boolean)
-    .map((d: any) => new Date(d));
+    .filter((d): d is Date => d instanceof Date)
+    .map((d) => new Date(d));
   if (!candidates.length) return null;
   candidates.sort((a, b) => b.getTime() - a.getTime());
   return candidates[0];
 }
 
-function changedRank(a: any | null, b: any) {
+function changedRank(a: RankComparable | null, b: RankComparable) {
   if (!a) return true;
   return (
     (a.tier ?? null) !== (b.tier ?? null) ||
@@ -102,7 +218,7 @@ function changedRank(a: any | null, b: any) {
 }
 
 async function insertRankIfChanged(input: {
-  playerId: any;
+  playerId: Types.ObjectId;
   queue: string;
   tier?: string;
   division?: string;
@@ -111,20 +227,21 @@ async function insertRankIfChanged(input: {
   losses?: number;
   fetchedAt: Date;
 }) {
-  if (!RANK_QUEUES.includes(input.queue as any)) return;
+  if (!(RANK_QUEUES as readonly string[]).includes(input.queue)) return;
+  const queue = input.queue as RankQueue;
 
-  const prev = await RankEntry.findOne({ playerId: input.playerId, queue: input.queue })
+  const prev = await RankEntry.findOne({ playerId: input.playerId, queue })
     .sort({ fetchedAt: -1 })
     .lean();
 
   if (changedRank(prev, input)) {
-    await RankEntry.create(input);
+    await RankEntry.create({ ...input, queue });
   }
 }
 
-function extractPlayerMatchSummary(match: any, puuid: string) {
+function extractPlayerMatchSummary(match: LolMatchPayload, puuid: string) {
   const info = match?.info ?? {};
-  const participants: any[] = Array.isArray(info.participants) ? info.participants : [];
+  const participants: LolMatchParticipant[] = Array.isArray(info.participants) ? info.participants : [];
   const me = participants.find((p) => String(p?.puuid ?? "").toLowerCase() === puuid.toLowerCase());
 
   const items = me
@@ -133,7 +250,9 @@ function extractPlayerMatchSummary(match: any, puuid: string) {
       .filter((x) => x !== 0)
     : [];
 
-  const summonerSpells = me ? [me.summoner1Id, me.summoner2Id].filter((x: any) => typeof x === "number") : [];
+  const summonerSpells = me
+    ? [me.summoner1Id, me.summoner2Id].filter((x): x is number => typeof x === "number")
+    : [];
 
   const cs =
     me && (typeof me.totalMinionsKilled === "number" || typeof me.neutralMinionsKilled === "number")
@@ -185,7 +304,7 @@ function safeString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function simplifyTftUnit(unit: any) {
+function simplifyTftUnit(unit: TftRawUnit) {
   return {
     characterId: safeString(unit?.character_id),
     name: safeString(unit?.name),
@@ -197,7 +316,7 @@ function simplifyTftUnit(unit: any) {
   };
 }
 
-function simplifyTftTrait(trait: any) {
+function simplifyTftTrait(trait: TftRawTrait) {
   return {
     name: safeString(trait?.name),
     numUnits: safeNumber(trait?.num_units),
@@ -207,9 +326,9 @@ function simplifyTftTrait(trait: any) {
   };
 }
 
-function extractTftPlayerMatchSummary(match: any, puuid: string) {
+function extractTftPlayerMatchSummary(match: TftMatchPayload, puuid: string) {
   const info = match?.info ?? {};
-  const participants: any[] = Array.isArray(info.participants) ? info.participants : [];
+  const participants: TftRawParticipant[] = Array.isArray(info.participants) ? info.participants : [];
   const me = participants.find((p) => String(p?.puuid ?? "").toLowerCase() === puuid.toLowerCase());
   if (!me) return null;
 
@@ -234,7 +353,7 @@ function extractTftPlayerMatchSummary(match: any, puuid: string) {
   };
 }
 
-async function syncFullMastery(player: any, platform: string, puuid: string, now: Date) {
+async function syncFullMastery(player: PlayerDocument, platform: string, puuid: string, now: Date) {
   const all = await getChampionMasteriesByPuuid(platform, puuid);
   if (!Array.isArray(all) || all.length === 0) return;
 
@@ -279,7 +398,7 @@ async function syncFullMastery(player: any, platform: string, puuid: string, now
 }
 
 async function syncMatchIdsForPlayer(params: {
-  player: any;
+  player: PlayerDocument;
   puuid: string;
   matchRegion: string;
   ids: string[];
@@ -292,12 +411,12 @@ async function syncMatchIdsForPlayer(params: {
   if (!uniqueIds.length) return { requested: 0, written: 0 };
 
   const existing = await Match.find({ matchId: { $in: uniqueIds } }, { matchId: 1 }).lean();
-  const have = new Set(existing.map((x: any) => x.matchId));
+  const have = new Set(existing.map((x) => x.matchId));
   let written = 0;
 
   await mapLimit(uniqueIds, MATCH_SYNC_CONCURRENCY, async (matchId) => {
     try {
-      let payload: any | null = null;
+      let payload: LolMatchPayload | null = null;
 
       if (have.has(matchId)) {
         const doc = await Match.findOne(
@@ -305,11 +424,11 @@ async function syncMatchIdsForPlayer(params: {
           { raw: 1, region: 1, queueId: 1, gameCreation: 1, gameDuration: 1 }
         ).lean();
 
-        payload = (doc as any)?.raw ?? null;
+        payload = doc?.raw == null ? null : asLolMatchPayload(doc.raw);
       }
 
       if (!payload) {
-        payload = await getMatchById(matchId, matchRegion);
+        payload = asLolMatchPayload(await getMatchById(matchId, matchRegion));
 
         const info = payload?.info ?? {};
         const queueId = typeof info.queueId === "number" ? info.queueId : undefined;
@@ -379,7 +498,8 @@ async function syncMatchIdsForPlayer(params: {
       );
       written++;
     } catch (e) {
-      if (isRateLimit(e)) await sleep(rateLimitWaitMs(e, 2500));
+      if (isRateLimit(e)) throw e;
+      console.error(`LoL match sync failed for ${matchId}:`, e);
     }
   });
 
@@ -389,7 +509,7 @@ async function syncMatchIdsForPlayer(params: {
 }
 
 async function syncRecentMatches(params: {
-  player: any;
+  player: PlayerDocument;
   puuid: string;
   matchRegion: string;
   count: number;
@@ -420,12 +540,23 @@ async function syncRecentMatches(params: {
     try {
       const storedCount = await PlayerMatch.countDocuments({ playerId: player._id });
       const start = Math.max(count, storedCount);
-      const olderIds = await getMatchIdsByPuuid({ puuid, matchRegion, start, count: backfillCount });
-      const synced = await syncMatchIdsForPlayer({ player, puuid, matchRegion, ids: olderIds, now });
-      backfill = { ...synced, start };
+      const remainingCapacity = Math.max(0, PLAYER_MATCH_RETENTION_LIMIT - start);
+      const safeBackfillCount = Math.min(backfillCount, remainingCapacity);
+      if (safeBackfillCount > 0) {
+        const olderIds = await getMatchIdsByPuuid({
+          puuid,
+          matchRegion,
+          start,
+          count: safeBackfillCount,
+        });
+        const synced = await syncMatchIdsForPlayer({ player, puuid, matchRegion, ids: olderIds, now });
+        backfill = { ...synced, start };
+      } else {
+        backfill = { requested: 0, written: 0, start };
+      }
     } catch (e) {
-      if (isRateLimit(e)) await sleep(rateLimitWaitMs(e, 2500));
-      else console.error("LoL match backfill failed:", e);
+      if (isRateLimit(e)) throw e;
+      console.error("LoL match backfill failed:", e);
     }
   }
 
@@ -443,7 +574,12 @@ async function syncRecentMatches(params: {
   await player.save();
 }
 
-async function syncRecentTftMatches(params: { player: any; puuid: string; matchRegion: string; count: number }) {
+async function syncRecentTftMatches(params: {
+  player: PlayerDocument;
+  puuid: string;
+  matchRegion: string;
+  count: number;
+}) {
   const { player, puuid, matchRegion, count } = params;
   const now = new Date();
 
@@ -455,24 +591,24 @@ async function syncRecentTftMatches(params: { player: any; puuid: string; matchR
   }
 
   const existing = await TftMatch.find({ matchId: { $in: ids } }, { matchId: 1 }).lean();
-  const have = new Set(existing.map((x: any) => x.matchId));
+  const have = new Set(existing.map((x) => x.matchId));
   let failedFetches = 0;
   let writtenSummaries = 0;
 
   await mapLimit(ids, MATCH_SYNC_CONCURRENCY, async (matchId) => {
     try {
-      let payload: any | null = null;
+      let payload: TftMatchPayload | null = null;
 
       if (have.has(matchId)) {
         const doc = await TftMatch.findOne(
           { matchId },
           { raw: 1, region: 1, queueId: 1, gameDatetime: 1, gameLength: 1 }
         ).lean();
-        payload = (doc as any)?.raw ?? null;
+        payload = doc?.raw == null ? null : asTftMatchPayload(doc.raw);
       }
 
       if (!payload) {
-        payload = await getTftMatchById(matchId, matchRegion);
+        payload = asTftMatchPayload(await getTftMatchById(matchId, matchRegion));
         const info = payload?.info ?? {};
 
         await TftMatch.updateOne(
@@ -512,8 +648,8 @@ async function syncRecentTftMatches(params: { player: any; puuid: string; matchR
       writtenSummaries++;
     } catch (e) {
       failedFetches++;
-      if (isRateLimit(e)) await sleep(rateLimitWaitMs(e, 2500));
-      else console.error(`TFT match sync failed for ${matchId}:`, e);
+      if (isRateLimit(e)) throw e;
+      console.error(`TFT match sync failed for ${matchId}:`, e);
     }
   });
 
@@ -535,6 +671,7 @@ export async function refreshPlayerById(
   opts?: {
     force?: boolean;
     cooldownMs?: number;
+    strictCooldown?: boolean;
 
     syncMatches?: boolean;
     matchesCount?: number;
@@ -542,11 +679,12 @@ export async function refreshPlayerById(
 
     fullMastery?: boolean;
     syncTftMatches?: boolean;
+    syncLolProfile?: boolean;
   }
-) {
+): Promise<RefreshPlayerResult> {
   await dbConnect();
 
-  let player: any = await Player.findById(playerId);
+  let player = await Player.findById(playerId);
   if (!player) throw new Error("Player not found");
 
   const cooldownMs = opts?.cooldownMs ?? COOLDOWN_MS;
@@ -557,10 +695,12 @@ export async function refreshPlayerById(
       const now = Date.now();
       const age = now - last.getTime();
       const wantsTftMatchSync =
+        opts?.strictCooldown !== true &&
         opts?.syncTftMatches === true &&
         hasTftApiKey() &&
         player?.tftMatchSync?.enabled !== false;
       const wantsLolMatchSync =
+        opts?.strictCooldown !== true &&
         opts?.syncMatches === true &&
         player?.matchSync?.enabled !== false;
       let shouldBypassCooldownForLolMatches = false;
@@ -589,16 +729,17 @@ export async function refreshPlayerById(
       }
 
       if (age < cooldownMs) {
-        if (shouldBypassCooldownForLolMatches || shouldBypassCooldownForTftMatches) {
-          // Continue so a rank-only cooldown does not block match-history sync.
-        } else {
-        const next = new Date(last.getTime() + cooldownMs);
-        return {
-          ...player.toObject(),
-          _skipped: true,
-          _cooldownSecondsLeft: Math.ceil((cooldownMs - age) / 1000),
-          _nextRefreshAt: next.toISOString(),
-        };
+        const canBypassForMatchSync =
+          opts?.strictCooldown !== true &&
+          (shouldBypassCooldownForLolMatches || shouldBypassCooldownForTftMatches);
+        if (!canBypassForMatchSync) {
+          const next = new Date(last.getTime() + cooldownMs);
+          return {
+            ...player.toObject(),
+            _skipped: true,
+            _cooldownSecondsLeft: Math.ceil((cooldownMs - age) / 1000),
+            _nextRefreshAt: next.toISOString(),
+          };
         }
       }
     }
@@ -607,8 +748,10 @@ export async function refreshPlayerById(
   const now = new Date();
 
   let puuid = String(player.puuid ?? "").trim();
+  let accountFromRiotId: RiotAccount | null = null;
   try {
     const acct = await getPuuidByRiotId(player.gameName, player.tagLine);
+    accountFromRiotId = acct;
     if (acct?.puuid && acct.puuid !== puuid) {
       puuid = acct.puuid;
       player.puuid = puuid;
@@ -616,12 +759,16 @@ export async function refreshPlayerById(
       await player.save();
     }
   } catch (e) {
+    if (isRateLimit(e)) throw e;
     if (!puuid) throw e;
     console.error("Riot ID PUUID sync failed:", e);
   }
 
   try {
-    const account = await getAccountByPuuid(puuid);
+    const account =
+      accountFromRiotId?.gameName && accountFromRiotId?.tagLine
+        ? accountFromRiotId
+        : await getAccountByPuuid(puuid);
     if (account?.gameName && account?.tagLine) {
       const currentGameNameNorm = normalizeRiotIdPart(account.gameName);
       const currentTagLineNorm = normalizeRiotIdPart(account.tagLine);
@@ -641,11 +788,12 @@ export async function refreshPlayerById(
       syncCanonicalRiotId(player, account.gameName, account.tagLine, now);
     }
   } catch (e) {
+    if (isRateLimit(e)) throw e;
     console.error("Account sync failed:", e);
   }
 
   let platform = String(player.platform || "auto").toLowerCase().trim();
-  let summoner: any;
+  let summoner: Summoner;
 
   try {
     if (platform !== "auto") {
@@ -678,30 +826,25 @@ export async function refreshPlayerById(
   const matchRegion = player.matchRegion ?? platformToMatchRegion(platform);
   player.matchRegion = matchRegion;
 
-  const entries = await getLeagueEntriesByPuuid(platform, puuid);
-  const solo = entries.find((e) => e.queueType === SOLO);
-  const flex = entries.find((e) => e.queueType === FLEX);
+  const syncLolProfile = opts?.syncLolProfile !== false;
+  const entries = syncLolProfile ? await getLeagueEntriesByPuuid(platform, puuid) : [];
+  if (syncLolProfile) {
+    const solo = entries.find((e) => e.queueType === SOLO);
+    const flex = entries.find((e) => e.queueType === FLEX);
 
-  player.solo = solo
-    ? { tier: solo.tier, division: solo.rank, lp: solo.leaguePoints, wins: solo.wins, losses: solo.losses, fetchedAt: now }
-    : { fetchedAt: now };
+    player.solo = solo
+      ? { tier: solo.tier, division: solo.rank, lp: solo.leaguePoints, wins: solo.wins, losses: solo.losses, fetchedAt: now }
+      : { fetchedAt: now };
 
-  player.flex = flex
-    ? { tier: flex.tier, division: flex.rank, lp: flex.leaguePoints, wins: flex.wins, losses: flex.losses, fetchedAt: now }
-    : { fetchedAt: now };
+    player.flex = flex
+      ? { tier: flex.tier, division: flex.rank, lp: flex.leaguePoints, wins: flex.wins, losses: flex.losses, fetchedAt: now }
+      : { fetchedAt: now };
+  }
 
-  if (hasTftApiKey()) {
+  if (opts?.syncTftMatches === true && hasTftApiKey()) {
     try {
-      let tftPuuid = String(player.tftPuuid ?? "").trim();
-      try {
-        const tftAccount = await getPuuidByRiotId(player.gameName, player.tagLine, "tft");
-        if (tftAccount?.puuid && tftAccount.puuid !== tftPuuid) {
-          tftPuuid = tftAccount.puuid;
-          player.tftPuuid = tftPuuid;
-        }
-      } catch (e) {
-        if (!tftPuuid) throw e;
-      }
+      const tftPuuid = String(player.tftPuuid ?? puuid).trim();
+      if (!player.tftPuuid && tftPuuid) player.tftPuuid = tftPuuid;
 
       const foundTftLeague = await findTftLeagueEntriesByPuuid(tftPuuid, platform);
       const { entries: tftEntries } = foundTftLeague;
@@ -731,6 +874,7 @@ export async function refreshPlayerById(
         });
       }
     } catch (e) {
+      if (isRateLimit(e)) throw e;
       if (!isRiot404(e)) {
         console.error("TFT sync failed:", e);
       }
@@ -738,30 +882,33 @@ export async function refreshPlayerById(
       // auxiliary TFT lookup. Match history and active-shard calls can fail
       // independently from the player's actual ranked state.
       player.tft = {
-        ...(player.tft?.toObject ? player.tft.toObject() : player.tft ?? {}),
+        ...subdocumentValue(player.tft),
         fetchedAt: player.tft?.fetchedAt ?? now,
       };
     }
   }
 
   // ✅ FIX: don’t silently swallow mastery write errors anymore
-  try {
-    if (opts?.fullMastery) {
-      await syncFullMastery(player, platform, puuid, now);
-    } else {
-      const top = await getChampionMasteriesByPuuid(platform, puuid);
-      if (Array.isArray(top)) {
-        const mains = top.slice(0, 3).map((m) => ({
-          championId: m.championId,
-          championPoints: m.championPoints,
-          updatedAt: now,
-        }));
-        player.mains = mains;
-        player.masterySyncedAt = now;
+  if (syncLolProfile) {
+    try {
+      if (opts?.fullMastery) {
+        await syncFullMastery(player, platform, puuid, now);
+      } else {
+        const top = await getChampionMasteriesByPuuid(platform, puuid);
+        if (Array.isArray(top)) {
+          const mains = top.slice(0, 3).map((m) => ({
+            championId: m.championId,
+            championPoints: m.championPoints,
+            updatedAt: now,
+          }));
+          player.mains = mains;
+          player.masterySyncedAt = now;
+        }
       }
+    } catch (e) {
+      if (isRateLimit(e)) throw e;
+      console.error("Mastery sync failed:", e);
     }
-  } catch (e) {
-    console.error("Mastery sync failed:", e);
   }
 
   player.lastRefreshAt = now;
@@ -808,11 +955,10 @@ export async function refreshPlayerById(
       } catch (e) {
         if (!isRiotDecryptingBadRequest(e) && !isRiot404(e)) throw e;
         console.warn("TFT match sync skipped because Riot rejected this TFT puuid:", errToString(e));
-        player.tftMatchSync = {
-          ...(player.tftMatchSync?.toObject ? player.tftMatchSync.toObject() : player.tftMatchSync ?? {}),
+        player.tftMatchSync = Object.assign(subdocumentValue(player.tftMatchSync), {
           lastError: "Riot could not return TFT match history for this account yet.",
           lastAttemptAt: now,
-        };
+        });
         await player.save();
       }
     }
@@ -833,6 +979,7 @@ export async function refreshAllPlayers(opts?: {
   cooldownMs?: number;
   syncMatches?: boolean;
   syncTftMatches?: boolean;
+  syncLolProfile?: boolean;
   matchesCount?: number;
   matchBackfillCount?: number;
 }) {
@@ -841,7 +988,7 @@ export async function refreshAllPlayers(opts?: {
   const limit = opts?.limit ?? 20;
   const delayMs = opts?.delayMs ?? 1100;
 
-  const q: any = {};
+  const q: Record<string, unknown> = {};
   if (opts?.leaderboardOnly) {
     Object.assign(q, approvedCommunityLeaderboardQuery(opts?.leaderboardGroup ?? "burmese"));
     q["leaderboard.status"] = opts?.leaderboardStatus ?? "approved";
@@ -871,20 +1018,23 @@ export async function refreshAllPlayers(opts?: {
   let ok = 0;
   let fail = 0;
   let skipped = 0;
+  let rateLimited = false;
+  let retryAfterMs: number | undefined;
 
   for (const p of players) {
     try {
-      const out: any = await refreshPlayerById(String(p._id), {
+      const out = await refreshPlayerById(String(p._id), {
         force: opts?.force,
         cooldownMs: opts?.cooldownMs,
         syncMatches: opts?.syncMatches === true,
         syncTftMatches: opts?.syncTftMatches === true,
+        syncLolProfile: opts?.syncLolProfile,
         matchesCount: opts?.matchesCount,
         matchBackfillCount: opts?.matchBackfillCount,
         fullMastery: false,
       });
 
-      if (out?._skipped) {
+      if ("_skipped" in out && out._skipped) {
         skipped++;
         playersSummary.push({
           playerId: String(p._id),
@@ -902,7 +1052,10 @@ export async function refreshAllPlayers(opts?: {
       });
       if (delayMs) await sleep(delayMs);
     } catch (e) {
-      if (isRateLimit(e)) await sleep(rateLimitWaitMs(e, 3000));
+      if (isRateLimit(e)) {
+        rateLimited = true;
+        retryAfterMs = rateLimitWaitMs(e, 120_000);
+      }
       fail++;
       errors.push({
         playerId: String(p._id),
@@ -914,10 +1067,20 @@ export async function refreshAllPlayers(opts?: {
         name: `${p.gameName}#${p.tagLine}`,
         status: "failed",
       });
+      if (rateLimited) break;
     }
   }
 
-  return { ok, fail, skipped, errors, players: playersSummary, scanned: players.length };
+  return {
+    ok,
+    fail,
+    skipped,
+    errors,
+    players: playersSummary,
+    scanned: playersSummary.length,
+    rateLimited,
+    retryAfterMs,
+  };
 }
 
 export async function upsertAndRefreshByRiotId(
@@ -941,7 +1104,7 @@ export async function upsertAndRefreshByRiotId(
   const gameNameNorm = normalize(gameName);
   const tagLineNorm = normalize(tagLine);
 
-  const p: any = await Player.findOneAndUpdate(
+  const p = await Player.findOneAndUpdate(
     { gameNameNorm, tagLineNorm },
     {
       $set: { gameName, tagLine },
@@ -950,5 +1113,6 @@ export async function upsertAndRefreshByRiotId(
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
 
+  if (!p) throw new Error("Player upsert failed");
   return refreshPlayerById(String(p._id), opts);
 }

@@ -5,7 +5,7 @@ export const SITE_DESCRIPTION =
   "RiftBoard Myanmar tracks LoL and TFT ranks, player profiles, match history, champion mastery, and community tournaments.";
 export const SITE_PUBLISHER = SITE_NAME;
 export const SITE_LOGO_PATH = "/logo.png";
-export const SITE_BANNER_PATH = "/banner.png";
+export const SITE_BANNER_PATH = "/og.png";
 const GOOGLE_SITE_VERIFICATION_FALLBACK = "4nPX8Ok4DvtWgJbLn6wOWqfQ5iw9t7DPbthiMlHP3gc";
 
 export function getSiteUrl() {
@@ -39,7 +39,7 @@ export function getSiteOpenGraphImages() {
       url: getSiteBannerUrl(),
       width: 1200,
       height: 630,
-      alt: `${SITE_NAME} banner`,
+      alt: `${SITE_NAME} social preview`,
     },
   ];
 }

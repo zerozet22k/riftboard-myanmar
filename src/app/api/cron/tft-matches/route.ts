@@ -2,13 +2,19 @@ import { revalidatePath } from "next/cache";
 import { NextRequest, NextResponse } from "next/server";
 import { refreshAllPlayers } from "@/lib/refresh";
 import { getSchedulerTokens } from "@/lib/runtimeConfig";
+import {
+  acquireSchedulerLease,
+  deferSchedulerLease,
+  releaseSchedulerLease,
+} from "@/lib/schedulerLease";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const DEFAULT_LIMIT = Math.max(1, Math.min(200, Number(process.env.TFT_MATCH_CRON_LIMIT ?? 50) || 50));
-const DEFAULT_DELAY_MS = Math.max(0, Math.min(5000, Number(process.env.TFT_MATCH_CRON_DELAY_MS ?? 900) || 900));
-const DEFAULT_MATCHES_COUNT = Math.max(1, Math.min(100, Number(process.env.TFT_MATCH_CRON_MATCHES_COUNT ?? 20) || 20));
+const MAX_LIMIT = Math.max(1, Math.min(25, Number(process.env.TFT_MATCH_CRON_MAX_LIMIT ?? 10) || 10));
+const DEFAULT_LIMIT = Math.max(1, Math.min(MAX_LIMIT, Number(process.env.TFT_MATCH_CRON_LIMIT ?? 5) || 5));
+const DEFAULT_DELAY_MS = Math.max(0, Math.min(5000, Number(process.env.TFT_MATCH_CRON_DELAY_MS ?? 1500) || 1500));
+const DEFAULT_MATCHES_COUNT = Math.max(1, Math.min(20, Number(process.env.TFT_MATCH_CRON_MATCHES_COUNT ?? 5) || 5));
 
 function getToken(req: NextRequest): string {
   const auth = req.headers.get("authorization") || "";
@@ -17,9 +23,10 @@ function getToken(req: NextRequest): string {
 }
 
 function isLocalDevRequest(req: NextRequest) {
+  if (process.env.NODE_ENV === "production") return false;
   const hostname = req.nextUrl.hostname.toLowerCase();
   const isLoopback = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
-  return isLoopback && process.env.VERCEL !== "1";
+  return isLoopback;
 }
 
 function assertCronAuth(req: NextRequest) {
@@ -45,15 +52,23 @@ function boolParam(url: URL, key: string, def = false) {
 }
 
 export async function GET(req: NextRequest) {
+  let lease: Awaited<ReturnType<typeof acquireSchedulerLease>> = null;
   try {
     assertCronAuth(req);
+    lease = await acquireSchedulerLease("riot-api-refresh");
+    if (!lease) {
+      return NextResponse.json(
+        { ok: true, skipped: true, reason: "Another refresh job is already running." },
+        { status: 202, headers: { "Retry-After": "60" } }
+      );
+    }
 
     const url = new URL(req.url);
-    const limit = Math.max(1, Math.min(200, numParam(url, "limit", DEFAULT_LIMIT)!));
+    const limit = Math.max(1, Math.min(MAX_LIMIT, numParam(url, "limit", DEFAULT_LIMIT)!));
     const delayMs = Math.max(0, Math.min(5000, numParam(url, "delayMs", DEFAULT_DELAY_MS)!));
     const cooldownMs = numParam(url, "cooldownMs", undefined);
     const force = boolParam(url, "force", false);
-    const matchesCount = Math.max(1, Math.min(100, numParam(url, "matchesCount", DEFAULT_MATCHES_COUNT)!));
+    const matchesCount = Math.max(1, Math.min(20, numParam(url, "matchesCount", DEFAULT_MATCHES_COUNT)!));
 
     const result = await refreshAllPlayers({
       leaderboardOnly: true,
@@ -65,15 +80,28 @@ export async function GET(req: NextRequest) {
       force,
       syncMatches: false,
       syncTftMatches: true,
+      syncLolProfile: false,
       matchesCount,
     });
 
     revalidatePath("/tft");
 
+    if (result.rateLimited) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((result.retryAfterMs ?? 120_000) / 1000));
+      await deferSchedulerLease(lease, retryAfterSeconds * 1000);
+      lease = null;
+      return NextResponse.json(
+        { ok: false, error: "Riot rate limit reached; this batch stopped safely.", result },
+        { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } }
+      );
+    }
+
     return NextResponse.json({ ok: true, result });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Error";
     return NextResponse.json({ ok: false, error: msg }, { status: msg === "Unauthorized" ? 401 : 500 });
+  } finally {
+    if (lease) await releaseSchedulerLease(lease).catch(() => undefined);
   }
 }
 

@@ -5,6 +5,7 @@ import { hasAdminSessionFromRequest, isValidAdminCode } from "@/lib/adminSession
 import { dbConnect } from "@/lib/mongodb";
 import { buildPlayerLookupQuery, cleanRiotIdPart, normalizeRiotIdPart, canonicalPlayerPath } from "@/lib/playerIdentity";
 import { refreshPlayerById } from "@/lib/refresh";
+import { withRiotRefreshLease } from "@/lib/schedulerLease";
 import { Player } from "@/models/player";
 
 export const runtime = "nodejs";
@@ -59,17 +60,20 @@ export async function POST(req: NextRequest) {
       approvedAt: now,
     };
     await player.save();
+    const savedPlayerId = String(player._id);
 
     let refreshError: string | null = null;
     let refreshedPlayer: { _id?: unknown; gameName?: string; tagLine?: string } | null = null;
     try {
-      refreshedPlayer = await refreshPlayerById(String(player._id), {
-        force: true,
-        fullMastery: false,
-        syncMatches: true,
-        syncTftMatches: true,
-        matchesCount: 20,
-      });
+      refreshedPlayer = await withRiotRefreshLease(() =>
+        refreshPlayerById(savedPlayerId, {
+          force: true,
+          fullMastery: false,
+          syncMatches: true,
+          syncTftMatches: false,
+          matchesCount: 5,
+        })
+      );
     } catch (error) {
       refreshError = error instanceof Error ? error.message : "Refresh failed";
     }

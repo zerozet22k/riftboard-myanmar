@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import AdSenseScript from "@/components/AdSenseScript";
 import SiteHeader from "@/components/SiteHeader";
 import {
   absoluteUrl,
@@ -103,6 +104,7 @@ export default function RootLayout({
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(siteJsonLd) }}
         />
+        <AdSenseScript />
 
         <div className="fixed inset-0 -z-10">
           <div className="absolute inset-0 bg-gradient-to-b from-zinc-950 via-zinc-950 to-black" />

@@ -1,10 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
+import { NextRequest, NextResponse } from "next/server";
 import { dbConnect } from "@/lib/mongodb";
-import { pruneTftPlayerMatches } from "@/lib/matchRetention";
 import { buildPlayerLookupQuery } from "@/lib/playerIdentity";
-import { getTftMatchById, getTftMatchIdsByPuuid, platformToMatchRegion } from "@/lib/riot";
 import { hydrateTftMatches } from "@/lib/tftAssets";
 import { Player } from "@/models/player";
 import { TftMatch } from "@/models/tftMatch";
@@ -14,7 +12,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type Dict = Record<string, unknown>;
-
 type Params = { gameName: string; tagLine: string };
 
 function safeDecode(value: unknown) {
@@ -33,47 +30,37 @@ function safeStr(value: unknown) {
   return typeof value === "string" ? value : null;
 }
 
-function b64urlDecodeToString(input: string) {
-  const s = input.replace(/-/g, "+").replace(/_/g, "/");
-  const pad = s.length % 4 ? "=".repeat(4 - (s.length % 4)) : "";
-  return Buffer.from(s + pad, "base64").toString("utf8");
+function decodeCursor(input: string) {
+  const normalized = input.replace(/-/g, "+").replace(/_/g, "/");
+  const padding = normalized.length % 4 ? "=".repeat(4 - (normalized.length % 4)) : "";
+  return Buffer.from(normalized + padding, "base64").toString("utf8");
 }
 
-function parseCursor(cursor: string | null): { gd: number; id: string; matchId: string | null } | null {
+function parseCursor(cursor: string | null): { gd: number; id: string } | null {
   if (!cursor) return null;
   try {
-    const obj = JSON.parse(b64urlDecodeToString(cursor));
-    const gd = Number(obj?.gd);
-    const id = String(obj?.id ?? "");
-    const matchId = String(obj?.matchId ?? "").trim() || null;
-    if (!Number.isFinite(gd) || !id) return null;
-    return { gd, id, matchId };
+    const value = JSON.parse(decodeCursor(cursor));
+    const gd = Number(value?.gd);
+    const id = String(value?.id ?? "");
+    if (!Number.isFinite(gd) || !mongoose.Types.ObjectId.isValid(id)) return null;
+    return { gd, id };
   } catch {
     return null;
   }
 }
 
-function makeCursorFromDoc(last: any): string | null {
-  if (!last || typeof last.gameDatetime !== "number") return null;
-  const payload = { gd: last.gameDatetime, id: String(last._id), matchId: String(last.matchId ?? "") };
-  return Buffer.from(JSON.stringify(payload))
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
-}
+function makeCursor(last: any) {
+  if (!last || typeof last.gameDatetime !== "number" || !Number.isFinite(last.gameDatetime)) {
+    return null;
+  }
 
-async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T) => Promise<R>): Promise<R[]> {
-  const out: R[] = [];
-  let i = 0;
-  const workers = Array.from({ length: Math.max(1, limit) }, async () => {
-    while (i < items.length) {
-      const idx = i++;
-      out[idx] = await fn(items[idx]);
-    }
-  });
-  await Promise.all(workers);
-  return out;
+  return Buffer.from(
+    JSON.stringify({
+      gd: last.gameDatetime,
+      id: String(last._id),
+      matchId: String(last.matchId ?? ""),
+    })
+  ).toString("base64url");
 }
 
 function simplifyUnit(unit: any) {
@@ -96,114 +83,6 @@ function simplifyTrait(trait: any) {
     tierCurrent: safeNum(trait?.tier_current),
     tierTotal: safeNum(trait?.tier_total),
   };
-}
-
-function extractTftRow(matchId: string, region: string, playerId: mongoose.Types.ObjectId, puuid: string, match: any) {
-  const info = match?.info ?? {};
-  const participants: any[] = Array.isArray(info.participants) ? info.participants : [];
-  const me = participants.find((participant) => String(participant?.puuid ?? "").toLowerCase() === puuid.toLowerCase());
-  if (!me) return null;
-
-  return {
-    playerId,
-    matchId,
-    region,
-    fetchedAt: new Date(),
-    queueId: safeNum(info.queue_id),
-    gameDatetime: safeNum(info.game_datetime),
-    gameLength: safeNum(info.game_length),
-    setNumber: safeNum(info.tft_set_number),
-    placement: safeNum(me.placement),
-    level: safeNum(me.level),
-    lastRound: safeNum(me.last_round),
-    playersEliminated: safeNum(me.players_eliminated),
-    totalDamageToPlayers: safeNum(me.total_damage_to_players),
-    goldLeft: safeNum(me.gold_left),
-    timeEliminated: safeNum(me.time_eliminated),
-    companionContentId: safeStr(me.companion?.content_ID),
-    augments: Array.isArray(me.augments)
-      ? me.augments.filter((augment: unknown): augment is string => typeof augment === "string")
-      : [],
-    traits: Array.isArray(me.traits) ? me.traits.map(simplifyTrait) : [],
-    units: Array.isArray(me.units) ? me.units.map(simplifyUnit) : [],
-  };
-}
-
-async function syncOlderTftMatches(opts: {
-  playerId: mongoose.Types.ObjectId;
-  puuid: string;
-  matchRegion: string;
-  batch: number;
-  afterMatchId?: string | null;
-}) {
-  const { playerId, puuid, matchRegion, batch, afterMatchId } = opts;
-  let ids: string[] = [];
-
-  if (afterMatchId) {
-    const scanCount = Math.max(20, Math.min(100, batch * 2));
-    for (let start = 0; start < 1000; start += scanCount) {
-      const pageIds = await getTftMatchIdsByPuuid({ puuid, matchRegion, start, count: scanCount });
-      if (!Array.isArray(pageIds) || pageIds.length === 0) break;
-      const anchorIndex = pageIds.indexOf(afterMatchId);
-      if (anchorIndex >= 0) {
-        ids = pageIds.slice(anchorIndex + 1, anchorIndex + 1 + batch);
-        break;
-      }
-      if (pageIds.length < scanCount) break;
-    }
-  } else {
-    ids = await getTftMatchIdsByPuuid({ puuid, matchRegion, start: 0, count: batch });
-  }
-
-  if (!Array.isArray(ids) || ids.length === 0) return 0;
-
-  const existing = await TftPlayerMatch.find({ playerId, matchId: { $in: ids } }, { matchId: 1 }).lean();
-  const have = new Set(existing.map((x: any) => String(x.matchId)));
-  const newIds = ids.filter((id) => !have.has(id));
-  if (!newIds.length) return 0;
-
-  const now = new Date();
-  const matches = await mapLimit(newIds, 3, async (id) => {
-    let payload: any | null = null;
-    const cached = await TftMatch.findOne({ matchId: id }, { raw: 1 }).lean();
-    payload = (cached as any)?.raw ?? null;
-    if (!payload) {
-      payload = await getTftMatchById(id, matchRegion);
-      const info = payload?.info ?? {};
-      await TftMatch.updateOne(
-        { matchId: id },
-        {
-          $set: {
-            region: matchRegion,
-            queueId: safeNum(info.queue_id),
-            gameDatetime: safeNum(info.game_datetime),
-            gameLength: safeNum(info.game_length),
-            setNumber: safeNum(info.tft_set_number),
-            raw: payload,
-            fetchedAt: now,
-          },
-          $setOnInsert: { matchId: id },
-        },
-        { upsert: true }
-      );
-    }
-    return { id, payload };
-  });
-
-  const ops = matches
-    .map(({ id, payload }) => extractTftRow(id, matchRegion, playerId, puuid, payload))
-    .filter(Boolean)
-    .map((doc: any) => ({
-      updateOne: {
-        filter: { playerId: doc.playerId, matchId: doc.matchId },
-        update: { $set: doc },
-        upsert: true,
-      },
-    }));
-
-  if (ops.length) await TftPlayerMatch.bulkWrite(ops, { ordered: false });
-  await pruneTftPlayerMatches(playerId);
-  return ops.length;
 }
 
 function serializeMatch(match: Dict & { _id?: unknown }) {
@@ -253,7 +132,9 @@ function serializeParticipant(participant: unknown) {
 function serializeParticipants(raw: unknown) {
   const payload = raw && typeof raw === "object" ? (raw as { info?: { participants?: unknown[] } }) : {};
   const participants = Array.isArray(payload.info?.participants) ? payload.info.participants : [];
-  return participants.map(serializeParticipant).sort((left, right) => (left.placement ?? 99) - (right.placement ?? 99));
+  return participants
+    .map(serializeParticipant)
+    .sort((left, right) => (left.placement ?? 99) - (right.placement ?? 99));
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<Params> }) {
@@ -265,85 +146,36 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
       return NextResponse.json({ ok: false, error: "Missing params" }, { status: 400 });
     }
 
-    const url = new URL(req.url);
-    const limitRaw = Number(url.searchParams.get("limit") ?? url.searchParams.get("count") ?? 20);
-    const limit = Math.max(1, Math.min(50, Number.isFinite(limitRaw) ? limitRaw : 20));
-    const autosync = url.searchParams.get("autosync") === "1";
-    const cursor = parseCursor(url.searchParams.get("cursor"));
+    const limitRaw = Number(req.nextUrl.searchParams.get("limit") ?? req.nextUrl.searchParams.get("count") ?? 20);
+    const limit = Math.max(1, Math.min(50, Number.isFinite(limitRaw) ? Math.trunc(limitRaw) : 20));
+    const cursor = parseCursor(req.nextUrl.searchParams.get("cursor"));
 
     await dbConnect();
 
-    const player: any = await Player.findOne(
-      buildPlayerLookupQuery(gameNameRaw, tagLineRaw),
-      { _id: 1, tftPuuid: 1, puuid: 1, platform: 1, matchRegion: 1 }
-    ).lean();
-
+    const player = await Player.findOne(buildPlayerLookupQuery(gameNameRaw, tagLineRaw), { _id: 1 }).lean();
     if (!player?._id) {
       return NextResponse.json({ ok: false, error: "Player not found" }, { status: 404 });
     }
 
     const playerId = new mongoose.Types.ObjectId(String(player._id));
-    const puuid = String(player.tftPuuid ?? player.puuid ?? "").trim();
-    const matchRegion = String(player.matchRegion ?? platformToMatchRegion(String(player.platform ?? "sg2")))
-      .trim()
-      .toLowerCase();
-
-    function buildFilter() {
-      const filter: any = { playerId };
-      if (cursor) {
-        let oid: mongoose.Types.ObjectId | null = null;
-        try {
-          oid = new mongoose.Types.ObjectId(cursor.id);
-        } catch {
-          oid = null;
-        }
-        filter.$or = [
-          { gameDatetime: { $lt: cursor.gd } },
-          ...(oid ? [{ gameDatetime: cursor.gd, _id: { $lt: oid } }] : []),
-        ];
-      }
-      return filter;
+    const filter: any = { playerId };
+    if (cursor) {
+      const cursorId = new mongoose.Types.ObjectId(cursor.id);
+      filter.$or = [
+        { gameDatetime: { $lt: cursor.gd } },
+        { gameDatetime: cursor.gd, _id: { $lt: cursorId } },
+      ];
     }
 
-    async function queryPage() {
-      return TftPlayerMatch.find(buildFilter())
-        .sort({ gameDatetime: -1, _id: -1 })
-        .limit(limit + 1)
-        .lean();
-    }
-
-    let inserted = 0;
-    let docs = await queryPage();
-
-    if (autosync && docs.length <= limit) {
-      if (!puuid) {
-        return NextResponse.json({ ok: false, error: "Player missing TFT puuid" }, { status: 400 });
-      }
-      inserted = await syncOlderTftMatches({
-        playerId,
-        puuid,
-        matchRegion,
-        batch: limit,
-        afterMatchId: cursor?.matchId ?? null,
-      });
-      if (inserted > 0) docs = await queryPage();
-    }
-
+    const docs = await TftPlayerMatch.find(filter)
+      .sort({ gameDatetime: -1, _id: -1 })
+      .limit(limit + 1)
+      .lean();
     const hasMore = docs.length > limit;
     const page = hasMore ? docs.slice(0, limit) : docs;
-    const nextCursor =
-      page.length === 0
-        ? null
-        : hasMore
-          ? makeCursorFromDoc(page[page.length - 1])
-          : autosync && inserted > 0
-            ? makeCursorFromDoc(page[page.length - 1])
-            : null;
-
-    const total = await TftPlayerMatch.countDocuments({ playerId });
 
     const rawMatches = await TftMatch.find(
-      { matchId: { $in: page.map((match: any) => String(match.matchId ?? "")).filter(Boolean) } },
+      { matchId: { $in: page.map((match) => String(match.matchId ?? "")).filter(Boolean) } },
       { matchId: 1, raw: 1 }
     ).lean();
     const rawByMatchId = new Map(rawMatches.map((match: any) => [String(match.matchId ?? ""), match.raw]));
@@ -355,14 +187,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
       };
     });
     const matches = await hydrateTftMatches(serialized);
+    const total = await TftPlayerMatch.countDocuments({ playerId });
 
     return NextResponse.json({
       ok: true,
       total,
-      count: page.length,
-      inserted,
+      count: matches.length,
+      inserted: 0,
       matches,
-      nextCursor,
+      nextCursor: hasMore ? makeCursor(page[page.length - 1]) : null,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Error";

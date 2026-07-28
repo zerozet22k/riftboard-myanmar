@@ -45,7 +45,7 @@ type Row = {
 };
 
 async function submitOne(opts: { riotId: string; code?: string }) {
-  const payload: any = { riotId: opts.riotId };
+  const payload: { riotId: string; code?: string } = { riotId: opts.riotId };
   if (opts.code) payload.code = opts.code;
 
   // retry on 429/5xx a few times (simple backoff)
@@ -100,7 +100,7 @@ export default function BulkSubmitLocal({
     process.env.NEXT_PUBLIC_ENABLE_BULK_SUBMIT === "1";
 
   const [text, setText] = useState("");
-  const [code, setCode] = useState("");
+  const [code] = useState("");
   const [delayMs, setDelayMs] = useState<number>(defaultDelayMs);
 
   const [rows, setRows] = useState<Row[]>([]);
@@ -192,14 +192,15 @@ export default function BulkSubmitLocal({
             }
             return next;
           });
-        } catch (e: any) {
+        } catch (e: unknown) {
+          const message = e instanceof Error ? e.message : "Submit failed";
           setRows((prev) => {
             const next = [...prev];
             if (next[i]) {
               next[i] = {
                 ...next[i],
                 status: "error",
-                message: e?.message ?? "Submit failed",
+                message,
               };
             }
             return next;

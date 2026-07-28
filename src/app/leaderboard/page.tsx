@@ -1,7 +1,11 @@
+import Link from "next/link";
 import type { Metadata } from "next";
 import type { Types } from "mongoose";
+import AdSenseSlot from "@/components/AdSenseSlot";
 import { dbConnect } from "@/lib/mongodb";
+import HomeSearch from "@/components/HomeSearch";
 import { bestRankSnapshot } from "@/lib/rank";
+import { getLeaderboardAdSlotId } from "@/lib/adsense";
 import {
   absoluteUrl,
   getSiteBannerUrl,
@@ -18,7 +22,6 @@ import AutoUIRefresh from "@/components/AutoUIRefresh";
 import LeaderboardTable, { type LeaderboardRow } from "@/components/LeaderboardTable";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
 export const revalidate = 300;
 
 export const metadata: Metadata = {
@@ -367,9 +370,6 @@ export default async function LeaderboardPage() {
     };
   });
 
-  const rankedSolo = rows.filter((r) => r.tier).length;
-  const rankedFlex = rows.filter((r) => r.flexTier).length;
-
   const latestUpdatedMs = rows.reduce((max, r) => {
     const ms = r.updatedAt ? Date.parse(r.updatedAt) : 0;
     return Number.isFinite(ms) && ms > max ? ms : max;
@@ -397,39 +397,70 @@ export default async function LeaderboardPage() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(collectionJsonLd) }}
       />
-      <AutoUIRefresh everyMs={60000} />
-      <div className="mx-auto max-w-full p-4 sm:p-6 space-y-6">
-        <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div className="space-y-2">
-            <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">
-              Myanmar League of Legends Leaderboard
-            </h1>
-            <p className="max-w-3xl text-sm text-zinc-400">
-              Myanmar ranked players, current LP, recent form, and main champions in one board.
-            </p>
-          </div>
+      <AutoUIRefresh everyMs={5 * 60 * 1000} />
+      <div className="mx-auto max-w-[1600px] space-y-6 p-4 sm:p-6 lg:p-8">
+        <section className="relative overflow-hidden rounded-[32px] border border-white/8 bg-zinc-900/35 p-5 shadow-2xl shadow-black/30 sm:p-8 lg:p-10">
+          <div className="pointer-events-none absolute -right-24 -top-32 h-80 w-80 rounded-full bg-emerald-400/10 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-40 left-1/3 h-80 w-80 rounded-full bg-sky-400/8 blur-3xl" />
 
-          <div className="flex flex-col sm:items-end gap-2">
-            <div className="flex items-center gap-2 text-xs text-zinc-400">
-              <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-3 py-1">
-                Players: <span className="text-zinc-200">{rows.length}</span>
-              </span>
-              <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-3 py-1">
-                Solo ranked: <span className="text-zinc-200">{rankedSolo}</span>
-              </span>
-              <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-3 py-1">
-                Flex ranked: <span className="text-zinc-200">{rankedFlex}</span>
-              </span>
+          <div className="relative max-w-4xl">
+            <div>
+              <div className="mb-5 inline-flex w-fit items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-300/8 px-3 py-1.5 text-xs font-medium text-emerald-100">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
+                Myanmar League of Legends
+              </div>
+              <h1 className="max-w-4xl text-4xl font-semibold tracking-[-0.045em] text-white sm:text-5xl lg:text-6xl">
+                RiftBoard leaderboard
+              </h1>
+              <p className="mt-5 max-w-2xl text-base leading-7 text-zinc-400 sm:text-lg">
+                Solo/Duo and Flex rankings, match history, and champion stats for Myanmar players.
+              </p>
+
+              <div className="mt-7 max-w-2xl rounded-[24px] border border-white/8 bg-black/25 p-3 shadow-xl shadow-black/20">
+                <div className="mb-2 px-1 text-xs font-medium uppercase tracking-[0.16em] text-zinc-500">
+                  Find a player
+                </div>
+                <HomeSearch />
+              </div>
+
+              <div className="mt-5 flex flex-wrap items-center gap-3 text-sm">
+                <Link
+                  href="#rankings"
+                  className="rounded-full bg-zinc-100 px-4 py-2 font-semibold text-zinc-950 transition hover:bg-white"
+                >
+                  View leaderboard
+                </Link>
+                <Link
+                  href="/tft"
+                  className="rounded-full border border-white/10 bg-white/5 px-4 py-2 font-medium text-zinc-200 transition hover:bg-white/10"
+                >
+                  TFT leaderboard
+                </Link>
+              </div>
             </div>
-
-            <p className="text-xs text-zinc-500 sm:text-right">
-              Profiles refresh from each player page. The leaderboard syncs automatically in the
-              background.
-            </p>
           </div>
-        </header>
+        </section>
 
-        <LeaderboardTable key={tableKey} initialRows={rows} />
+        <AdSenseSlot
+          slotId={getLeaderboardAdSlotId()}
+          format="horizontal"
+          className="min-h-[120px]"
+        />
+
+        <section id="rankings" className="scroll-mt-28 space-y-4">
+          <header className="px-1">
+            <div>
+              <h2 className="text-2xl font-semibold tracking-tight text-zinc-100 sm:text-3xl">
+                League leaderboard
+              </h2>
+              <p className="mt-2 max-w-2xl text-sm text-zinc-500">
+                Solo/Duo and Flex rankings for tracked players.
+              </p>
+            </div>
+          </header>
+
+          <LeaderboardTable key={tableKey} initialRows={rows} />
+        </section>
       </div>
     </main>
   );

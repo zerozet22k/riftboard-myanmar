@@ -235,8 +235,9 @@ export async function enrichMatchParticipants(params: {
   participants: MatchParticipantSeed[];
   platform: string | null;
   trackedSelf?: TrackedSelfProfile | null;
+  cacheOnly?: boolean;
 }) {
-  const { participants, platform, trackedSelf } = params;
+  const { participants, platform, trackedSelf, cacheOnly = false } = params;
   const now = new Date();
   const puuids = Array.from(
     new Set(participants.map((participant) => normalizePuuid(participant.puuid)).filter(Boolean))
@@ -270,8 +271,16 @@ export async function enrichMatchParticipants(params: {
         ) ?? now,
       };
 
-      await upsertParticipantProfile(puuid, selfProfile);
+      if (!cacheOnly) {
+        await upsertParticipantProfile(puuid, selfProfile);
+      }
       return profileToOutput(participant, selfProfile, "self", false);
+    }
+
+    if (cacheOnly) {
+      return existing
+        ? profileToOutput(participant, existing, "cache", cacheIsStale(existing, now))
+        : profileToOutput(participant, null, "none", true);
     }
 
     if (!platform) {

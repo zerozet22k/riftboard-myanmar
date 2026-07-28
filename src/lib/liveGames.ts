@@ -3,7 +3,7 @@ import { sendDiscordChannelMessage } from "@/lib/discord";
 import { getLatestDdragonVersion } from "@/lib/ddragon";
 import { dbConnect } from "@/lib/mongodb";
 import { getAppBaseUrl } from "@/lib/runtimeConfig";
-import { findActiveGameByPuuid, isRiot404 } from "@/lib/riot";
+import { findActiveGameByPuuid, isRiot404, isRiot429 } from "@/lib/riot";
 import { canonicalPlayerPath } from "@/lib/playerIdentity";
 import { DiscordLink } from "@/models/discordLink";
 import { LiveGamePost } from "@/models/liveGamePost";
@@ -164,8 +164,8 @@ export async function publishLiveGamesToDiscord(opts?: {
   const channelId = String(opts?.channelId ?? liveChannelId()).trim();
   if (!channelId) throw new Error("Missing Discord live channel ID.");
 
-  const limit = Math.max(1, Math.min(200, Math.floor(Number(opts?.limit ?? 80) || 80)));
-  const delayMs = Math.max(0, Math.min(5000, Math.floor(Number(opts?.delayMs ?? 350) || 0)));
+  const limit = Math.max(1, Math.min(50, Math.floor(Number(opts?.limit ?? 40) || 40)));
+  const delayMs = Math.max(1200, Math.min(5000, Math.floor(Number(opts?.delayMs ?? 1500) || 1500)));
   const now = new Date();
   const verifiedLinks = await DiscordLink.find(
     {
@@ -182,7 +182,7 @@ export async function publishLiveGamesToDiscord(opts?: {
   const approvedFilter = {
     puuid: { $type: "string" as const, $ne: "" },
     "leaderboard.group": "burmese",
-    "leaderboard.status": "approved",
+    "leaderboard.status": "approved" as const,
     "track.lol": { $ne: false },
   };
 
@@ -195,7 +195,7 @@ export async function publishLiveGamesToDiscord(opts?: {
         },
         { gameName: 1, tagLine: 1, platform: 1, puuid: 1 }
       )
-        .sort({ lastRefreshAt: -1, updatedAt: -1 })
+        .sort({ "liveGame.checkedAt": 1, lastRefreshAt: -1, updatedAt: -1 })
         .limit(limit)
         .lean<LivePlayer[]>()
     : [];
@@ -211,7 +211,7 @@ export async function publishLiveGamesToDiscord(opts?: {
           : approvedFilter,
         { gameName: 1, tagLine: 1, platform: 1, puuid: 1 }
       )
-        .sort({ lastRefreshAt: -1, updatedAt: -1 })
+        .sort({ "liveGame.checkedAt": 1, lastRefreshAt: -1, updatedAt: -1 })
         .limit(remaining)
         .lean<LivePlayer[]>()
     : [];
@@ -236,6 +236,7 @@ export async function publishLiveGamesToDiscord(opts?: {
 
     try {
       const found = await findActiveGameByPuuid(puuid, player.platform);
+      await Player.updateOne({ _id: player._id }, { $set: { "liveGame.checkedAt": new Date() } });
       if (!found?.game?.gameId) {
         if (delayMs) await sleep(delayMs);
         continue;
@@ -260,8 +261,12 @@ export async function publishLiveGamesToDiscord(opts?: {
         });
       }
     } catch (error) {
+      await Player.updateOne({ _id: player._id }, { $set: { "liveGame.checkedAt": new Date() } });
       if (!isRiot404(error)) {
         errors.push(`${compactRiotId(player)}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      if (isRiot429(error)) {
+        break;
       }
     }
 

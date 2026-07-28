@@ -15,7 +15,6 @@ import {
 } from "@/lib/displayTime";
 import { getOptionalDiscordSession } from "@/lib/discordSession";
 import { approvedCommunityLeaderboardQuery } from "@/lib/communityLeaderboard";
-import { ensureMatchDetailsForHistoryRows } from "@/lib/lolMatchHydration";
 import { analyzeMatchPerformance, matchPerformanceToneClass, type MatchPerformanceBadge } from "@/lib/matchAnalysis";
 import { dbConnect } from "@/lib/mongodb";
 import { buildPlayerLookupQuery, canonicalPlayerPath } from "@/lib/playerIdentity";
@@ -601,11 +600,6 @@ export default async function PlayerProfilePage({
   ]);
 
   const initialMatchDocs = matchDocs.slice(0, 10);
-  await ensureMatchDetailsForHistoryRows({
-    rows: initialMatchDocs,
-    matchRegion: String(player.matchRegion ?? "sea").toLowerCase(),
-    maxFetch: 10,
-  });
   const initialMatches: MatchRow[] = initialMatchDocs.map((match) => ({
     _id: String(match._id),
     matchId: String(match.matchId),

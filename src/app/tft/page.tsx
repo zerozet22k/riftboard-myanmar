@@ -11,6 +11,7 @@ import {
   websiteSchemaId,
 } from "@/lib/seo";
 import { approvedCommunityLeaderboardQuery } from "@/lib/communityLeaderboard";
+import { analyzeTftPlaystyle, type TftPlaystyleSummary } from "@/lib/tftPlaystyle";
 import { Player } from "@/models/player";
 import { TftPlayerMatch } from "@/models/tftPlayerMatch";
 import TftLeaderboardTable, { type TftLeaderboardRow } from "@/components/TftLeaderboardTable";
@@ -89,14 +90,14 @@ type TftRecentMatch = {
   }>;
 };
 
-const getRecentMatchesForLeaderboardPage = unstable_cache(
+const getPlaystylesForLeaderboardPage = unstable_cache(
   async (rawPlayerIds: string[]) => {
     await dbConnect();
     const playerIds = rawPlayerIds
       .map((id) => (Types.ObjectId.isValid(id) ? new Types.ObjectId(id) : null))
       .filter((id): id is Types.ObjectId => id != null);
 
-    if (!playerIds.length) return [] as Array<[string, TftRecentMatch[]]>;
+    if (!playerIds.length) return [] as Array<[string, TftPlaystyleSummary | null]>;
 
     const recentGroups = await TftPlayerMatch.aggregate<{
       _id: Types.ObjectId;
@@ -118,12 +119,18 @@ const getRecentMatchesForLeaderboardPage = unstable_cache(
           },
         },
       },
-      { $project: { matches: { $slice: ["$matches", 20] } } },
+      { $project: { matches: { $slice: ["$matches", 12] } } },
     ]);
 
-    return recentGroups.map((group) => [String(group._id), group.matches ?? []] as [string, TftRecentMatch[]]);
+    return recentGroups.map(
+      (group) =>
+        [
+          String(group._id),
+          group.matches?.length ? analyzeTftPlaystyle(group.matches) : null,
+        ] as [string, TftPlaystyleSummary | null]
+    );
   },
-  ["tft-leaderboard-recent-matches-v5"],
+  ["tft-leaderboard-playstyles-v6"],
   { revalidate: 300 }
 );
 
@@ -171,7 +178,7 @@ export default async function TftPage() {
 
   const rows = players
     .filter((player) => player.gameName && player.tagLine)
-    .map<Omit<TftLeaderboardRow, "recentMatches">>((player) => {
+    .map<Omit<TftLeaderboardRow, "playstyle">>((player) => {
       const gameName = String(player.gameName ?? "").trim();
       const tagLine = String(player.tagLine ?? "").trim();
       const tft = player.tft ?? {};
@@ -196,10 +203,10 @@ export default async function TftPage() {
 
   rows.sort((left, right) => right.key - left.key || left.name.localeCompare(right.name));
 
-  const recentByPlayer = new Map(await getRecentMatchesForLeaderboardPage(rows.map((row) => row.id)));
+  const playstyleByPlayer = new Map(await getPlaystylesForLeaderboardPage(rows.map((row) => row.id)));
   const tableRows: TftLeaderboardRow[] = rows.map((row) => ({
     ...row,
-    recentMatches: recentByPlayer.get(row.id) ?? [],
+    playstyle: playstyleByPlayer.get(row.id) ?? null,
   }));
 
   const rankedRows = rows.filter((row) => row.tier);

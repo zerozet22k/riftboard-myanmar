@@ -9,7 +9,7 @@ export type MatchDoc = {
     gameCreation?: number; // unix ms
     gameDuration?: number; // seconds
 
-    raw?: any;
+    raw?: { info?: unknown } | null;
 
     fetchedAt: Date;
 };

@@ -23,6 +23,7 @@ import {
 } from "@/lib/discordLinkStore";
 import { buildPlayerLookupQuery, canonicalPlayerPath } from "@/lib/playerIdentity";
 import { upsertAndRefreshByRiotId } from "@/lib/refresh";
+import { withRiotRefreshLease } from "@/lib/schedulerLease";
 import { parseRiotId } from "@/lib/tournaments";
 import { DiscordLink } from "@/models/discordLink";
 import { Player } from "@/models/player";
@@ -255,9 +256,11 @@ async function adminBindDiscordUserToRiot(input: {
   const parsed = parseRiotId(input.riotId);
   if (!parsed) throw new Error("Enter Riot ID as GameName#TagLine.");
 
-  await upsertAndRefreshByRiotId(
-    { gameName: parsed.gameName, tagLine: parsed.tagLine },
-    { force: true, syncMatches: false, fullMastery: false }
+  await withRiotRefreshLease(() =>
+    upsertAndRefreshByRiotId(
+      { gameName: parsed.gameName, tagLine: parsed.tagLine },
+      { force: true, syncMatches: false, fullMastery: false }
+    )
   ).catch(() => null);
 
   const player = await Player.findOne(buildPlayerLookupQuery(parsed.gameName, parsed.tagLine), {

@@ -3,7 +3,6 @@ import LeaderboardPage from "./leaderboard/page";
 import { absoluteUrl, getSiteOpenGraphImages, SITE_NAME } from "@/lib/seo";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
 export const revalidate = 300;
 
 export const metadata: Metadata = {

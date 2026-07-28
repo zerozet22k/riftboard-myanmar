@@ -10,6 +10,7 @@ import {
 import { dbConnect } from "@/lib/mongodb";
 import { canonicalPlayerPath } from "@/lib/playerIdentity";
 import { refreshPlayerById } from "@/lib/refresh";
+import { withRiotRefreshLease } from "@/lib/schedulerLease";
 import { requireDiscordSessionFromRequest } from "@/lib/discordSession";
 import { getCommunityJoinCodes } from "@/lib/runtimeConfig";
 import { Player } from "@/models/player";
@@ -71,13 +72,15 @@ export async function POST(req: NextRequest) {
 
     let refreshOut: RefreshResult | null = null;
     try {
-      refreshOut = (await refreshPlayerById(String(player._id), {
-        force: true,
-        fullMastery: false,
-        syncMatches: true,
-        syncTftMatches: true,
-        matchesCount: 20,
-      })) as RefreshResult;
+      refreshOut = (await withRiotRefreshLease(() =>
+        refreshPlayerById(String(player._id), {
+          force: true,
+          fullMastery: false,
+          syncMatches: true,
+          syncTftMatches: false,
+          matchesCount: 5,
+        })
+      )) as RefreshResult;
     } catch (error) {
       refreshOut = { _refreshError: error instanceof Error ? error.message : "Refresh failed" };
     }

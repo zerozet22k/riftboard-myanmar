@@ -10,12 +10,15 @@
     "lint": "eslint",
     "cleanup:matches": "node scripts/cleanup-match-storage.mjs",
     "discord:register": "node scripts/register-discord.mjs",
-    "discord:worker": "node scripts/discord-worker.mjs"
+    "discord:worker": "node scripts/discord-worker.mjs",
+    "tray:host": "powershell -ExecutionPolicy Bypass -File scripts/build-tray.ps1 -Mode host",
+    "tray:community": "powershell -ExecutionPolicy Bypass -File scripts/build-tray.ps1 -Mode community",
+    "tray:all": "powershell -ExecutionPolicy Bypass -File scripts/build-tray.ps1 -Mode all"
   },
   "dependencies": {
-    "discord.js": "^14.26.4",
-    "mongoose": "^9.0.1",
-    "next": "16.0.10",
+    "discord.js": "^14.27.0",
+    "mongoose": "9.7.2",
+    "next": "16.2.12",
     "react": "19.2.1",
     "react-dom": "19.2.1",
     "zod": "^4.2.0"
@@ -27,7 +30,7 @@
     "@types/react-dom": "^19",
     "babel-plugin-react-compiler": "1.0.0",
     "eslint": "^9",
-    "eslint-config-next": "16.0.10",
+    "eslint-config-next": "16.2.12",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

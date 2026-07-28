@@ -31,6 +31,7 @@ import {
 } from "@/lib/riotAuth";
 import { getRsoAccountMe } from "@/lib/riot";
 import { refreshPlayerById } from "@/lib/refresh";
+import { withRiotRefreshLease } from "@/lib/schedulerLease";
 import { Player } from "@/models/player";
 
 export const runtime = "nodejs";
@@ -46,14 +47,16 @@ function redirectOAuthError(req: NextRequest, returnTo: string | undefined | nul
 
 async function refreshLinkedPlayer(playerId: unknown) {
   try {
-    await refreshPlayerById(String(playerId), {
-      force: true,
-      cooldownMs: 0,
-      syncMatches: true,
-      syncTftMatches: true,
-      matchesCount: 20,
-      fullMastery: false,
-    });
+    await withRiotRefreshLease(() =>
+      refreshPlayerById(String(playerId), {
+        force: true,
+        cooldownMs: 0,
+        syncMatches: false,
+        syncTftMatches: false,
+        matchesCount: 5,
+        fullMastery: false,
+      })
+    );
     revalidatePath("/leaderboard");
     revalidatePath("/tft");
   } catch (error) {

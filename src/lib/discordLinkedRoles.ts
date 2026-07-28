@@ -13,6 +13,7 @@ import {
 import { buildPlayerLookupQuery, canonicalPlayerPath } from "@/lib/playerIdentity";
 import { rankScore, TIER_SCORE } from "@/lib/rank";
 import { refreshPlayerById, upsertAndRefreshByRiotId } from "@/lib/refresh";
+import { withRiotRefreshLease } from "@/lib/schedulerLease";
 import { parseRiotId } from "@/lib/tournaments";
 import { DiscordLink, type DiscordLinkDoc } from "@/models/discordLink";
 import { Player } from "@/models/player";
@@ -138,9 +139,11 @@ export async function resolvePlayerForDiscordLink(riotIdInput: string) {
   const parsed = parseRiotId(riotIdInput);
   if (!parsed) throw new Error("Discord did not provide a valid Riot ID.");
 
-  await upsertAndRefreshByRiotId(
-    { gameName: parsed.gameName, tagLine: parsed.tagLine },
-    { force: true, syncMatches: false, fullMastery: false }
+  await withRiotRefreshLease(() =>
+    upsertAndRefreshByRiotId(
+      { gameName: parsed.gameName, tagLine: parsed.tagLine },
+      { force: true, syncMatches: false, fullMastery: false }
+    )
   );
 
   const player = await Player.findOne(
@@ -395,12 +398,14 @@ export async function refreshStoredDiscordProfile(
   }
 ) {
   const { link } = await loadStoredDiscordIdentity(discordUserId);
-  const player = (await refreshPlayerById(String(link.playerId), {
-    force: opts?.force ?? true,
-    syncMatches: opts?.syncMatches ?? false,
-    matchesCount: opts?.matchesCount ?? 10,
-    fullMastery: opts?.fullMastery ?? false,
-  })) as RefreshedDiscordPlayer;
+  const player = (await withRiotRefreshLease(() =>
+    refreshPlayerById(String(link.playerId), {
+      force: opts?.force ?? true,
+      syncMatches: opts?.syncMatches ?? false,
+      matchesCount: opts?.matchesCount ?? 5,
+      fullMastery: opts?.fullMastery ?? false,
+    })
+  )) as RefreshedDiscordPlayer;
 
   let linkedRoleError: string | null = null;
   let guildRoleError: string | null = null;

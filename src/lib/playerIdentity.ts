@@ -74,8 +74,9 @@ export function buildPlayerLookupQuery(gameName: unknown, tagLine: unknown) {
     $or: [
       { gameNameNorm, tagLineNorm },
       {
-        "riotIdAliases.gameNameNorm": gameNameNorm,
-        "riotIdAliases.tagLineNorm": tagLineNorm,
+        riotIdAliases: {
+          $elemMatch: { gameNameNorm, tagLineNorm },
+        },
       },
     ],
   };

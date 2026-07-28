@@ -81,7 +81,7 @@ export default function TournamentCreateForm({
 
   return (
     <form onSubmit={onSubmit} className="space-y-5 rounded-[28px] bg-zinc-900/35 p-5 ring-1 ring-white/5 sm:p-6">
-      {/* <section className="rounded-[24px] bg-zinc-950/45 p-4 ring-1 ring-white/6">
+      <section className="rounded-[24px] bg-zinc-950/45 p-4 ring-1 ring-white/6">
         <div className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">Riot compliance</div>
         <div className="mt-2 text-sm text-zinc-300">
           This flow is built for real tournaments, not one-off lobby generation.
@@ -103,7 +103,7 @@ export default function TournamentCreateForm({
             ? "Riot Tournament API is enabled for this deployment."
             : "Riot Tournament API is currently disabled here. You can still prepare the event, but Riot provisioning stays blocked until approved access is enabled."}
         </div>
-      </section> */}
+      </section>
 
       <div className="grid gap-4 md:grid-cols-2">
         <label className="space-y-1.5 text-sm">

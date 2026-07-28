@@ -1,3 +1,8 @@
+import {
+  queuedRiotFetch,
+  retryAfterMsFromResponse,
+} from "@/lib/riotRequestQueue";
+
 export type RiotAccount = { puuid: string; gameName?: string; tagLine?: string };
 
 export type Summoner = {
@@ -220,11 +225,7 @@ function parseRiotErrorMessage(text: string) {
 }
 
 function retryAfterMsFromHeaders(res: Response): number | undefined {
-  const ra = res.headers.get("retry-after");
-  if (!ra) return undefined;
-  const n = Number(ra);
-  if (!Number.isFinite(n) || n <= 0) return undefined;
-  return Math.floor(n * 1000);
+  return retryAfterMsFromResponse(res);
 }
 
 function sleep(ms: number) {
@@ -232,32 +233,56 @@ function sleep(ms: number) {
 }
 
 async function riotFetch<T>(url: string, opts?: { maxRetries?: number; apiKey?: string }): Promise<T> {
-  const maxRetries = opts?.maxRetries ?? 3;
+  const maxRetries = opts?.maxRetries ?? 2;
   const apiKey = opts?.apiKey ?? getLolApiKey();
+  const maxRetryWaitMs = Math.max(
+    0,
+    Number(process.env.RIOT_MAX_RETRY_WAIT_MS ?? 15_000) || 15_000
+  );
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const res = await fetch(url, {
-      headers: {
-        "X-Riot-Token": apiKey,
-        "Accept-Language": "en-US,en;q=0.9",
-      },
-      cache: "no-store",
-    });
+    let res: Response;
+    try {
+      res = await queuedRiotFetch(
+        url,
+        {
+          headers: {
+            "X-Riot-Token": apiKey,
+            "Accept-Language": "en-US,en;q=0.9",
+          },
+          cache: "no-store",
+        },
+        apiKey
+      );
+    } catch (error) {
+      if (attempt >= maxRetries) throw error;
+      await sleep(750 * 2 ** attempt + Math.floor(Math.random() * 250));
+      continue;
+    }
 
     if (res.ok) return (await res.json()) as T;
 
     const text = await res.text().catch(() => "");
     const msg = parseRiotErrorMessage(text || res.statusText);
+    const retryAfterMs = retryAfterMsFromHeaders(res);
 
     // 429: respect Retry-After if present
     if (res.status === 429 && attempt < maxRetries) {
-      const waitMs = retryAfterMsFromHeaders(res) ?? (1500 + attempt * 1500);
+      const waitMs = retryAfterMs ?? 120_000;
+      if (waitMs > maxRetryWaitMs) {
+        throw new RiotApiError(res.status, msg, { url, retryAfterMs: waitMs });
+      }
       // tiny jitter so concurrent refreshes don’t line up
       await sleep(waitMs + Math.floor(Math.random() * 250));
       continue;
     }
 
-    throw new RiotApiError(res.status, msg, { url, retryAfterMs: retryAfterMsFromHeaders(res) });
+    if ([500, 502, 503, 504].includes(res.status) && attempt < maxRetries) {
+      await sleep(750 * 2 ** attempt + Math.floor(Math.random() * 250));
+      continue;
+    }
+
+    throw new RiotApiError(res.status, msg, { url, retryAfterMs });
   }
 
   throw new RiotApiError(429, "Rate limit (retries exhausted)", { url });
@@ -302,20 +327,35 @@ async function riotFetchWithBody<T>(
   body: unknown,
   opts?: { maxRetries?: number; apiKey?: string }
 ): Promise<T> {
-  const maxRetries = opts?.maxRetries ?? 3;
+  const maxRetries = opts?.maxRetries ?? 2;
   const apiKey = opts?.apiKey ?? getLolApiKey();
+  const maxRetryWaitMs = Math.max(
+    0,
+    Number(process.env.RIOT_MAX_RETRY_WAIT_MS ?? 15_000) || 15_000
+  );
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "X-Riot-Token": apiKey,
-        "Accept-Language": "en-US,en;q=0.9",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-      cache: "no-store",
-    });
+    let res: Response;
+    try {
+      res = await queuedRiotFetch(
+        url,
+        {
+          method: "POST",
+          headers: {
+            "X-Riot-Token": apiKey,
+            "Accept-Language": "en-US,en;q=0.9",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+          cache: "no-store",
+        },
+        apiKey
+      );
+    } catch (error) {
+      if (attempt >= maxRetries) throw error;
+      await sleep(750 * 2 ** attempt + Math.floor(Math.random() * 250));
+      continue;
+    }
 
     if (res.ok) {
       const text = await res.text();
@@ -329,14 +369,23 @@ async function riotFetchWithBody<T>(
 
     const text = await res.text().catch(() => "");
     const msg = parseRiotErrorMessage(text || res.statusText);
+    const retryAfterMs = retryAfterMsFromHeaders(res);
 
     if (res.status === 429 && attempt < maxRetries) {
-      const waitMs = retryAfterMsFromHeaders(res) ?? (1500 + attempt * 1500);
+      const waitMs = retryAfterMs ?? 120_000;
+      if (waitMs > maxRetryWaitMs) {
+        throw new RiotApiError(res.status, msg, { url, retryAfterMs: waitMs });
+      }
       await sleep(waitMs + Math.floor(Math.random() * 250));
       continue;
     }
 
-    throw new RiotApiError(res.status, msg, { url, retryAfterMs: retryAfterMsFromHeaders(res) });
+    if ([500, 502, 503, 504].includes(res.status) && attempt < maxRetries) {
+      await sleep(750 * 2 ** attempt + Math.floor(Math.random() * 250));
+      continue;
+    }
+
+    throw new RiotApiError(res.status, msg, { url, retryAfterMs });
   }
 
   throw new RiotApiError(429, "Rate limit (retries exhausted)", { url });
@@ -378,9 +427,10 @@ export async function getRsoAccountMe(accessToken: string) {
 
     const text = await res.text().catch(() => "");
     const msg = parseRiotErrorMessage(text || res.statusText);
+    const retryAfterMs = retryAfterMsFromHeaders(res);
     if (res.status === 404 || res.status === 403) continue;
 
-    throw new RiotApiError(res.status, msg, { url, retryAfterMs: retryAfterMsFromHeaders(res) });
+    throw new RiotApiError(res.status, msg, { url, retryAfterMs });
   }
 
   throw new RiotApiError(404, "RSO Riot account not found");
@@ -428,10 +478,11 @@ export async function getActiveGameByPuuid(platform: string, puuid: string) {
 }
 
 export async function findActiveGameByPuuid(puuid: string, preferredPlatform?: string | null) {
-  const candidates = new Set<string>();
   const preferred = String(preferredPlatform ?? "").trim().toLowerCase();
-  if (preferred && preferred !== "auto") candidates.add(preferred);
-  for (const platform of ["sg2", "th2", "ph2", "vn2", "tw2"]) candidates.add(platform);
+  const candidates =
+    preferred && preferred !== "auto"
+      ? [preferred]
+      : ["sg2", "th2", "ph2", "vn2", "tw2"];
 
   for (const platform of candidates) {
     try {
@@ -457,15 +508,27 @@ export async function getTftLeagueEntriesByPuuid(platform: string, puuid: string
 }
 
 export async function findTftLeagueEntriesByPuuid(puuid: string, preferredPlatform?: string | null) {
-  const candidates = new Set<string>();
   const preferred = String(preferredPlatform ?? "").trim().toLowerCase();
-  if (preferred && preferred !== "auto") candidates.add(preferred);
+  if (preferred && preferred !== "auto") {
+    try {
+      return {
+        platform: preferred,
+        entries: await getTftLeagueEntriesByPuuid(preferred, puuid),
+      };
+    } catch (e) {
+      if (isRiot404(e) || isRiotDecryptingBadRequest(e) || isMissingPlatformHost(e)) {
+        return { platform: preferred, entries: [] };
+      }
+      throw e;
+    }
+  }
 
+  let shardPlatform = "";
   try {
     const shard = await getActiveShardByPuuid("tft", puuid);
-    const shardPlatform = String(shard.activeShard ?? "").trim().toLowerCase();
-    if (shardPlatform) candidates.add(shardPlatform);
+    shardPlatform = String(shard.activeShard ?? "").trim().toLowerCase();
   } catch (e) {
+    if (isRiot429(e)) throw e;
     // Some TFT product keys can read TFT League but not Account active-shard.
     // Platform fallback below is enough for SEA players, so active-shard is best-effort.
     if (!isRiot404(e) && !isRiot403(e)) {
@@ -473,9 +536,9 @@ export async function findTftLeagueEntriesByPuuid(puuid: string, preferredPlatfo
     }
   }
 
-  for (const platform of ["sg2", "th2", "ph2", "vn2", "tw2"]) {
-    candidates.add(platform);
-  }
+  const candidates = shardPlatform
+    ? [shardPlatform]
+    : ["sg2", "th2", "ph2", "vn2", "tw2"];
 
   for (const platform of candidates) {
     try {

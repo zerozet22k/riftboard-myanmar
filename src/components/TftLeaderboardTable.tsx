@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { formatNumber, formatRelativeTime } from "@/lib/displayTime";
-import { analyzeTftPlaystyle, type TftPlaystyleSummary } from "@/lib/tftPlaystyle";
+import type { TftPlaystyleSummary } from "@/lib/tftPlaystyle";
 import { LeaderboardPager, LeaderboardSearchBar } from "@/components/LeaderboardControls";
 import ProfileAvatar from "@/components/ProfileAvatar";
 import RankEmblem from "@/components/RankEmblem";
@@ -23,19 +23,7 @@ export type TftLeaderboardRow = {
   losses: number | null;
   wr: number | null;
   key: number;
-  recentMatches: Array<{
-    gameDatetime?: number | null;
-    level?: number | null;
-    goldLeft?: number | null;
-    totalDamageToPlayers?: number | null;
-    units?: Array<{
-      characterId?: string | null;
-      name?: string | null;
-      rarity?: number | null;
-      tier?: number | null;
-      itemNames?: string[];
-    }>;
-  }>;
+  playstyle: TftPlaystyleSummary | null;
 };
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
@@ -122,10 +110,7 @@ export default function TftLeaderboardTable({ rows, renderedAt }: { rows: TftLea
         )
       : rankFiltered;
 
-    return source.map((row) => ({
-      ...row,
-      playstyle: row.recentMatches.length ? analyzeTftPlaystyle(row.recentMatches) : null,
-    }));
+    return source;
   }, [rows, query, rankFilter]);
 
   const total = filtered.length;

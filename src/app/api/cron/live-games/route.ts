@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { publishLiveGamesToDiscord } from "@/lib/liveGames";
 import { getSchedulerTokens } from "@/lib/runtimeConfig";
+import {
+  acquireSchedulerLease,
+  deferSchedulerLease,
+  releaseSchedulerLease,
+} from "@/lib/schedulerLease";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,9 +17,10 @@ function getToken(req: NextRequest): string {
 }
 
 function isLocalDevRequest(req: NextRequest) {
+  if (process.env.NODE_ENV === "production") return false;
   const hostname = req.nextUrl.hostname.toLowerCase();
   const isLoopback = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
-  return isLoopback && process.env.VERCEL !== "1";
+  return isLoopback;
 }
 
 function assertCronAuth(req: NextRequest) {
@@ -33,13 +39,40 @@ function intParam(req: NextRequest, key: string, fallback: number, min: number, 
 }
 
 export async function GET(req: NextRequest) {
+  let lease: Awaited<ReturnType<typeof acquireSchedulerLease>> = null;
   try {
     assertCronAuth(req);
-    const result = await publishLiveGamesToDiscord({
+    lease = await acquireSchedulerLease("riot-api-refresh");
+    if (!lease) {
+      return NextResponse.json(
+        { ok: true, skipped: true, reason: "Another refresh job is already running." },
+        { status: 202, headers: { "Retry-After": "60" } }
+      );
+    }
+    const live = await publishLiveGamesToDiscord({
       channelId: req.nextUrl.searchParams.get("channelId") || undefined,
-      limit: intParam(req, "limit", 200, 1, 200),
-      delayMs: intParam(req, "delayMs", 350, 0, 5000),
+      limit: intParam(req, "limit", 10, 1, 25),
+      delayMs: intParam(req, "delayMs", 1500, 1200, 5000),
     });
+    const result = {
+      ok: live.posted,
+      fail: live.errors.length,
+      skipped: live.skipped + Math.max(0, live.checked - live.active),
+      scanned: live.checked,
+      errors: live.errors.map((error) => ({ error })),
+      players: [],
+      live,
+    };
+
+    const rateLimited = live.errors.some((error) => /429|rate limit/i.test(error));
+    if (rateLimited) {
+      await deferSchedulerLease(lease, 120_000);
+      lease = null;
+      return NextResponse.json(
+        { ok: false, error: "Riot rate limit reached; live polling stopped safely.", result },
+        { status: 429, headers: { "Retry-After": "120" } }
+      );
+    }
 
     return NextResponse.json({ ok: true, result });
   } catch (error) {
@@ -48,6 +81,8 @@ export async function GET(req: NextRequest) {
       { ok: false, error: message },
       { status: message === "Unauthorized" ? 401 : 500 }
     );
+  } finally {
+    if (lease) await releaseSchedulerLease(lease).catch(() => undefined);
   }
 }
 

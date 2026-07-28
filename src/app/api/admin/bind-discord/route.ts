@@ -7,6 +7,7 @@ import { syncDiscordGuildRankRoleForStoredLink } from "@/lib/discordGuildRoles";
 import { dbConnect } from "@/lib/mongodb";
 import { buildPlayerLookupQuery } from "@/lib/playerIdentity";
 import { upsertAndRefreshByRiotId } from "@/lib/refresh";
+import { withRiotRefreshLease } from "@/lib/schedulerLease";
 import { parseRiotId } from "@/lib/tournaments";
 import { DiscordLink } from "@/models/discordLink";
 import { Player } from "@/models/player";
@@ -66,9 +67,11 @@ export async function POST(req: NextRequest) {
 
     if (!player?._id) {
       try {
-        await upsertAndRefreshByRiotId(
-          { gameName: riot.gameName, tagLine: riot.tagLine },
-          { force: true, syncMatches: false, fullMastery: false }
+        await withRiotRefreshLease(() =>
+          upsertAndRefreshByRiotId(
+            { gameName: riot.gameName, tagLine: riot.tagLine },
+            { force: true, syncMatches: false, fullMastery: false }
+          )
         );
       } catch (error) {
         refreshWarning = error instanceof Error ? error.message : "Could not refresh Riot player before binding.";

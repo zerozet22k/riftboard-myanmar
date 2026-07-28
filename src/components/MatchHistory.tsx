@@ -132,7 +132,6 @@ function matchesUrl(gameName: string, tagLine: string, limit: number, cursor?: s
   const base = `/api/p/${encodeURIComponent(gn)}/${encodeURIComponent(tl)}/matches`;
   const qs = new URLSearchParams();
   qs.set("limit", String(limit));
-  qs.set("autosync", "1");
   if (cursor) qs.set("cursor", cursor);
   return `${base}?${qs.toString()}`;
 }

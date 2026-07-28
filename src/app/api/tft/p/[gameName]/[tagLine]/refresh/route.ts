@@ -1,11 +1,6 @@
 import { NextResponse } from "next/server";
 import { dbConnect } from "@/lib/mongodb";
 import { buildPlayerLookupQuery } from "@/lib/playerIdentity";
-import { refreshPlayerById } from "@/lib/refresh";
-import { hasTftApiKey } from "@/lib/riot";
-import { syncDiscordGuildRankRoleForStoredLink } from "@/lib/discordGuildRoles";
-import { syncDiscordLinkedRoleForStoredLink } from "@/lib/discordLinkedRoles";
-import { DiscordLink } from "@/models/discordLink";
 import { Player } from "@/models/player";
 
 export const runtime = "nodejs";
@@ -21,100 +16,35 @@ function safeDecode(value: unknown) {
   }
 }
 
-function friendlyRefreshError(error: unknown) {
-  const message = error instanceof Error ? error.message : "Refresh failed";
-  if (/Exception decrypting|Bad Request/i.test(message)) {
-    return "Riot could not return TFT match history for this account yet. No recent matches were saved.";
-  }
-  if (/403|Forbidden/i.test(message)) {
-    return "Riot rejected the TFT API key. Update RIOT_TFT_API_KEY or RIOT_API_KEY.";
-  }
-  if (/404|not found/i.test(message)) {
-    return "No TFT player or match history was found for this Riot ID.";
-  }
-  return message;
-}
-
-async function syncDiscordRolesForPlayer(playerId: string) {
-  const links = await DiscordLink.find(
-    {
-      playerId,
-      verifiedBinding: true,
-      verificationSource: { $in: ["discord_connections", "riot_rso"] },
-    },
-    { _id: 1 }
-  ).lean();
-
-  let linkedRoleSkipped = 0;
-  let guildRoleSkipped = 0;
-  const errors: string[] = [];
-
-  for (const link of links) {
-    const linkId = String(link._id);
-
-    try {
-      const synced = await syncDiscordLinkedRoleForStoredLink(linkId, { force: true });
-      if (synced.skipped) linkedRoleSkipped++;
-    } catch (error) {
-      errors.push(friendlyRefreshError(error));
-    }
-
-    try {
-      const synced = await syncDiscordGuildRankRoleForStoredLink(linkId, { force: true });
-      if (synced.skipped) guildRoleSkipped++;
-    } catch (error) {
-      errors.push(friendlyRefreshError(error));
-    }
-  }
-
-  return {
-    scanned: links.length,
-    linkedRoleSkipped,
-    guildRoleSkipped,
-    errors,
-  };
-}
-
-export async function POST(req: Request, { params }: { params: Promise<Params> }) {
+export async function POST(_req: Request, { params }: { params: Promise<Params> }) {
   try {
     const { gameName, tagLine } = await params;
     const gameNameRaw = safeDecode(gameName).trim();
-    const tagLineRaw = safeDecode(tagLine).trim().toLowerCase();
-    const body = (await req.json().catch(() => ({}))) as {
-      force?: boolean;
-      syncTftMatches?: boolean;
-      matchesCount?: number;
-    };
-
+    const tagLineRaw = safeDecode(tagLine).trim();
     if (!gameNameRaw || !tagLineRaw) {
       return NextResponse.json({ ok: false, error: "Missing Riot ID" }, { status: 400 });
     }
 
-    if (body.syncTftMatches !== false && !hasTftApiKey()) {
-      return NextResponse.json(
-        { ok: false, error: "Missing RIOT_TFT_API_KEY or RIOT_API_KEY; TFT match history cannot sync." },
-        { status: 500 }
-      );
-    }
-
     await dbConnect();
-
-    const player = await Player.findOne(buildPlayerLookupQuery(gameNameRaw, tagLineRaw), { _id: 1 }).lean();
+    const player = await Player.findOne(
+      buildPlayerLookupQuery(gameNameRaw, tagLineRaw),
+      { _id: 1, "tft.fetchedAt": 1, "tftMatchSync.lastSyncAt": 1 }
+    ).lean();
     if (!player?._id) {
       return NextResponse.json({ ok: false, error: "Player not found" }, { status: 404 });
     }
 
-    const refreshed = await refreshPlayerById(String(player._id), {
-      force: body.force === true,
-      syncTftMatches: body.syncTftMatches !== false,
-      matchesCount: Math.max(1, Math.min(50, Number(body.matchesCount ?? 20) || 20)),
+    return NextResponse.json({
+      ok: true,
+      refreshed: false,
+      automatic: true,
+      lastRefreshAt: player.tftMatchSync?.lastSyncAt ?? player.tft?.fetchedAt ?? null,
+      message: "RiftBoard updates TFT data through its protected background scheduler.",
     });
-    const discordRoleSync = refreshed?._skipped
-      ? { scanned: 0, linkedRoleSkipped: 0, guildRoleSkipped: 0, errors: [] }
-      : await syncDiscordRolesForPlayer(String(refreshed?._id ?? player._id));
-
-    return NextResponse.json({ ok: true, player: refreshed, discordRoleSync });
   } catch (error) {
-    return NextResponse.json({ ok: false, error: friendlyRefreshError(error) }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: error instanceof Error ? error.message : "Refresh check failed" },
+      { status: 500 }
+    );
   }
 }

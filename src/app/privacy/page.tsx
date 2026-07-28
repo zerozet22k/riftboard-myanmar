@@ -22,6 +22,24 @@ const sections = [
     ],
   },
   {
+    title: "Cookies and Advertising",
+    body: [
+      "Riftboard uses essential cookies to keep account linking, community access, security, and session features working. These cookies are not used to sell personal information.",
+      "When Google AdSense is enabled, third-party vendors including Google may use cookies or similar technologies to serve and measure ads. Google advertising cookies can support ads based on a visitor's prior visits to Riftboard or other websites.",
+      "Where consent is required, Riftboard will use a Google-certified consent flow before serving personalized advertising. Visitors can manage Google ad personalization or learn more about how Google uses information from partner sites using the links below.",
+    ],
+    links: [
+      {
+        href: "https://policies.google.com/technologies/partner-sites",
+        label: "How Google uses information from partner sites",
+      },
+      {
+        href: "https://adssettings.google.com/",
+        label: "Manage Google ad personalization",
+      },
+    ],
+  },
+  {
     title: "Public vs Private Information",
     body: [
       "Some tournament information is intentionally public inside the community experience, such as team names, bracket status, seeds, and match outcomes.",
@@ -73,6 +91,7 @@ export default function PrivacyPage() {
               This policy explains what Riftboard may store and process for the website, tournament
               features, and the Riftboard Myanmar community bot.
             </p>
+            <p className="mt-3 text-xs text-zinc-500">Last updated July 28, 2026.</p>
           </div>
         </header>
 
@@ -88,6 +107,21 @@ export default function PrivacyPage() {
                   <p key={line}>{line}</p>
                 ))}
               </div>
+              {"links" in section && section.links ? (
+                <div className="mt-4 flex flex-col gap-2 text-sm sm:flex-row sm:flex-wrap">
+                  {section.links.map((link) => (
+                    <a
+                      key={link.href}
+                      href={link.href}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-xl bg-zinc-950/45 px-3 py-2 text-emerald-200 ring-1 ring-white/8 transition hover:bg-white/5 hover:text-emerald-100"
+                    >
+                      {link.label}
+                    </a>
+                  ))}
+                </div>
+              ) : null}
             </article>
           ))}
         </section>
