@@ -1,7 +1,9 @@
 import crypto from "node:crypto";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
+import { ensureStoredDiscordAccount } from "@/lib/discordAccountStore";
 import { dbConnect } from "@/lib/mongodb";
+import { DiscordAccount } from "@/models/discordAccount";
 import { DiscordLink } from "@/models/discordLink";
 import { getCommunityJoinCodes, isCommunityCodeRequired } from "@/lib/runtimeConfig";
 
@@ -127,27 +129,52 @@ export async function hasStoredCommunityAccessForDiscordUser(discordUserId: stri
   if (!isCommunityCodeRequired()) return true;
 
   await dbConnect();
+  const normalizedDiscordUserId = String(discordUserId).trim();
+  const account = await DiscordAccount.exists({
+    discordUserId: normalizedDiscordUserId,
+    communityAccessCodeHash: communityCodeHash(),
+  });
+  if (account) return true;
+
+  // Keep the sibling-link lookup as a migration fallback for access granted
+  // before DiscordAccount became the owner record.
   const link = await DiscordLink.findOne(
-    { discordUserId: String(discordUserId).trim() },
+    {
+      discordUserId: normalizedDiscordUserId,
+      verifiedBinding: true,
+      communityAccessCodeHash: communityCodeHash(),
+    },
     { communityAccessCodeHash: 1 }
   ).lean<StoredCommunityAccessRecord | null>();
 
-  return hasStoredCommunityAccessRecord(link);
+  return Boolean(link);
 }
 
 export async function grantStoredCommunityAccessForDiscordUser(discordUserId: string) {
   if (!isCommunityCodeRequired()) return true;
 
   await dbConnect();
-  const updated = await DiscordLink.updateMany(
-    { discordUserId: String(discordUserId).trim() },
-    {
-      $set: {
-        communityAccessCodeHash: communityCodeHash(),
-        communityAccessGrantedAt: new Date(),
-      },
-    }
-  );
+  const normalizedDiscordUserId = String(discordUserId).trim();
+  await ensureStoredDiscordAccount(normalizedDiscordUserId);
+  const grant = {
+    communityAccessCodeHash: communityCodeHash(),
+    communityAccessGrantedAt: new Date(),
+  };
+  const [updatedAccount, updatedLinks] = await Promise.all([
+    DiscordAccount.updateOne(
+      { discordUserId: normalizedDiscordUserId },
+      { $set: grant }
+    ),
+    DiscordLink.updateMany(
+      { discordUserId: normalizedDiscordUserId },
+      { $set: grant }
+    ),
+  ]);
 
-  return updated.modifiedCount > 0 || updated.matchedCount > 0;
+  return (
+    updatedAccount.modifiedCount > 0 ||
+    updatedAccount.matchedCount > 0 ||
+    updatedLinks.modifiedCount > 0 ||
+    updatedLinks.matchedCount > 0
+  );
 }

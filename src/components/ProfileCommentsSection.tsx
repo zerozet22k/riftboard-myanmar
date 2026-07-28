@@ -32,12 +32,14 @@ export default function ProfileCommentsSection({
   profilePath,
   initialComments,
   viewer,
+  discordConnected,
 }: {
   gameName: string;
   tagLine: string;
   profilePath: string;
   initialComments: ProfileCommentView[];
   viewer: Viewer | null;
+  discordConnected: boolean;
 }) {
   const [comments, setComments] = useState(initialComments);
   const [body, setBody] = useState("");
@@ -166,6 +168,18 @@ export default function ProfileCommentsSection({
               </button>
             </div>
           </form>
+        ) : discordConnected ? (
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-xs text-zinc-500">
+              Connect a Riot account before posting.
+            </div>
+            <Link
+              href={`/discord/linked-roles?returnTo=${encodeURIComponent(profilePath)}`}
+              className="inline-flex rounded-lg bg-emerald-500/90 px-3 py-1.5 text-xs font-semibold text-black transition hover:bg-emerald-400"
+            >
+              Add Riot account
+            </Link>
+          </div>
         ) : (
           <div className="flex items-center justify-between gap-3">
             <div className="text-xs text-zinc-500">Discord login required.</div>

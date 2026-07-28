@@ -694,7 +694,7 @@ export function makeDiscordOAuthUrl(state: string) {
   const query = new URLSearchParams({
     client_id: getDiscordClientId(),
     response_type: "code",
-    scope: "identify connections guilds role_connections.write",
+    scope: "identify guilds role_connections.write",
     redirect_uri: getDiscordRedirectUri(),
     prompt: "consent",
     state,

@@ -16,6 +16,7 @@ import {
   syncDiscordGuildRankRoleForStoredLink,
   syncAllDiscordGuildRankRoles,
 } from "@/lib/discordGuildRoles";
+import { syncOwnedPrimaryDiscordRoles } from "@/lib/discordAccountRoles";
 import {
   ensureDiscordLinkMultiAccountIndexes,
   findPrimaryDiscordLink,
@@ -448,24 +449,13 @@ export async function POST(req: NextRequest) {
     if (!targetUserId) return messageResponse("Pick a Discord user to sync.");
 
     return scheduleDeferredReply(interaction, async () => {
-      const links = await listLinkedAccountsForDiscordUser(targetUserId);
-      if (!links.length) return `<@${targetUserId}> has no saved Riot links.`;
+      const primary = await findPrimaryDiscordLink(targetUserId);
+      if (!primary?._id) return `<@${targetUserId}> has no saved Riot links.`;
 
-      let ok = 0;
-      const errors: string[] = [];
-      for (const linked of links) {
-        try {
-          await syncDiscordGuildRankRoleForStoredLink(String(linked._id), { force: true });
-          ok++;
-        } catch (error) {
-          errors.push(`${linked.gameName}#${linked.tagLine}: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
-
-      return [
-        `Synced <@${targetUserId}>: ${ok}/${links.length} Riot links.`,
-        errors.length ? `Errors: ${errors.slice(0, 2).join(" | ")}${errors.length > 2 ? " | ..." : ""}` : "",
-      ].filter(Boolean).join("\n");
+      const synced = await syncOwnedPrimaryDiscordRoles(targetUserId, primary._id);
+      return synced.outcome === "success"
+        ? `Synced <@${targetUserId}>'s primary Riot account: ${synced.riotId}.`
+        : `Primary account is ${synced.riotId}, but Discord role sync ${synced.outcome === "partial" ? "only partially finished" : "failed"}.`;
     });
   }
 
@@ -510,14 +500,25 @@ export async function POST(req: NextRequest) {
     if (!parsed) return messageResponse("Enter Riot ID as GameName#TagLine.");
 
     const wanted = `${parsed.gameName}#${parsed.tagLine}`.toLowerCase();
-    const links = await listLinkedAccountsForDiscordUser(userId);
-    const match = links.find((entry) => `${entry.gameName}#${entry.tagLine}`.toLowerCase() === wanted);
-    if (!match?._id) {
-      return messageResponse("That Riot account is not saved under your Discord. Link it first.");
-    }
+    return scheduleDeferredReply(interaction, async () => {
+      const links = await listLinkedAccountsForDiscordUser(userId);
+      const match = links.find(
+        (entry) => `${entry.gameName}#${entry.tagLine}`.toLowerCase() === wanted
+      );
+      if (!match?._id) {
+        return "That Riot account is not saved under your Discord. Link it first.";
+      }
 
-    await setPrimaryDiscordLink(userId, match._id);
-    return messageResponse(`Primary Riot account is now ${match.gameName}#${match.tagLine}.`);
+      await setPrimaryDiscordLink(userId, match._id);
+      const synced = await syncOwnedPrimaryDiscordRoles(userId, match._id);
+      const suffix =
+        synced.outcome === "success"
+          ? " Discord roles were synced."
+          : synced.outcome === "partial"
+            ? " Discord role sync only partially finished."
+            : " Discord role sync failed; try again from the account hub.";
+      return `Primary Riot account is now ${match.gameName}#${match.tagLine}.${suffix}`;
+    });
   }
   if (!isVerifiedDiscordLink(link)) {
     return messageResponse(

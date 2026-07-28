@@ -73,7 +73,7 @@ export async function POST(
       {
         playerId: parsed.data.playerId,
         verifiedBinding: true,
-        verificationSource: "discord_connections",
+        verificationSource: { $in: ["discord_connections", "riot_rso"] },
       },
       {
         discordUserId: 1,

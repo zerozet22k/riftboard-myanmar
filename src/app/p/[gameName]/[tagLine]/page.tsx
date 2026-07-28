@@ -840,8 +840,9 @@ export default async function PlayerProfilePage({
               tagLine={canonicalTagLineLower}
               profilePath={canonicalPath}
               initialComments={initialComments}
+              discordConnected={Boolean(viewer?.discordUserId)}
               viewer={
-                viewer
+                viewer?.gameName && viewer.tagLine
                   ? {
                       discordUsername: viewer.discordUsername,
                       gameName: viewer.gameName,

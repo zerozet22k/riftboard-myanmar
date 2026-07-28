@@ -3,23 +3,15 @@ import {
   exchangeDiscordCode,
   getDiscordGuildId,
   getDiscordUser,
-  getDiscordUserConnections,
   getDiscordUserGuilds,
 } from "@/lib/discord";
-import {
-  extractRiotCandidatesFromDiscordConnections,
-  saveVerifiedDiscordLinkFromCandidate,
-  syncDiscordLinkedRoleForStoredLink,
-} from "@/lib/discordLinkedRoles";
-import { syncDiscordGuildRankRoleForStoredLink } from "@/lib/discordGuildRoles";
+import { saveDiscordAccountFromOAuth } from "@/lib/discordAccountStore";
 import {
   clearDiscordOAuthStateCookie,
   clearPendingDiscordBindCookie,
-  makePendingDiscordBindPayload,
   normalizeReturnTo,
   readDiscordOAuthStateCookieValue,
   setDiscordSessionCookie,
-  setPendingDiscordBindCookie,
 } from "@/lib/discordSession";
 import { oauthProviderErrorMessage } from "@/lib/oauthRequest";
 
@@ -42,41 +34,6 @@ function redirectWithStatus(
     url.searchParams.set("returnTo", safeReturnTo);
   }
   return NextResponse.redirect(url);
-}
-
-function redirectAfterLinked(
-  req: NextRequest,
-  returnTo: string,
-  riotId: string,
-  syncFailed: boolean
-) {
-  const target = new URL(normalizeReturnTo(returnTo), req.url);
-  if (target.pathname === "/discord/linked-roles") {
-    target.searchParams.set("status", "linked");
-    target.searchParams.set("riotId", riotId);
-    if (syncFailed) target.searchParams.set("message", "discord-role-sync-failed");
-  }
-  return NextResponse.redirect(target);
-}
-
-async function syncDiscordRoles(linkId: string) {
-  let failed = false;
-
-  try {
-    await syncDiscordLinkedRoleForStoredLink(linkId, { force: true });
-  } catch (error) {
-    failed = true;
-    console.error("[discord/oauth] linked role sync failed", error);
-  }
-
-  try {
-    await syncDiscordGuildRankRoleForStoredLink(linkId, { force: true });
-  } catch (error) {
-    failed = true;
-    console.error("[discord/oauth] guild rank role sync failed", error);
-  }
-
-  return failed;
 }
 
 export async function GET(req: NextRequest) {
@@ -134,12 +91,13 @@ export async function GET(req: NextRequest) {
     return response;
   }
 
+  let connectedDiscordUserId = "";
+
   try {
     const token = await exchangeDiscordCode(code);
-    const [discordUser, guilds, connections] = await Promise.all([
+    const [discordUser, guilds] = await Promise.all([
       getDiscordUser(token.access_token),
       getDiscordUserGuilds(token.access_token),
-      getDiscordUserConnections(token.access_token),
     ]);
 
     const requiredGuildId = String(getDiscordGuildId() ?? "").trim();
@@ -160,83 +118,27 @@ export async function GET(req: NextRequest) {
       return response;
     }
 
-    const candidates = extractRiotCandidatesFromDiscordConnections(connections);
-    if (!candidates.length) {
-      const response = redirectWithStatus(
-        req,
-        "choose",
-        "connect-riot-rso",
-        undefined,
-        storedState.returnTo
-      );
-      setPendingDiscordBindCookie(
-        response,
-        makePendingDiscordBindPayload({
-          discordUserId: discordUser.id,
-          discordUsername: discordUser.global_name || discordUser.username,
-          accessToken: token.access_token,
-          refreshToken: token.refresh_token ?? null,
-          tokenType: token.token_type,
-          scopes: String(token.scope ?? "")
-            .trim()
-            .split(/\s+/)
-            .filter(Boolean),
-          expiresAt: new Date(Date.now() + Math.max(0, token.expires_in - 60) * 1000),
-          candidates: [],
-          returnTo: storedState.returnTo,
-        }),
-        req.nextUrl.protocol === "https:"
-      );
-      clearDiscordOAuthStateCookie(response);
-      return response;
-    }
-
-    if (candidates.length === 1) {
-      const bound = await saveVerifiedDiscordLinkFromCandidate({
-        discordUser,
-        token,
-        candidate: candidates[0],
-      });
-      const syncFailed = await syncDiscordRoles(String(bound.link._id));
-      const response = redirectAfterLinked(
-        req,
-        storedState.returnTo,
-        `${bound.player.gameName}#${bound.player.tagLine}`,
-        syncFailed
-      );
-
-      setDiscordSessionCookie(response, { discordUserId: discordUser.id }, req.nextUrl.protocol === "https:");
-      clearDiscordOAuthStateCookie(response);
-      clearPendingDiscordBindCookie(response);
-      return response;
-    }
+    await saveDiscordAccountFromOAuth({
+      discordUser,
+      token,
+      verifiedGuildId: requiredGuildId,
+    });
+    connectedDiscordUserId = discordUser.id;
 
     const response = redirectWithStatus(
       req,
-      "choose",
-      undefined,
+      "connected",
+      "discord-account-connected",
       undefined,
       storedState.returnTo
     );
-    setPendingDiscordBindCookie(
+    setDiscordSessionCookie(
       response,
-      makePendingDiscordBindPayload({
-        discordUserId: discordUser.id,
-        discordUsername: discordUser.global_name || discordUser.username,
-        accessToken: token.access_token,
-        refreshToken: token.refresh_token ?? null,
-        tokenType: token.token_type,
-        scopes: String(token.scope ?? "")
-          .trim()
-          .split(/\s+/)
-          .filter(Boolean),
-        expiresAt: new Date(Date.now() + Math.max(0, token.expires_in - 60) * 1000),
-        candidates,
-        returnTo: storedState.returnTo,
-      }),
+      { discordUserId: discordUser.id },
       req.nextUrl.protocol === "https:"
     );
     clearDiscordOAuthStateCookie(response);
+    clearPendingDiscordBindCookie(response);
     return response;
   } catch (error) {
     const response = redirectWithStatus(
@@ -246,6 +148,13 @@ export async function GET(req: NextRequest) {
       undefined,
       storedState.returnTo
     );
+    if (connectedDiscordUserId) {
+      setDiscordSessionCookie(
+        response,
+        { discordUserId: connectedDiscordUserId },
+        req.nextUrl.protocol === "https:"
+      );
+    }
     clearDiscordOAuthStateCookie(response);
     clearPendingDiscordBindCookie(response);
     return response;

@@ -274,6 +274,15 @@ async function loadRsoSessionFromCookieValue(
 ): Promise<RsoViewerSession | null> {
   const payload = unsealPayload<RsoSignedSessionPayload>(token);
   if (!payload?.puuid || payload.v !== 1) return null;
+  const issuedAt = Number(payload.issuedAt);
+  if (
+    !Number.isFinite(issuedAt) ||
+    issuedAt <= 0 ||
+    issuedAt > Date.now() + 60_000 ||
+    Date.now() - issuedAt > SESSION_MAX_AGE * 1000
+  ) {
+    return null;
+  }
 
   // Lazy import to avoid circular deps
   const { dbConnect } = await import("@/lib/mongodb");

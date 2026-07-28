@@ -387,6 +387,7 @@ export async function syncDiscordGuildRankRoleForStoredLink(
 
   const link = await DiscordLink.findById(linkId);
   if (!link?._id) throw new Error("Discord link not found.");
+  if (link.isPrimary !== true) throw new Error("primary-account-required");
   if (!canSyncGuildRankRoles(link)) {
     throw new Error("Bind this Discord user before syncing server rank roles.");
   }
@@ -435,11 +436,53 @@ export async function syncDiscordGuildRankRoleForStoredLink(
   return { ...result, skipped: false };
 }
 
+export async function clearDiscordGuildRankRolesForUser(discordUserId: string) {
+  const userId = String(discordUserId ?? "").trim();
+  if (!userId) throw new Error("Missing Discord user ID.");
+
+  const context = await ensureManagedRoleContext();
+  const member = await getDiscordGuildMember({
+    guildId: context.guildId,
+    userId,
+  });
+  const existingRoleIds = new Set(
+    Array.isArray(member.roles) ? member.roles.map((roleId) => String(roleId)) : []
+  );
+  const removableRoles = [...managedRoles(context), context.verifiedRole];
+  let removedRoles = 0;
+
+  for (const role of removableRoles) {
+    if (!existingRoleIds.has(role.id)) continue;
+    await removeDiscordGuildMemberRole({
+      guildId: context.guildId,
+      userId,
+      roleId: role.id,
+      reason: "Remove Riftboard roles after the final Riot account was unlinked",
+    });
+    existingRoleIds.delete(role.id);
+    removedRoles++;
+  }
+
+  let addedBindRole = false;
+  if (!existingRoleIds.has(context.bindRole.id)) {
+    await addDiscordGuildMemberRole({
+      guildId: context.guildId,
+      userId,
+      roleId: context.bindRole.id,
+      reason: "Assign Riftboard bind role after the final Riot account was unlinked",
+    });
+    addedBindRole = true;
+  }
+
+  return { removedRoles, addedBindRole };
+}
+
 export async function syncAllDiscordGuildRankRoles(opts?: SyncAllDiscordGuildRankRolesOptions) {
   await dbConnect();
 
   const links = await DiscordLink.find(
     {
+      isPrimary: true,
       verifiedBinding: true,
       verificationSource: { $in: ["discord_connections", "riot_rso", "legacy_manual"] },
     },

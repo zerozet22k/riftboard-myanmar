@@ -7,7 +7,6 @@ import {
 import { syncDiscordGuildRankRoleForStoredLink } from "@/lib/discordGuildRoles";
 import {
   clearPendingDiscordBindCookie,
-  decodePendingDiscordTokenPayload,
   normalizeReturnTo,
   readPendingDiscordBindCookieValue,
   setDiscordSessionCookie,
@@ -21,7 +20,7 @@ function redirectLinkedRoles(req: NextRequest, status: string, message?: string,
   url.searchParams.set("status", status);
   if (message) url.searchParams.set("message", message);
   if (riotId) url.searchParams.set("riotId", riotId);
-  return NextResponse.redirect(url);
+  return NextResponse.redirect(url, 303);
 }
 
 export async function POST(req: NextRequest) {
@@ -48,39 +47,25 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const decoded = decodePendingDiscordTokenPayload(pending);
-    const expiresIn = decoded.expiresAt
-      ? Math.max(60, Math.floor((decoded.expiresAt.getTime() - Date.now()) / 1000))
-      : 3600;
-
     await dbConnect();
     const bound = await saveVerifiedDiscordLinkFromCandidate({
-      discordUser: {
-        id: pending.discordUserId,
-        username: pending.discordUsername || "Discord User",
-        global_name: pending.discordUsername,
-      },
-      token: {
-        access_token: decoded.accessToken,
-        refresh_token: decoded.refreshToken ?? undefined,
-        token_type: pending.tokenType,
-        expires_in: expiresIn,
-        scope: pending.scopes.join(" "),
-      },
+      discordUserId: pending.discordUserId,
       candidate,
     });
 
     let syncMessage: string | undefined;
-    try {
-      await syncDiscordLinkedRoleForStoredLink(String(bound.link._id), { force: true });
-    } catch {
-      syncMessage = "discord-role-sync-failed";
-    }
+    if (bound.isPrimary) {
+      try {
+        await syncDiscordLinkedRoleForStoredLink(String(bound.link._id), { force: true });
+      } catch {
+        syncMessage = "discord-role-sync-failed";
+      }
 
-    try {
-      await syncDiscordGuildRankRoleForStoredLink(String(bound.link._id), { force: true });
-    } catch {
-      syncMessage = "discord-role-sync-failed";
+      try {
+        await syncDiscordGuildRankRoleForStoredLink(String(bound.link._id), { force: true });
+      } catch {
+        syncMessage = "discord-role-sync-failed";
+      }
     }
 
     const target = new URL(normalizeReturnTo(pending.returnTo), req.url);
@@ -90,7 +75,7 @@ export async function POST(req: NextRequest) {
       if (syncMessage) target.searchParams.set("message", syncMessage);
     }
 
-    const response = NextResponse.redirect(target);
+    const response = NextResponse.redirect(target, 303);
     setDiscordSessionCookie(response, { discordUserId: pending.discordUserId }, req.nextUrl.protocol === "https:");
     clearPendingDiscordBindCookie(response);
     return response;

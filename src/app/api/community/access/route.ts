@@ -20,10 +20,10 @@ export async function POST(req: NextRequest) {
     const failure = new URL("/discord/linked-roles", req.url);
     failure.searchParams.set("status", "error");
     failure.searchParams.set("message", "wrong-community-code");
-    return NextResponse.redirect(failure);
+    return NextResponse.redirect(failure, 303);
   }
 
-  const response = NextResponse.redirect(target);
+  const response = NextResponse.redirect(target, 303);
   const session = await getOptionalDiscordSessionFromRequest(req);
   if (session?.discordUserId) {
     await grantStoredCommunityAccessForDiscordUser(session.discordUserId);

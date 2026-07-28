@@ -432,8 +432,9 @@ export default async function TournamentPage({
               disabled={registrationClosed}
               statusLabel={displayTournamentStatus(tournament.status as never)}
               joinCodeRequired={joinCodeRequired}
+              discordConnected={Boolean(viewer?.discordUserId)}
               viewer={
-                viewer
+                viewer?.gameName && viewer.tagLine
                   ? {
                       discordUserId: viewer.discordUserId,
                       discordUsername: viewer.discordUsername,

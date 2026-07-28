@@ -1,20 +1,15 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { dbConnect } from "@/lib/mongodb";
-import { decryptDiscordSecret } from "@/lib/discord";
+import { loadVerifiedDiscordAccount } from "@/lib/discordAccountStore";
 import { syncDiscordGuildRankRoleForStoredLink } from "@/lib/discordGuildRoles";
 import {
-  ensureFreshDiscordAccessToken,
-  loadStoredDiscordIdentity,
   saveVerifiedDiscordLinkFromRso,
   syncDiscordLinkedRoleForStoredLink,
 } from "@/lib/discordLinkedRoles";
 import {
   clearPendingDiscordBindCookie,
-  decodePendingDiscordTokenPayload,
   getOptionalDiscordSessionFromRequest,
-  normalizeReturnTo as normalizeDiscordReturnTo,
-  readPendingDiscordBindCookieValue,
   setDiscordSessionCookie,
 } from "@/lib/discordSession";
 import {
@@ -65,6 +60,29 @@ async function refreshLinkedPlayer(playerId: unknown) {
   }
 }
 
+function scheduleLinkedAccountRefresh(
+  playerId: unknown,
+  linkId: string,
+  syncRoles: boolean
+) {
+  after(async () => {
+    await refreshLinkedPlayer(playerId);
+    if (!syncRoles) return;
+
+    try {
+      await syncDiscordLinkedRoleForStoredLink(linkId, { force: true });
+    } catch (error) {
+      console.error("[riot/oauth] Discord linked-role sync failed", error);
+    }
+
+    try {
+      await syncDiscordGuildRankRoleForStoredLink(linkId, { force: true });
+    } catch (error) {
+      console.error("[riot/oauth] Discord guild role sync failed", error);
+    }
+  });
+}
+
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
   const stateParam = req.nextUrl.searchParams.get("state");
@@ -74,10 +92,6 @@ export async function GET(req: NextRequest) {
   const savedState = readRsoOAuthStateCookieValue(
     req.cookies.get("rso_oauth_state")?.value
   );
-  const pendingDiscordBind = readPendingDiscordBindCookieValue(
-    req.cookies.get("discord_pending_bind")?.value
-  );
-
   /* ---- missing or invalid state => incomplete/invalid OAuth flow ---- */
   if (!stateParam || !savedState) {
     const response = redirectOAuthError(req, savedState?.returnTo, "missing-rso-state");
@@ -126,7 +140,12 @@ export async function GET(req: NextRequest) {
     if (!account?.gameName || !account?.tagLine) {
       throw new Error("Could not resolve Riot ID from RSO");
     }
-    const puuid = account.puuid || userInfo.sub;
+    const userInfoPuuid = String(userInfo.sub).trim();
+    const accountPuuid = String(account.puuid ?? "").trim();
+    if (accountPuuid && accountPuuid !== userInfoPuuid) {
+      throw new Error("riot-id-puuid-conflict");
+    }
+    const puuid = accountPuuid || userInfoPuuid;
 
     /* ---- find or create player ---- */
     await dbConnect();
@@ -134,14 +153,21 @@ export async function GET(req: NextRequest) {
     const gameNameNorm = normalizeRiotIdPart(account.gameName);
     const tagLineNorm = normalizeRiotIdPart(account.tagLine);
 
-    let player = await Player.findOne({ puuid }).lean();
-
-    if (!player) {
-      player = await Player.findOne({
-        gameNameNorm,
-        tagLineNorm,
-      }).lean();
+    const [playerByPuuid, playerByRiotId] = await Promise.all([
+      Player.findOne({ puuid }).lean(),
+      Player.findOne({ gameNameNorm, tagLineNorm }).lean(),
+    ]);
+    const riotIdPuuid = String(playerByRiotId?.puuid ?? "").trim();
+    if (
+      (riotIdPuuid && riotIdPuuid !== puuid) ||
+      (playerByPuuid &&
+        playerByRiotId &&
+        String(playerByPuuid._id) !== String(playerByRiotId._id))
+    ) {
+      throw new Error("riot-id-puuid-conflict");
     }
+
+    let player = playerByPuuid ?? playerByRiotId;
 
     if (!player) {
       const created = await Player.create({
@@ -159,57 +185,10 @@ export async function GET(req: NextRequest) {
       await Player.updateOne({ _id: player._id }, { $set: { puuid } });
     }
 
-    if (pendingDiscordBind && player?._id && player.gameName && player.tagLine) {
-      const decodedDiscord = decodePendingDiscordTokenPayload(pendingDiscordBind);
-      const bound = await saveVerifiedDiscordLinkFromRso({
-        discordUserId: pendingDiscordBind.discordUserId,
-        discordUsername: pendingDiscordBind.discordUsername,
-        accessToken: decodedDiscord.accessToken,
-        refreshToken: decodedDiscord.refreshToken,
-        tokenType: pendingDiscordBind.tokenType,
-        scopes: pendingDiscordBind.scopes,
-        expiresAt: decodedDiscord.expiresAt,
-        player: {
-          _id: player._id,
-          gameName: player.gameName ?? account.gameName,
-          tagLine: player.tagLine ?? account.tagLine,
-        },
-      });
-
-      await refreshLinkedPlayer(player._id);
-
-      let syncFailed = false;
-      try {
-        await syncDiscordLinkedRoleForStoredLink(String(bound.link._id), { force: true });
-      } catch (error) {
-        syncFailed = true;
-        console.error("[riot/oauth] Discord linked-role sync failed", error);
-      }
-
-      try {
-        await syncDiscordGuildRankRoleForStoredLink(String(bound.link._id), { force: true });
-      } catch (error) {
-        syncFailed = true;
-        console.error("[riot/oauth] Discord guild role sync failed", error);
-      }
-
-      const target = new URL(normalizeDiscordReturnTo(pendingDiscordBind.returnTo), req.url);
-      if (target.pathname === "/discord/linked-roles") {
-        target.searchParams.set("status", "linked");
-        target.searchParams.set("riotId", `${bound.player.gameName}#${bound.player.tagLine}`);
-        if (syncFailed) target.searchParams.set("message", "discord-role-sync-failed");
-      }
-
-      const response = NextResponse.redirect(target);
-      setRsoSessionCookie(response, { puuid }, req.nextUrl.protocol === "https:");
-      setDiscordSessionCookie(response, { discordUserId: pendingDiscordBind.discordUserId }, req.nextUrl.protocol === "https:");
-      clearRsoOAuthStateCookie(response);
-      clearPendingDiscordBindCookie(response);
-      return response;
-    }
-
     if (savedState.bindDiscordAccount && player?._id && player.gameName && player.tagLine) {
-      const discordSession = await getOptionalDiscordSessionFromRequest(req);
+      const discordSession = await getOptionalDiscordSessionFromRequest(req, {
+        verifyGuildMembership: true,
+      });
       if (!discordSession?.discordUserId) {
         const target = new URL("/discord/linked-roles", req.url);
         target.searchParams.set("status", "error");
@@ -220,16 +199,9 @@ export async function GET(req: NextRequest) {
         return response;
       }
 
-      const identity = await loadStoredDiscordIdentity(discordSession.discordUserId);
-      const accessToken = await ensureFreshDiscordAccessToken(identity.link);
+      await loadVerifiedDiscordAccount(discordSession.discordUserId);
       const bound = await saveVerifiedDiscordLinkFromRso({
         discordUserId: discordSession.discordUserId,
-        discordUsername: identity.link.discordUsername ?? discordSession.discordUsername,
-        accessToken,
-        refreshToken: identity.link.refreshTokenEnc ? decryptDiscordSecret(identity.link.refreshTokenEnc) : null,
-        tokenType: identity.link.tokenType,
-        scopes: identity.link.scopes ?? [],
-        expiresAt: identity.link.expiresAt ?? null,
         player: {
           _id: player._id,
           gameName: player.gameName ?? account.gameName,
@@ -237,28 +209,16 @@ export async function GET(req: NextRequest) {
         },
       });
 
-      await refreshLinkedPlayer(player._id);
-
-      let syncFailed = false;
-      try {
-        await syncDiscordLinkedRoleForStoredLink(String(bound.link._id), { force: true });
-      } catch (error) {
-        syncFailed = true;
-        console.error("[riot/oauth] Discord linked-role sync failed", error);
-      }
-
-      try {
-        await syncDiscordGuildRankRoleForStoredLink(String(bound.link._id), { force: true });
-      } catch (error) {
-        syncFailed = true;
-        console.error("[riot/oauth] Discord guild role sync failed", error);
-      }
+      scheduleLinkedAccountRefresh(
+        player._id,
+        String(bound.link._id),
+        bound.isPrimary
+      );
 
       const target = new URL(normalizeReturnTo(savedState.returnTo), req.url);
       if (target.pathname === "/discord/linked-roles") {
         target.searchParams.set("status", "linked");
         target.searchParams.set("riotId", `${bound.player.gameName}#${bound.player.tagLine}`);
-        if (syncFailed) target.searchParams.set("message", "discord-role-sync-failed");
       }
 
       const response = NextResponse.redirect(target);

@@ -1,15 +1,13 @@
 import { dbConnect } from "@/lib/mongodb";
 import {
-  decryptDiscordSecret,
-  encryptDiscordSecret,
-  getDiscordGuildId,
-  getDiscordUserGuilds,
-  refreshDiscordToken,
   type DiscordConnection,
-  type DiscordOAuthToken,
-  type DiscordUser,
   updateDiscordRoleConnection,
 } from "@/lib/discord";
+import {
+  ensureFreshDiscordAccountAccessToken,
+  loadStoredDiscordAccount,
+  verifyDiscordGuildMembershipForAccount,
+} from "@/lib/discordAccountStore";
 import { buildPlayerLookupQuery, canonicalPlayerPath } from "@/lib/playerIdentity";
 import { rankScore, TIER_SCORE } from "@/lib/rank";
 import { refreshPlayerById, upsertAndRefreshByRiotId } from "@/lib/refresh";
@@ -19,6 +17,7 @@ import { DiscordLink, type DiscordLinkDoc } from "@/models/discordLink";
 import { Player } from "@/models/player";
 import { syncDiscordGuildRankRoleForStoredLink } from "@/lib/discordGuildRoles";
 import {
+  assertPlayerLinkAvailable,
   ensureDiscordLinkMultiAccountIndexes,
   findPrimaryDiscordLink,
   setPrimaryDiscordLink,
@@ -57,6 +56,14 @@ type SyncDiscordLinkedRoleOptions = {
   force?: boolean;
 };
 
+type StoredDiscordCredentials = {
+  accessTokenEnc: string;
+  refreshTokenEnc: string | null;
+  tokenType: string;
+  scopes: string[];
+  expiresAt: Date | null;
+};
+
 export type DiscordRiotCandidate = {
   id: string;
   riotId: string;
@@ -70,8 +77,6 @@ const TRUSTED_VERIFICATION_SOURCES = ["discord_connections", "riot_rso", "legacy
 const LINKED_ROLE_VERIFICATION_SOURCES = ["discord_connections", "riot_rso"] as const;
 
 const RIOT_CONNECTION_TYPE_PATTERN = /(riot|league)/i;
-const RECENT_GUILD_VERIFICATION_MS = 10 * 60 * 1000;
-
 function normalizeTierValue(tier?: string | null) {
   return tier ? TIER_SCORE[String(tier).toUpperCase()] ?? 0 : 0;
 }
@@ -90,6 +95,41 @@ function sameMetadataSnapshot(
   if (Object.keys(left).length !== rightEntries.length) return false;
 
   return rightEntries.every(([key, value]) => Number(left[key]) === value);
+}
+
+function credentialsFromDiscordAccount(input: {
+  accessTokenEnc: string;
+  refreshTokenEnc?: string | null;
+  tokenType: string;
+  scopes: string[];
+  expiresAt?: Date | null;
+}): StoredDiscordCredentials {
+  return {
+    accessTokenEnc: input.accessTokenEnc,
+    refreshTokenEnc: input.refreshTokenEnc ?? null,
+    tokenType: input.tokenType,
+    scopes: input.scopes,
+    expiresAt: input.expiresAt ?? null,
+  };
+}
+
+async function propagateDiscordCredentials(
+  discordUserId: string,
+  credentials: StoredDiscordCredentials,
+  discordUsername?: string | null
+) {
+  const update: Record<string, unknown> = { ...credentials };
+  if (discordUsername !== undefined) {
+    update.discordUsername = discordUsername;
+  }
+
+  // A Discord OAuth credential belongs to the Discord user, not one Riot
+  // account. A single multi-document update keeps every sibling link on the
+  // same access/refresh token generation.
+  await DiscordLink.updateMany(
+    { discordUserId: String(discordUserId).trim() },
+    { $set: update }
+  );
 }
 
 export function buildDiscordLinkedRoleMetadata(player: PlayerProjection) {
@@ -112,7 +152,7 @@ export function extractRiotCandidatesFromDiscordConnections(connections: Discord
   for (const connection of Array.isArray(connections) ? connections : []) {
     const connectionType = String(connection?.type ?? "").trim();
     if (!RIOT_CONNECTION_TYPE_PATTERN.test(connectionType)) continue;
-    if (connection?.verified === false) continue;
+    if (connection?.verified !== true) continue;
 
     const label = String(connection?.name ?? "").trim();
     const parsed = parseRiotId(label);
@@ -139,6 +179,19 @@ export async function resolvePlayerForDiscordLink(riotIdInput: string) {
   const parsed = parseRiotId(riotIdInput);
   if (!parsed) throw new Error("Discord did not provide a valid Riot ID.");
 
+  await dbConnect();
+  const lookup = buildPlayerLookupQuery(parsed.gameName, parsed.tagLine);
+  const existing = await Player.findOne(
+    lookup,
+    {
+      gameName: 1,
+      tagLine: 1,
+      solo: 1,
+      leaderboard: 1,
+    }
+  ).lean<PlayerProjection | null>();
+  if (existing?._id) return existing;
+
   await withRiotRefreshLease(() =>
     upsertAndRefreshByRiotId(
       { gameName: parsed.gameName, tagLine: parsed.tagLine },
@@ -147,7 +200,7 @@ export async function resolvePlayerForDiscordLink(riotIdInput: string) {
   );
 
   const player = await Player.findOne(
-    buildPlayerLookupQuery(parsed.gameName, parsed.tagLine),
+    lookup,
     {
       gameName: 1,
       tagLine: 1,
@@ -162,57 +215,27 @@ export async function resolvePlayerForDiscordLink(riotIdInput: string) {
 
 export async function ensureFreshDiscordAccessToken(linkInput: DiscordLinkDocument) {
   const link = toDiscordLinkDocument(linkInput);
-  let accessToken = decryptDiscordSecret(link.accessTokenEnc);
-
-  if (link.expiresAt && link.expiresAt.getTime() <= Date.now()) {
-    if (!link.refreshTokenEnc) {
-      throw new Error("Discord authorization expired. Reconnect your Discord account.");
-    }
-
-    const refreshed = await refreshDiscordToken(decryptDiscordSecret(link.refreshTokenEnc));
-    accessToken = refreshed.access_token;
-    link.accessTokenEnc = encryptDiscordSecret(refreshed.access_token);
-    link.refreshTokenEnc = refreshed.refresh_token
-      ? encryptDiscordSecret(refreshed.refresh_token)
-      : link.refreshTokenEnc;
-    link.tokenType = refreshed.token_type;
-    link.scopes = String(refreshed.scope ?? "")
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean);
-    link.expiresAt = new Date(Date.now() + Math.max(0, refreshed.expires_in - 60) * 1000);
-    await link.save();
-  }
-
+  const account = await loadStoredDiscordAccount(String(link.discordUserId));
+  const accessToken = await ensureFreshDiscordAccountAccessToken(account);
+  link.accessTokenEnc = account.accessTokenEnc;
+  link.refreshTokenEnc = account.refreshTokenEnc ?? null;
+  link.tokenType = account.tokenType;
+  link.scopes = account.scopes ?? [];
+  link.expiresAt = account.expiresAt ?? null;
   return accessToken;
 }
 
 export async function verifyDiscordGuildMembershipForLink(linkInput: DiscordLinkDocument) {
   const link = toDiscordLinkDocument(linkInput);
-  const guildId = String(getDiscordGuildId() ?? "").trim();
-  if (!guildId) throw new Error("Missing env: DISCORD_GUILD_ID");
-
-  const accessToken = await ensureFreshDiscordAccessToken(link);
-  const lastVerifiedAt = link.lastVerifiedAt ? new Date(link.lastVerifiedAt).getTime() : 0;
-  if (
-    lastVerifiedAt &&
-    Number.isFinite(lastVerifiedAt) &&
-    Date.now() - lastVerifiedAt < RECENT_GUILD_VERIFICATION_MS &&
-    String(link.lastVerifiedGuildId ?? "").trim() === guildId
-  ) {
-    return accessToken;
-  }
-
-  const guilds = await getDiscordUserGuilds(accessToken);
-  const isMember = guilds.some((guild) => String(guild?.id ?? "").trim() === guildId);
-
-  if (!isMember) {
-    throw new Error("Join the Riftboard Discord server before using this feature.");
-  }
-
-  link.lastVerifiedAt = new Date();
-  link.lastVerifiedGuildId = guildId;
-  await link.save();
+  const account = await loadStoredDiscordAccount(String(link.discordUserId));
+  const accessToken = await verifyDiscordGuildMembershipForAccount(account);
+  link.accessTokenEnc = account.accessTokenEnc;
+  link.refreshTokenEnc = account.refreshTokenEnc ?? null;
+  link.tokenType = account.tokenType;
+  link.scopes = account.scopes ?? [];
+  link.expiresAt = account.expiresAt ?? null;
+  link.lastVerifiedAt = account.lastVerifiedAt ?? null;
+  link.lastVerifiedGuildId = account.lastVerifiedGuildId ?? null;
   return accessToken;
 }
 
@@ -241,40 +264,45 @@ export async function loadVerifiedDiscordIdentity(discordUserId: string) {
 }
 
 export async function saveVerifiedDiscordLinkFromCandidate(input: {
-  discordUser: DiscordUser;
-  token: DiscordOAuthToken;
+  discordUserId: string;
   candidate: DiscordRiotCandidate;
 }) {
   const player = await resolvePlayerForDiscordLink(input.candidate.riotId);
-  const guildId = String(getDiscordGuildId() ?? "").trim();
-  const now = new Date();
+  const account = await loadStoredDiscordAccount(input.discordUserId);
+  const discordUsername = account.discordUsername ?? "Discord User";
   await ensureDiscordLinkMultiAccountIndexes();
-  await DiscordLink.deleteMany({
-    playerId: player._id,
-    discordUserId: { $ne: input.discordUser.id },
-  } as Record<string, unknown>);
+  await assertPlayerLinkAvailable(input.discordUserId, player._id);
+  const [existingLink, currentPrimary] = await Promise.all([
+    DiscordLink.findOne(
+      { discordUserId: input.discordUserId, playerId: player._id },
+      { isPrimary: 1 }
+    ).lean<{ isPrimary?: boolean } | null>(),
+    findPrimaryDiscordLink(input.discordUserId),
+  ]);
+  const useForRoles =
+    existingLink?.isPrimary === true || !currentPrimary?._id;
+  const credentials = credentialsFromDiscordAccount({
+    accessTokenEnc: account.accessTokenEnc,
+    refreshTokenEnc: account.refreshTokenEnc,
+    tokenType: account.tokenType,
+    scopes: account.scopes ?? [],
+    expiresAt: account.expiresAt,
+  });
 
   const saved = await DiscordLink.findOneAndUpdate(
-    { discordUserId: input.discordUser.id, playerId: player._id } as Record<string, unknown>,
+    { discordUserId: input.discordUserId, playerId: player._id } as Record<string, unknown>,
     {
       $set: {
-        discordUsername: input.discordUser.global_name || input.discordUser.username,
+        discordUsername,
         playerId: player._id,
-        isPrimary: true,
+        isPrimary: useForRoles,
         gameName: player.gameName,
         tagLine: player.tagLine,
-        accessTokenEnc: encryptDiscordSecret(input.token.access_token),
-        refreshTokenEnc: input.token.refresh_token ? encryptDiscordSecret(input.token.refresh_token) : null,
-        tokenType: input.token.token_type,
-        scopes: String(input.token.scope ?? "")
-          .trim()
-          .split(/\s+/)
-          .filter(Boolean),
-        expiresAt: new Date(Date.now() + Math.max(0, input.token.expires_in - 60) * 1000),
+        ...credentials,
         verifiedBinding: true,
         verificationSource: "discord_connections",
-        lastVerifiedAt: now,
-        lastVerifiedGuildId: guildId || null,
+        lastVerifiedAt: account.lastVerifiedAt ?? null,
+        lastVerifiedGuildId: account.lastVerifiedGuildId ?? null,
         proofConnectionType: input.candidate.connectionType,
         proofConnectionLabel: input.candidate.connectionLabel,
       },
@@ -282,51 +310,56 @@ export async function saveVerifiedDiscordLinkFromCandidate(input: {
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
   const savedLink = toDiscordLinkDocument(saved);
-  await setPrimaryDiscordLink(input.discordUser.id, savedLink._id);
+  await propagateDiscordCredentials(input.discordUserId, credentials, discordUsername);
+  if (useForRoles) {
+    await setPrimaryDiscordLink(input.discordUserId, savedLink._id);
+  }
 
-  return { link: savedLink, player };
+  return { link: savedLink, player, isPrimary: useForRoles };
 }
 
 export async function saveVerifiedDiscordLinkFromRso(input: {
   discordUserId: string;
-  discordUsername: string | null;
-  accessToken: string;
-  refreshToken?: string | null;
-  tokenType: string;
-  scopes: string[];
-  expiresAt?: Date | null;
   player: {
     _id: unknown;
     gameName: string;
     tagLine: string;
   };
 }) {
-  const guildId = String(getDiscordGuildId() ?? "").trim();
-  const now = new Date();
+  const account = await loadStoredDiscordAccount(input.discordUserId);
   await ensureDiscordLinkMultiAccountIndexes();
-  await DiscordLink.deleteMany({
-    playerId: input.player._id,
-    discordUserId: { $ne: input.discordUserId },
-  } as Record<string, unknown>);
+  await assertPlayerLinkAvailable(input.discordUserId, input.player._id);
+  const [existingLink, currentPrimary] = await Promise.all([
+    DiscordLink.findOne(
+      { discordUserId: input.discordUserId, playerId: input.player._id },
+      { isPrimary: 1 }
+    ).lean<{ isPrimary?: boolean } | null>(),
+    findPrimaryDiscordLink(input.discordUserId),
+  ]);
+  const useForRoles =
+    existingLink?.isPrimary === true || !currentPrimary?._id;
+  const credentials = credentialsFromDiscordAccount({
+    accessTokenEnc: account.accessTokenEnc,
+    refreshTokenEnc: account.refreshTokenEnc,
+    tokenType: account.tokenType,
+    scopes: account.scopes ?? [],
+    expiresAt: account.expiresAt,
+  });
 
   const saved = await DiscordLink.findOneAndUpdate(
     { discordUserId: input.discordUserId, playerId: input.player._id } as Record<string, unknown>,
     {
       $set: {
-        discordUsername: input.discordUsername,
+        discordUsername: account.discordUsername ?? null,
         playerId: input.player._id,
-        isPrimary: true,
+        isPrimary: useForRoles,
         gameName: input.player.gameName,
         tagLine: input.player.tagLine,
-        accessTokenEnc: encryptDiscordSecret(input.accessToken),
-        refreshTokenEnc: input.refreshToken ? encryptDiscordSecret(input.refreshToken) : null,
-        tokenType: input.tokenType,
-        scopes: input.scopes,
-        expiresAt: input.expiresAt ?? null,
+        ...credentials,
         verifiedBinding: true,
         verificationSource: "riot_rso",
-        lastVerifiedAt: now,
-        lastVerifiedGuildId: guildId || null,
+        lastVerifiedAt: account.lastVerifiedAt ?? null,
+        lastVerifiedGuildId: account.lastVerifiedGuildId ?? null,
         proofConnectionType: "riot_rso",
         proofConnectionLabel: `${input.player.gameName}#${input.player.tagLine}`,
       },
@@ -334,9 +367,16 @@ export async function saveVerifiedDiscordLinkFromRso(input: {
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
   const savedLink = toDiscordLinkDocument(saved);
-  await setPrimaryDiscordLink(input.discordUserId, savedLink._id);
+  await propagateDiscordCredentials(
+    input.discordUserId,
+    credentials,
+    account.discordUsername ?? null
+  );
+  if (useForRoles) {
+    await setPrimaryDiscordLink(input.discordUserId, savedLink._id);
+  }
 
-  return { link: savedLink, player: input.player };
+  return { link: savedLink, player: input.player, isPrimary: useForRoles };
 }
 
 export async function syncDiscordLinkedRoleForStoredLink(
@@ -346,6 +386,7 @@ export async function syncDiscordLinkedRoleForStoredLink(
   await dbConnect();
   const link = await DiscordLink.findById(linkId);
   if (!link?._id) throw new Error("Discord link not found.");
+  if (link.isPrimary !== true) throw new Error("primary-account-required");
   if (
     !link.verifiedBinding ||
     !LINKED_ROLE_VERIFICATION_SOURCES.includes(link.verificationSource as "discord_connections" | "riot_rso")

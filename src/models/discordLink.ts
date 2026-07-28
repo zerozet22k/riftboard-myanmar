@@ -66,6 +66,22 @@ const DiscordLinkSchema = new Schema<DiscordLinkDoc>(
 DiscordLinkSchema.index({ discordUserId: 1, isPrimary: -1, updatedAt: -1 });
 DiscordLinkSchema.index({ discordUserId: 1, playerId: 1 }, { unique: true });
 DiscordLinkSchema.index({ playerId: 1, updatedAt: -1 });
+DiscordLinkSchema.index(
+  { playerId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { verifiedBinding: true },
+    name: "verified_player_owner_unique",
+  }
+);
+DiscordLinkSchema.index(
+  { discordUserId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { verifiedBinding: true, isPrimary: true },
+    name: "verified_primary_per_discord_unique",
+  }
+);
 
 export const DiscordLink =
   (mongoose.models.DiscordLink as mongoose.Model<DiscordLinkDoc>) ??

@@ -63,6 +63,7 @@ export default function TournamentRegisterForm({
   statusLabel,
   joinCodeRequired,
   viewer,
+  discordConnected,
   viewerTeam,
 }: {
   slug: string;
@@ -71,6 +72,7 @@ export default function TournamentRegisterForm({
   statusLabel?: string;
   joinCodeRequired: boolean;
   viewer: Viewer | null;
+  discordConnected: boolean;
   viewerTeam: ViewerTeam | null;
 }) {
   const router = useRouter();
@@ -221,15 +223,31 @@ export default function TournamentRegisterForm({
       {!viewer ? (
         <div className="rounded-[22px] bg-zinc-950/50 p-4 ring-1 ring-white/6">
           <div className="text-sm text-zinc-300">
-            Connect Discord before joining this tournament. Manual Riot roster entry is disabled.
+            {discordConnected
+              ? "Connect a Riot account before joining this tournament."
+              : "Sign in with Discord before joining this tournament."}
           </div>
-          <form action="/api/discord/oauth/start" method="GET" className="mt-4">
+          <form
+            action={
+              discordConnected
+                ? "/api/riot/oauth/start"
+                : "/api/discord/oauth/start"
+            }
+            method="GET"
+            className="mt-4"
+          >
             <input type="hidden" name="returnTo" value={`/tournaments/${slug}`} />
+            {discordConnected ? (
+              <>
+                <input type="hidden" name="bindDiscord" value="1" />
+                <input type="hidden" name="switch" value="1" />
+              </>
+            ) : null}
             <button
               type="submit"
               className="inline-flex rounded-2xl bg-emerald-500/90 px-4 py-3 text-sm font-semibold text-black transition hover:bg-emerald-400"
             >
-              Connect Discord
+              {discordConnected ? "Connect Riot account" : "Continue with Discord"}
             </button>
           </form>
         </div>
