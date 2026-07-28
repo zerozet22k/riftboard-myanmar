@@ -3,6 +3,7 @@ using System.Drawing;
 using System.Net;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using MongoDB.Bson;
 using MongoDB.Driver;
@@ -700,6 +701,18 @@ internal sealed class SettingsForm : Form
         {
             await command();
         }
+        catch (Exception ex)
+        {
+            var failure = RefreshErrorClassifier.Classify(ex);
+            MessageBox.Show(
+                this,
+                failure.Message,
+                $"RiftBoard Refresh - {failure.Title}",
+                MessageBoxButtons.OK,
+                failure.Retryable
+                    ? MessageBoxIcon.Warning
+                    : MessageBoxIcon.Error);
+        }
         finally
         {
             SetBusy(false);
@@ -934,19 +947,24 @@ internal sealed class RefreshLoop
     private readonly Action<DateTimeOffset?> _updateTftNext;
     private readonly Action<DateTimeOffset?> _updateLiveNext;
     private readonly Action<string> _updateLastError;
-    private readonly HttpClient _http = new();
+    private readonly HttpClient _http = new()
+    {
+        Timeout = Timeout.InfiniteTimeSpan,
+    };
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly SemaphoreSlim _tickGate = new(1, 1);
-    private readonly Dictionary<RefreshJob, int> _rateLimitStrikes = new();
-    private readonly object _rateLimitSync = new();
+    private readonly Dictionary<RefreshJob, (string Code, int Strikes)> _failureStrikes = new();
+    private readonly Dictionary<RefreshJob, (string Message, DateTimeOffset At)> _jobErrors = new();
+    private readonly object _failureSync = new();
+    private CSharpRefreshService? _directService;
     private CancellationTokenSource? _cts;
     private Task? _rankTask;
     private Task? _queuedRankTask;
     private Task? _tftTask;
     private Task? _liveTask;
-    private bool _lastRankFailed;
-    private bool _lastTftFailed;
-    private bool _lastLiveFailed;
+    private string? _lastRankFailureCode;
+    private string? _lastTftFailureCode;
+    private string? _lastLiveFailureCode;
 
     public RefreshLoop(
         string baseDirectory,
@@ -1074,26 +1092,53 @@ internal sealed class RefreshLoop
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            var config = await AgentConfig.LoadAsync(Path.Combine(_baseDirectory, "config.json"), cancellationToken);
-            var jobConfig = JobConfigFor(config, job);
             var updateStatus = StatusUpdater(job);
             var updateLast = LastUpdater(job);
             var updateNext = NextUpdater(job);
             var logger = LoggerFor(job);
 
+            AgentConfig config;
+            try
+            {
+                config = await AgentConfig.LoadAsync(
+                    Path.Combine(_baseDirectory, "config.json"),
+                    cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                var failure = RefreshErrorClassifier.Classify(ex);
+                logger.Error(RefreshErrorClassifier.SafeDiagnostic("Config load", ex));
+                updateStatus($"{failure.Title} - {failure.Message}");
+                updateLast($"{DateTimeOffset.Now:hh:mm tt} - failed");
+                SetJobError(job, failure.Message);
+                SetFailureState(job, failure, failure.Message);
+                _updateState("running");
+                _updateCurrent("Idle");
+                updateNext(DateTimeOffset.Now.AddMinutes(1));
+                await Task.Delay(TimeSpan.FromMinutes(1), cancellationToken);
+                continue;
+            }
+
+            var jobConfig = JobConfigFor(config, job);
             if (!jobConfig.Enabled)
             {
                 updateStatus("Off");
                 updateNext(null);
+                SetJobError(job, null);
+                SetFailureState(job, null);
                 await Task.Delay(TimeSpan.FromSeconds(10), cancellationToken);
                 continue;
             }
 
             var startedAt = DateTimeOffset.Now;
-            var rateLimited = false;
+            RefreshFailureInfo? failureInfo = null;
+            int? retryAfterMs = null;
             updateNext(null);
             updateStatus($"{JobLabel(job)} - queued");
-            _updateLastError("None");
 
             try
             {
@@ -1108,11 +1153,25 @@ internal sealed class RefreshLoop
                     _tickGate.Release();
                 }
 
-                rateLimited = IsRateLimitOutcome(result);
+                var failureText = result.Fail > 0
+                    ? result.ErrorSummary ?? result.LogLine
+                    : null;
+                failureInfo = result.Failure ??
+                    (string.IsNullOrWhiteSpace(failureText)
+                        ? null
+                        : RefreshErrorClassifier.Classify(failureText));
+                retryAfterMs = result.RetryAfterMs;
                 logger.Info(result.LogLine);
-                updateStatus(rateLimited ? $"Rate limited - {FormatPhaseStatus(result)}" : FormatPhaseStatus(result));
+                updateStatus(
+                    failureInfo?.Code == RefreshErrorCodes.RateLimited
+                        ? $"Rate limited - {FormatPhaseStatus(result)}"
+                        : FormatPhaseStatus(result));
                 updateLast($"{DateTimeOffset.Now:hh:mm tt} - {result.Ok} saved, {result.Skipped} unchanged{(result.Fail > 0 ? $", {result.Fail} failed" : string.Empty)}");
-                SetFailureState(job, result.Fail > 0, result.ErrorSummary ?? result.LogLine);
+                SetJobError(job, failureText);
+                SetFailureState(
+                    job,
+                    result.Fail > 0 ? failureInfo : null,
+                    failureText);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -1120,19 +1179,33 @@ internal sealed class RefreshLoop
             }
             catch (Exception ex)
             {
-                rateLimited = IsRateLimitSignal(ex);
-                logger.Error(ex.ToString());
-                updateStatus(rateLimited ? $"Rate limited - {ex.Message}" : $"Failed - {ex.Message}");
+                failureInfo = RefreshErrorClassifier.Classify(ex);
+                retryAfterMs = ex switch
+                {
+                    CronApiException cron => cron.RetryAfterMs,
+                    RiotApiException riot => riot.RetryAfterMs,
+                    DiscordApiException discord => discord.RetryAfterMs,
+                    _ => retryAfterMs,
+                };
+                logger.Error(RefreshErrorClassifier.SafeDiagnostic(JobLabel(job), ex));
+                updateStatus($"{failureInfo.Title} - {failureInfo.Message}");
                 updateLast($"{DateTimeOffset.Now:hh:mm tt} - failed");
-                _updateLastError(ex.Message);
-                SetFailureState(job, true, ex.Message);
+                SetJobError(job, failureInfo.Message);
+                SetFailureState(job, failureInfo, failureInfo.Message);
             }
 
             var elapsed = DateTimeOffset.Now - startedAt;
-            var delay = ComputeNextDelay(job, jobConfig, elapsed, rateLimited);
-            if (rateLimited)
+            var delay = ComputeNextDelay(
+                job,
+                jobConfig,
+                elapsed,
+                failureInfo,
+                retryAfterMs);
+            if (failureInfo?.BaseBackoffMinutes > 0)
             {
-                logger.Info($"Rate limited; cooling down {Math.Ceiling(delay.TotalMinutes)} minutes before next {JobLabel(job)} run.");
+                logger.Info(
+                    $"{failureInfo.Title}; cooling down {Math.Ceiling(delay.TotalMinutes)} minutes " +
+                    $"before the next {JobLabel(job)} run.");
             }
 
             _updateState("running");
@@ -1144,7 +1217,6 @@ internal sealed class RefreshLoop
 
     private async Task RunQueuedRankRequestsAsync(CancellationToken cancellationToken)
     {
-        var directService = (CSharpRefreshService?)null;
         var pollInterval = TimeSpan.FromSeconds(20);
 
         while (!cancellationToken.IsCancellationRequested)
@@ -1156,13 +1228,11 @@ internal sealed class RefreshLoop
                     cancellationToken);
                 if (!config.CronOnly && config.RankJob.Enabled)
                 {
-                    directService ??= new CSharpRefreshService(_repoRoot);
-
                     await _tickGate.WaitAsync(cancellationToken);
                     CronResult result;
                     try
                     {
-                        result = await directService.RefreshOneQueuedRankAsync(
+                        result = await DirectService().RefreshOneQueuedRankAsync(
                             config.RankJob,
                             cancellationToken);
                     }
@@ -1179,15 +1249,20 @@ internal sealed class RefreshLoop
                             result.Skipped,
                             result.Scanned,
                             BuildCronPlayerSummary(result.Players),
-                            PrefixError("Queued rank", BuildCronErrorSummary(result.Errors)));
+                            PrefixError("Queued rank", BuildCronErrorSummary(result.Errors)),
+                            result.RetryAfterMs,
+                            BuildDominantFailure(result.Errors));
                         _rankLogger.Info($"Queued rank: {outcome.LogLine}");
                         _updateRankStatus(FormatPhaseStatus(outcome));
                         _updateRankLast(
                             $"{DateTimeOffset.Now:hh:mm tt} - {result.Ok} queued rank saved" +
                             (result.Fail > 0 ? $", {result.Fail} failed" : string.Empty));
+                        SetJobError(
+                            RefreshJob.Rank,
+                            result.Fail > 0 ? outcome.ErrorSummary ?? outcome.LogLine : null);
                         SetFailureState(
                             RefreshJob.Rank,
-                            result.Fail > 0,
+                            result.Fail > 0 ? outcome.Failure : null,
                             outcome.ErrorSummary ?? outcome.LogLine);
                     }
                 }
@@ -1198,15 +1273,22 @@ internal sealed class RefreshLoop
             }
             catch (Exception ex)
             {
-                _rankLogger.Error($"Queued rank watcher failed: {ex}");
-                _updateLastError(ex.Message);
+                var failure = RefreshErrorClassifier.Classify(ex);
+                _rankLogger.Error(RefreshErrorClassifier.SafeDiagnostic("Queued rank watcher", ex));
+                SetJobError(RefreshJob.Rank, failure.Message);
+                SetFailureState(RefreshJob.Rank, failure, failure.Message);
             }
 
             await Task.Delay(pollInterval, cancellationToken);
         }
     }
 
-    private TimeSpan ComputeNextDelay(RefreshJob job, JobConfig jobConfig, TimeSpan elapsed, bool rateLimited)
+    private TimeSpan ComputeNextDelay(
+        RefreshJob job,
+        JobConfig jobConfig,
+        TimeSpan elapsed,
+        RefreshFailureInfo? failure,
+        int? retryAfterMs)
     {
         // Schedule from completion, not from the previous start. A slow run must
         // never turn into a one-second catch-up loop that immediately spends the
@@ -1215,55 +1297,116 @@ internal sealed class RefreshLoop
         var minimumIntervalSeconds = job == RefreshJob.Live ? 15 * 60 : 10 * 60;
         var normalDelay = TimeSpan.FromSeconds(Math.Max(minimumIntervalSeconds, jobConfig.IntervalSec));
 
-        if (!rateLimited)
+        if (failure is null || failure.BaseBackoffMinutes <= 0)
         {
-            lock (_rateLimitSync)
+            lock (_failureSync)
             {
-                _rateLimitStrikes[job] = 0;
+                _failureStrikes.Remove(job);
             }
+            if (retryAfterMs is { } idleRetryAfterMs)
+            {
+                var retryAfter = TimeSpan.FromMilliseconds(
+                    Math.Max(1000, idleRetryAfterMs));
+                return retryAfter > normalDelay ? retryAfter : normalDelay;
+            }
+
             return normalDelay;
         }
 
         int strikes;
-        lock (_rateLimitSync)
+        lock (_failureSync)
         {
-            strikes = _rateLimitStrikes.TryGetValue(job, out var previous) ? previous + 1 : 1;
-            _rateLimitStrikes[job] = Math.Min(strikes, 6);
+            strikes = _failureStrikes.TryGetValue(job, out var previous) &&
+                      previous.Code == failure.Code
+                ? previous.Strikes + 1
+                : 1;
+            strikes = Math.Min(strikes, 6);
+            _failureStrikes[job] = (failure.Code, strikes);
         }
 
-        var baseMinutes = job == RefreshJob.Live ? 20 : 10;
-        var maxMinutes = job == RefreshJob.Live ? 90 : 45;
-        var cooldown = TimeSpan.FromMinutes(Math.Min(maxMinutes, baseMinutes * strikes));
+        var maxMinutes = job == RefreshJob.Live ? 90 : 60;
+        var cooldown = TimeSpan.FromMinutes(
+            Math.Min(maxMinutes, failure.BaseBackoffMinutes * strikes));
+        if (retryAfterMs is { } exactRetryAfterMs)
+        {
+            var retryAfter = TimeSpan.FromMilliseconds(Math.Max(1000, exactRetryAfterMs));
+            if (retryAfter > cooldown)
+            {
+                cooldown = retryAfter;
+            }
+        }
         return cooldown > normalDelay ? cooldown : normalDelay;
     }
 
-    private void SetFailureState(RefreshJob job, bool failed, string message)
+    private void SetFailureState(
+        RefreshJob job,
+        RefreshFailureInfo? failure,
+        string? displayMessage = null)
     {
+        var message = string.IsNullOrWhiteSpace(displayMessage)
+            ? failure?.Message ?? string.Empty
+            : RefreshErrorClassifier.SafeText(displayMessage, 360);
+
         if (job == RefreshJob.Rank)
         {
-            if (failed && !_lastRankFailed)
+            if (failure is not null && _lastRankFailureCode != failure.Code)
             {
-                _notify("RiftBoard Rank Failed", TrimForNotification(message), ToolTipIcon.Error);
+                _notify(
+                    $"RiftBoard Rank - {failure.Title}",
+                    TrimForNotification(message),
+                    failure.Retryable ? ToolTipIcon.Warning : ToolTipIcon.Error);
             }
-            _lastRankFailed = failed;
+            _lastRankFailureCode = failure?.Code;
             return;
         }
 
         if (job == RefreshJob.Tft)
         {
-            if (failed && !_lastTftFailed)
+            if (failure is not null && _lastTftFailureCode != failure.Code)
             {
-                _notify("RiftBoard TFT Failed", TrimForNotification(message), ToolTipIcon.Error);
+                _notify(
+                    $"RiftBoard TFT - {failure.Title}",
+                    TrimForNotification(message),
+                    failure.Retryable ? ToolTipIcon.Warning : ToolTipIcon.Error);
             }
-            _lastTftFailed = failed;
+            _lastTftFailureCode = failure?.Code;
             return;
         }
 
-        if (failed && !_lastLiveFailed)
+        if (failure is not null && _lastLiveFailureCode != failure.Code)
         {
-            _notify("RiftBoard Live Games Failed", TrimForNotification(message), ToolTipIcon.Error);
+            _notify(
+                $"RiftBoard Live Games - {failure.Title}",
+                TrimForNotification(message),
+                failure.Retryable ? ToolTipIcon.Warning : ToolTipIcon.Error);
         }
-        _lastLiveFailed = failed;
+        _lastLiveFailureCode = failure?.Code;
+    }
+
+    private void SetJobError(RefreshJob job, string? message)
+    {
+        message = RefreshErrorClassifier.SafeText(message, 360);
+        string latest;
+        lock (_failureSync)
+        {
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                _jobErrors.Remove(job);
+            }
+            else
+            {
+                _jobErrors[job] = (message, DateTimeOffset.Now);
+            }
+
+            latest = _jobErrors.Count == 0
+                ? "None"
+                : _jobErrors.Values
+                    .OrderByDescending(error => error.At)
+                    .First()
+                    .Message;
+        }
+
+        _updateLastError(latest);
     }
 
     private async Task<TickOutcome> RunTickJobAsync(RefreshJob job, AgentConfig config, JobConfig jobConfig, CancellationToken cancellationToken)
@@ -1271,7 +1414,7 @@ internal sealed class RefreshLoop
         _updateCurrent(JobLabel(job));
         var result = config.CronOnly
             ? await RunRemoteCronJobAsync(job, config, jobConfig, cancellationToken)
-            : await new CSharpRefreshService(_repoRoot).RefreshAsync(job, jobConfig, cancellationToken);
+            : await DirectService().RefreshAsync(job, jobConfig, cancellationToken);
 
         return new TickOutcome(
             result.Ok,
@@ -1279,8 +1422,13 @@ internal sealed class RefreshLoop
             result.Skipped,
             result.Scanned,
             BuildCronPlayerSummary(result.Players),
-            PrefixError(JobLabel(job), BuildCronErrorSummary(result.Errors)));
+            PrefixError(JobLabel(job), BuildCronErrorSummary(result.Errors)),
+            result.RetryAfterMs,
+            BuildDominantFailure(result.Errors));
     }
+
+    private CSharpRefreshService DirectService() =>
+        _directService ??= new CSharpRefreshService(_repoRoot);
 
     private async Task<CronResult> RunRemoteCronJobAsync(
         RefreshJob job,
@@ -1325,7 +1473,36 @@ internal sealed class RefreshLoop
 
         using var request = new HttpRequestMessage(HttpMethod.Get, url.Uri);
         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", config.CronToken);
-        using var response = await _http.SendAsync(request, cancellationToken);
+        using var timeoutSource =
+            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutSource.CancelAfter(TimeSpan.FromSeconds(
+            EstimateRefreshTimeoutSeconds(jobConfig, config.StartupTimeoutSec)));
+        HttpResponseMessage response;
+        try
+        {
+            response = await _http.SendAsync(request, timeoutSource.Token);
+        }
+        catch (OperationCanceledException ex) when (
+            !cancellationToken.IsCancellationRequested &&
+            timeoutSource.IsCancellationRequested)
+        {
+            throw new CronApiException(
+                408,
+                "The website refresh request timed out.",
+                null,
+                ex);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new CronApiException(
+                0,
+                "The tray could not reach the RiftBoard website.",
+                null,
+                ex);
+        }
+
+        using (response)
+        {
         var text = await response.Content.ReadAsStringAsync(cancellationToken);
         CronResponse? payload = null;
         try
@@ -1336,14 +1513,79 @@ internal sealed class RefreshLoop
         {
         }
 
-        if (!response.IsSuccessStatusCode || payload?.Ok != true)
+        var retryAfterMs = GetResponseRetryAfterMilliseconds(response);
+        if (response.IsSuccessStatusCode && payload is null)
         {
-            var error = payload?.Error;
-            if (string.IsNullOrWhiteSpace(error)) error = string.IsNullOrWhiteSpace(text) ? response.ReasonPhrase : text;
-            throw new InvalidOperationException($"Cron {(int)response.StatusCode}: {error}");
+            throw new JsonException(
+                "The website refresh response was not valid JSON.");
         }
 
-        return payload.Result ?? new CronResult();
+        if (
+            (int)response.StatusCode == 202 &&
+            payload?.Ok == true &&
+            payload.Skipped)
+        {
+            var busy = payload.Result ?? new CronResult();
+            busy.Skipped = Math.Max(1, busy.Skipped);
+            busy.RetryAfterMs = retryAfterMs;
+            busy.Players.Add(new CronPlayer
+            {
+                Name = string.IsNullOrWhiteSpace(payload.Reason)
+                    ? "Another refresh is already running"
+                    : RefreshErrorClassifier.SafeText(payload.Reason, 180),
+                Status = "skipped",
+            });
+            return busy;
+        }
+
+        if ((int)response.StatusCode == 429)
+        {
+            var partial = payload?.Result ?? new CronResult();
+            var failure = RefreshErrorClassifier.Classify(
+                new CronApiException(
+                    429,
+                    payload?.Error ?? "Refresh rate limit reached.",
+                    retryAfterMs));
+            partial.Fail = Math.Max(1, partial.Fail);
+            partial.RetryAfterMs = retryAfterMs ??
+                partial.RetryAfterMs ??
+                (int)TimeSpan.FromMinutes(failure.BaseBackoffMinutes).TotalMilliseconds;
+            if (!partial.Errors.Any(error =>
+                    RefreshErrorClassifier.Classify(error).Code ==
+                    RefreshErrorCodes.RateLimited))
+            {
+                partial.Errors.Add(new CronError
+                {
+                    Name = "Remote refresh",
+                    Error = failure.Message,
+                    Code = failure.Code,
+                    Retryable = failure.Retryable,
+                    UpstreamStatus = failure.Status,
+                });
+            }
+            return partial;
+        }
+
+        if (!response.IsSuccessStatusCode || payload?.Ok != true)
+        {
+            var error = string.IsNullOrWhiteSpace(payload?.Error)
+                ? response.ReasonPhrase ?? "Refresh request failed"
+                : payload.Error;
+            throw new CronApiException(
+                (int)response.StatusCode,
+                RefreshErrorClassifier.SafeText(error, 300),
+                retryAfterMs);
+        }
+
+        if (payload.Result is null)
+        {
+            throw new JsonException(
+                "The website refresh response did not contain a result.");
+        }
+
+        payload.Result.RetryAfterMs ??= retryAfterMs;
+        return payload.Result;
+        }
     }
 
     private static string JobLabel(RefreshJob job)
@@ -1412,17 +1654,55 @@ internal sealed class RefreshLoop
             return null;
         }
 
-        var parts = errors
-            .Take(3)
-            .Select(error =>
+        var classified = errors
+            .Select(error => new
             {
-                var name = string.IsNullOrWhiteSpace(error.Name) ? error.PlayerId : error.Name;
-                return string.IsNullOrWhiteSpace(name) ? error.Error : $"{name}: {error.Error}";
+                Error = error,
+                Failure = RefreshErrorClassifier.Classify(error),
             })
-            .Where(part => !string.IsNullOrWhiteSpace(part))
             .ToArray();
-        var suffix = errors.Count > parts.Length ? $" (+{errors.Count - parts.Length} more)" : string.Empty;
-        return string.Join(" | ", parts) + suffix;
+
+        var groups = classified
+            .GroupBy(item => item.Failure.Code)
+            .Take(3)
+            .Select(group =>
+            {
+                var failure = group.First().Failure;
+                var names = group
+                    .Select(item => string.IsNullOrWhiteSpace(item.Error.Name)
+                        ? item.Error.PlayerId
+                        : item.Error.Name)
+                    .Where(name => !string.IsNullOrWhiteSpace(name))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Take(3)
+                    .ToArray();
+                var affectedSuffix = group.Count() > names.Length
+                    ? $" (+{group.Count() - names.Length} more)"
+                    : string.Empty;
+                var affected = names.Length == 0
+                    ? string.Empty
+                    : $" Affected: {string.Join(", ", names)}{affectedSuffix}.";
+                return $"{failure.Message}{affected}";
+            })
+            .ToArray();
+
+        var categoryCount = classified
+            .Select(item => item.Failure.Code)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
+        var categorySuffix = categoryCount > groups.Length
+            ? $" (+{categoryCount - groups.Length} other error type)"
+            : string.Empty;
+        return string.Join(" | ", groups) + categorySuffix;
+    }
+
+    private static RefreshFailureInfo? BuildDominantFailure(
+        IReadOnlyList<CronError>? errors)
+    {
+        return errors is null
+            ? null
+            : RefreshErrorClassifier.Dominant(
+                errors.Select(RefreshErrorClassifier.Classify));
     }
 
     private static string? BuildCronPlayerSummary(IReadOnlyList<CronPlayer>? players)
@@ -1463,23 +1743,6 @@ internal sealed class RefreshLoop
         return string.IsNullOrWhiteSpace(errorSummary) ? null : $"{label}: {errorSummary}";
     }
 
-    private static bool IsRateLimitOutcome(TickOutcome outcome)
-    {
-        return IsRateLimitText(outcome.ErrorSummary) || IsRateLimitText(outcome.PlayerSummary);
-    }
-
-    private static bool IsRateLimitSignal(Exception ex)
-    {
-        return ex is RiotApiException { Status: 429 } || IsRateLimitText(ex.Message);
-    }
-
-    private static bool IsRateLimitText(string? value)
-    {
-        return !string.IsNullOrWhiteSpace(value) &&
-               (value.Contains("rate limit", StringComparison.OrdinalIgnoreCase) ||
-                value.Contains("429", StringComparison.OrdinalIgnoreCase));
-    }
-
     private static int EstimateRefreshTimeoutSeconds(JobConfig jobConfig, int startupTimeoutSec)
     {
         var perPlayerSeconds = Math.Max(2, (int)Math.Ceiling(jobConfig.DelayMs / 1000d) + 8);
@@ -1490,6 +1753,23 @@ internal sealed class RefreshLoop
 
         var estimate = 60 + jobConfig.Limit * perPlayerSeconds;
         return Math.Max(startupTimeoutSec, Math.Min(1800, estimate));
+    }
+
+    private static int? GetResponseRetryAfterMilliseconds(
+        HttpResponseMessage response)
+    {
+        if (response.Headers.RetryAfter?.Delta is { } delta)
+        {
+            return Math.Max(1000, (int)Math.Ceiling(delta.TotalMilliseconds));
+        }
+
+        if (response.Headers.RetryAfter?.Date is { } retryAt)
+        {
+            var remaining = retryAt - DateTimeOffset.UtcNow;
+            return Math.Max(1000, (int)Math.Ceiling(remaining.TotalMilliseconds));
+        }
+
+        return null;
     }
 
     private static string ResolveRepoRoot(string baseDirectory)
@@ -1643,7 +1923,7 @@ internal sealed class CSharpRefreshService
         try
         {
             var result = await RefreshWithLeaseAsync(job, config, cancellationToken);
-            if (result.RateLimitCooldownMs is { } cooldownMs)
+            if (result.RetryAfterMs is { } cooldownMs)
             {
                 releaseLease = false;
                 await HoldRiotRefreshLeaseForCooldownAsync(leaseOwner, cooldownMs);
@@ -1651,10 +1931,20 @@ internal sealed class CSharpRefreshService
 
             return result;
         }
-        catch (RiotApiException ex) when (IsRateLimit(ex))
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            releaseLease = false;
-            await HoldRiotRefreshLeaseForCooldownAsync(leaseOwner, ComputeRiotRateLimitCooldownMs(ex));
+            throw;
+        }
+        catch (Exception ex)
+        {
+            var failure = RefreshErrorClassifier.Classify(ex);
+            if (failure.StopBatch)
+            {
+                releaseLease = false;
+                var cooldownMs = FailureCooldownMilliseconds(failure, ex);
+                BlockRiotRequestsFor(cooldownMs);
+                await HoldRiotRefreshLeaseForCooldownAsync(leaseOwner, cooldownMs);
+            }
             throw;
         }
         finally
@@ -1701,7 +1991,7 @@ internal sealed class CSharpRefreshService
         try
         {
             var result = await RefreshOneQueuedRankWithLeaseAsync(config, cancellationToken);
-            if (result.RateLimitCooldownMs is { } cooldownMs)
+            if (result.RetryAfterMs is { } cooldownMs)
             {
                 releaseLease = false;
                 await HoldRiotRefreshLeaseForCooldownAsync(leaseOwner, cooldownMs);
@@ -1709,12 +1999,20 @@ internal sealed class CSharpRefreshService
 
             return result;
         }
-        catch (RiotApiException ex) when (IsRateLimit(ex))
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            releaseLease = false;
-            await HoldRiotRefreshLeaseForCooldownAsync(
-                leaseOwner,
-                ComputeRiotRateLimitCooldownMs(ex));
+            throw;
+        }
+        catch (Exception ex)
+        {
+            var failure = RefreshErrorClassifier.Classify(ex);
+            if (failure.StopBatch)
+            {
+                releaseLease = false;
+                var cooldownMs = FailureCooldownMilliseconds(failure, ex);
+                BlockRiotRequestsFor(cooldownMs);
+                await HoldRiotRefreshLeaseForCooldownAsync(leaseOwner, cooldownMs);
+            }
             throw;
         }
         finally
@@ -1780,12 +2078,16 @@ internal sealed class CSharpRefreshService
         }
         catch (Exception ex)
         {
+            var failure = RefreshErrorClassifier.Classify(ex);
             result.Fail = 1;
             result.Errors.Add(new CronError
             {
                 PlayerId = id.ToString(),
                 Name = name,
-                Error = ex.Message,
+                Error = failure.Message,
+                Code = failure.Code,
+                Retryable = failure.Retryable,
+                UpstreamStatus = failure.Status,
             });
             result.Players.Add(new CronPlayer
             {
@@ -1793,10 +2095,7 @@ internal sealed class CSharpRefreshService
                 Name = name,
                 Status = "failed",
             });
-            if (IsRateLimit(ex))
-            {
-                result.RateLimitCooldownMs = ComputeRiotRateLimitCooldownMs(ex);
-            }
+            ApplySystemicCooldown(result, failure, ex);
         }
 
         return result;
@@ -1882,10 +2181,14 @@ internal sealed class CSharpRefreshService
         }
         else
         {
+            var retryReady =
+                Builders<BsonDocument>.Filter.Exists("tftMatchSync.retryAfterAt", false) |
+                Builders<BsonDocument>.Filter.Lte("tftMatchSync.retryAfterAt", DateTime.UtcNow);
             var tftFilter =
                 approvedLeaderboard &
                 Builders<BsonDocument>.Filter.Ne("track.tft", false) &
-                Builders<BsonDocument>.Filter.Ne("tftMatchSync.enabled", false);
+                Builders<BsonDocument>.Filter.Ne("tftMatchSync.enabled", false) &
+                retryReady;
             var tftSort = Builders<BsonDocument>.Sort
                 .Ascending("tftMatchSync.lastSyncAt")
                 .Ascending("tft.fetchedAt")
@@ -1897,10 +2200,9 @@ internal sealed class CSharpRefreshService
                 .ToListAsync(cancellationToken);
         }
 
-        result.Scanned = players.Count;
-
         foreach (var player in players)
         {
+            result.Scanned++;
             var id = player.GetValue("_id").AsObjectId;
             var name = $"{ReadString(player, "gameName")}#{ReadString(player, "tagLine")}";
             try
@@ -1925,14 +2227,39 @@ internal sealed class CSharpRefreshService
                     await Task.Delay(config.DelayMs, cancellationToken);
                 }
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
-                result.Fail++;
-                result.Errors.Add(new CronError { PlayerId = id.ToString(), Name = name, Error = ex.Message });
-                result.Players.Add(new CronPlayer { PlayerId = id.ToString(), Name = name, Status = "failed" });
-                if (IsRateLimit(ex))
+                var failure = RefreshErrorClassifier.Classify(ex);
+                if (job == RefreshJob.Tft && !failure.StopBatch)
                 {
-                    result.RateLimitCooldownMs = ComputeRiotRateLimitCooldownMs(ex);
+                    try
+                    {
+                        await MarkTftRefreshFailedAsync(id, failure);
+                    }
+                    catch
+                    {
+                        // Preserve the original player failure if optional
+                        // retry bookkeeping cannot be stored.
+                    }
+                }
+                result.Fail++;
+                result.Errors.Add(new CronError
+                {
+                    PlayerId = id.ToString(),
+                    Name = name,
+                    Error = failure.Message,
+                    Code = failure.Code,
+                    Retryable = failure.Retryable,
+                    UpstreamStatus = failure.Status,
+                });
+                result.Players.Add(new CronPlayer { PlayerId = id.ToString(), Name = name, Status = "failed" });
+                ApplySystemicCooldown(result, failure, ex);
+                if (failure.StopBatch)
+                {
                     break;
                 }
             }
@@ -2013,13 +2340,18 @@ internal sealed class CSharpRefreshService
             .ToDictionary(group => group.Key, group => group.ToList());
         var linkedPlayerIds = linksByPlayerId.Keys.ToList();
 
-        var approvedFilter = Builders<BsonDocument>.Filter.Eq("leaderboard.group", "burmese") &
+        var retryReady =
+            Builders<BsonDocument>.Filter.Exists("liveGame.retryAfterAt", false) |
+            Builders<BsonDocument>.Filter.Lte("liveGame.retryAfterAt", DateTime.UtcNow);
+        var approvedFilter = retryReady &
+                             Builders<BsonDocument>.Filter.Eq("leaderboard.group", "burmese") &
                              Builders<BsonDocument>.Filter.Eq("leaderboard.status", "approved") &
                              Builders<BsonDocument>.Filter.Ne("track.lol", false) &
                              Builders<BsonDocument>.Filter.Type("puuid", BsonType.String);
         var linkedFilter = linkedPlayerIds.Count == 0
             ? Builders<BsonDocument>.Filter.Where(_ => false)
-            : Builders<BsonDocument>.Filter.In("_id", linkedPlayerIds) &
+            : retryReady &
+              Builders<BsonDocument>.Filter.In("_id", linkedPlayerIds) &
               Builders<BsonDocument>.Filter.Ne("track.lol", false) &
               Builders<BsonDocument>.Filter.Type("puuid", BsonType.String);
         var players = await _players.Find(linkedFilter | approvedFilter)
@@ -2041,18 +2373,40 @@ internal sealed class CSharpRefreshService
                 .Select(group => group.First()));
         }
 
-        result.Scanned = players.Count;
         var liveGames = new Dictionary<string, (string Platform, JsonElement Game, List<BsonDocument> Players)>(StringComparer.Ordinal);
 
         foreach (var player in players)
         {
+            result.Scanned++;
             var id = player.GetValue("_id").AsObjectId;
             var name = $"{ReadString(player, "gameName")}#{ReadString(player, "tagLine")}";
             var puuid = ReadString(player, "puuid");
             if (string.IsNullOrWhiteSpace(puuid))
             {
-                result.Skipped++;
-                result.Players.Add(new CronPlayer { PlayerId = id.ToString(), Name = name, Status = "skipped" });
+                var failure = RefreshErrorClassifier.Classify(
+                    "The player record is missing a Riot puuid.");
+                result.Fail++;
+                result.Errors.Add(new CronError
+                {
+                    PlayerId = id.ToString(),
+                    Name = name,
+                    Error = failure.Message,
+                    Code = failure.Code,
+                    Retryable = failure.Retryable,
+                });
+                result.Players.Add(new CronPlayer
+                {
+                    PlayerId = id.ToString(),
+                    Name = name,
+                    Status = "failed",
+                });
+                try
+                {
+                    await MarkLiveGameAttemptFailedAsync(id, failure);
+                }
+                catch
+                {
+                }
                 continue;
             }
 
@@ -2080,28 +2434,38 @@ internal sealed class CSharpRefreshService
                     }
                 }
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
-                var rateLimitCooldownMs = IsRateLimit(ex) ? ComputeRiotRateLimitCooldownMs(ex) : (int?)null;
+                var failure = RefreshErrorClassifier.Classify(ex);
                 result.Fail++;
-                result.Errors.Add(new CronError { PlayerId = id.ToString(), Name = name, Error = ex.Message });
-                result.Players.Add(new CronPlayer { PlayerId = id.ToString(), Name = name, Status = "failed" });
-                if (rateLimitCooldownMs is { } cooldownMs)
+                result.Errors.Add(new CronError
                 {
-                    result.RateLimitCooldownMs = cooldownMs;
-                    try
-                    {
-                        await MarkLiveGameCheckedAsync(id, DateTime.UtcNow, cancellationToken);
-                    }
-                    catch
-                    {
-                        // Preserve the Riot cooldown signal even if this optional
-                        // bookkeeping write also fails.
-                    }
+                    PlayerId = id.ToString(),
+                    Name = name,
+                    Error = failure.Message,
+                    Code = failure.Code,
+                    Retryable = failure.Retryable,
+                    UpstreamStatus = failure.Status,
+                });
+                result.Players.Add(new CronPlayer { PlayerId = id.ToString(), Name = name, Status = "failed" });
+                ApplySystemicCooldown(result, failure, ex);
+                try
+                {
+                    await MarkLiveGameAttemptFailedAsync(id, failure);
+                }
+                catch
+                {
+                    // Preserve the original provider/player failure if optional
+                    // attempt bookkeeping cannot be stored.
+                }
+                if (failure.StopBatch)
+                {
                     break;
                 }
-
-                await MarkLiveGameCheckedAsync(id, DateTime.UtcNow, cancellationToken);
             }
 
             if (config.DelayMs > 0)
@@ -2129,32 +2493,56 @@ internal sealed class CSharpRefreshService
                 var messageId = ReadString(existing, "messageId");
                 if (!string.IsNullOrWhiteSpace(messageId))
                 {
-                    result.Skipped++;
-                    if (existingFormatVersion < LivePostFormatVersion)
+                    try
                     {
-                        var knownPlayers = await LoadKnownPlayersForLiveGameAsync(group.Platform, group.Game, group.Players, cancellationToken);
-                        await EditDiscordChannelMessageAsync(
-                            LiveGamesChannelId(),
-                            messageId,
-                            await BuildLiveGameMessageAsync(group.Platform, group.Game, group.Players, knownPlayers, cancellationToken),
-                            cancellationToken);
-                        await _liveGamePosts.UpdateOneAsync(
-                            Builders<BsonDocument>.Filter.Eq("_id", existing.GetValue("_id").AsObjectId),
-                            Builders<BsonDocument>.Update
-                                .Set("lastSeenAt", now)
-                                .Set("updatedAt", now)
-                                .Set("riotIds", new BsonArray(riotIds))
-                                .Set("formatVersion", LivePostFormatVersion),
-                            cancellationToken: cancellationToken);
+                        if (existingFormatVersion < LivePostFormatVersion)
+                        {
+                            var knownPlayers = await LoadKnownPlayersForLiveGameAsync(group.Platform, group.Game, group.Players, cancellationToken);
+                            await EditDiscordChannelMessageAsync(
+                                LiveGamesChannelId(),
+                                messageId,
+                                await BuildLiveGameMessageAsync(group.Platform, group.Game, group.Players, knownPlayers, cancellationToken),
+                                cancellationToken);
+                            await _liveGamePosts.UpdateOneAsync(
+                                Builders<BsonDocument>.Filter.Eq("_id", existing.GetValue("_id").AsObjectId),
+                                Builders<BsonDocument>.Update
+                                    .Set("lastSeenAt", now)
+                                    .Set("updatedAt", now)
+                                    .Set("riotIds", new BsonArray(riotIds))
+                                    .Set("formatVersion", LivePostFormatVersion)
+                                    .Unset("error"),
+                                cancellationToken: cancellationToken);
+                        }
+                        else
+                        {
+                            await _liveGamePosts.UpdateOneAsync(
+                                Builders<BsonDocument>.Filter.Eq("_id", existing.GetValue("_id").AsObjectId),
+                                Builders<BsonDocument>.Update
+                                    .Set("lastSeenAt", now)
+                                    .Set("riotIds", new BsonArray(riotIds))
+                                    .Unset("error"),
+                                cancellationToken: cancellationToken);
+                        }
+                        result.Skipped++;
                     }
-                    else
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                     {
-                        await _liveGamePosts.UpdateOneAsync(
-                            Builders<BsonDocument>.Filter.Eq("_id", existing.GetValue("_id").AsObjectId),
-                            Builders<BsonDocument>.Update
-                                .Set("lastSeenAt", now)
-                                .Set("riotIds", new BsonArray(riotIds)),
-                            cancellationToken: cancellationToken);
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        var failure = await RecordLivePostFailureAsync(
+                            result,
+                            group.Platform,
+                            gameId,
+                            group.Players,
+                            riotIds,
+                            now,
+                            ex);
+                        if (failure.StopBatch)
+                        {
+                            break;
+                        }
                     }
                     continue;
                 }
@@ -2177,6 +2565,7 @@ internal sealed class CSharpRefreshService
                         .Set("lastSeenAt", now)
                         .Set("formatVersion", LivePostFormatVersion)
                         .Set("updatedAt", now)
+                        .Unset("error")
                         .SetOnInsert("channelId", LiveGamesChannelId())
                         .SetOnInsert("platform", group.Platform)
                         .SetOnInsert("gameId", gameId)
@@ -2186,30 +2575,80 @@ internal sealed class CSharpRefreshService
                 result.Ok++;
                 result.Players.Add(new CronPlayer { Name = string.Join(", ", riotIds.Take(3)), Status = "ok" });
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
-                result.Fail++;
-                await _liveGamePosts.UpdateOneAsync(
-                    Builders<BsonDocument>.Filter.Eq("channelId", LiveGamesChannelId()) &
-                    Builders<BsonDocument>.Filter.Eq("platform", group.Platform) &
-                    Builders<BsonDocument>.Filter.Eq("gameId", gameId),
-                    Builders<BsonDocument>.Update
-                        .Set("playerIds", new BsonArray(group.Players.Select(p => p.GetValue("_id").AsObjectId)))
-                        .Set("riotIds", new BsonArray(riotIds))
-                        .Set("lastSeenAt", now)
-                        .Set("updatedAt", now)
-                        .Set("error", ex.Message)
-                        .SetOnInsert("channelId", LiveGamesChannelId())
-                        .SetOnInsert("platform", group.Platform)
-                        .SetOnInsert("gameId", gameId)
-                        .SetOnInsert("createdAt", now),
-                    new UpdateOptions { IsUpsert = true },
-                    cancellationToken);
-                result.Errors.Add(new CronError { Name = $"{group.Platform}:{gameId}", Error = ex.Message });
+                var failure = await RecordLivePostFailureAsync(
+                    result,
+                    group.Platform,
+                    gameId,
+                    group.Players,
+                    riotIds,
+                    now,
+                    ex);
+                if (failure.StopBatch)
+                {
+                    break;
+                }
             }
         }
 
         return result;
+    }
+
+    private async Task<RefreshFailureInfo> RecordLivePostFailureAsync(
+        CronResult result,
+        string platform,
+        long gameId,
+        IReadOnlyCollection<BsonDocument> players,
+        IReadOnlyCollection<string> riotIds,
+        DateTime now,
+        Exception exception)
+    {
+        var failure = RefreshErrorClassifier.Classify(exception);
+        ApplySystemicCooldown(result, failure, exception);
+        result.Fail++;
+        result.Errors.Add(new CronError
+        {
+            Name = $"{platform}:{gameId}",
+            Error = failure.Message,
+            Code = failure.Code,
+            Retryable = failure.Retryable,
+            UpstreamStatus = failure.Status,
+        });
+
+        try
+        {
+            await _liveGamePosts.UpdateOneAsync(
+                Builders<BsonDocument>.Filter.Eq("channelId", LiveGamesChannelId()) &
+                Builders<BsonDocument>.Filter.Eq("platform", platform) &
+                Builders<BsonDocument>.Filter.Eq("gameId", gameId),
+                Builders<BsonDocument>.Update
+                    .Set(
+                        "playerIds",
+                        new BsonArray(players.Select(
+                            player => player.GetValue("_id").AsObjectId)))
+                    .Set("riotIds", new BsonArray(riotIds))
+                    .Set("lastSeenAt", now)
+                    .Set("updatedAt", now)
+                    .Set("error", failure.Message)
+                    .SetOnInsert("channelId", LiveGamesChannelId())
+                    .SetOnInsert("platform", platform)
+                    .SetOnInsert("gameId", gameId)
+                    .SetOnInsert("createdAt", now),
+                new UpdateOptions { IsUpsert = true },
+                CancellationToken.None);
+        }
+        catch
+        {
+            // Keep the original Discord/provider error in the job result even if
+            // optional diagnostic persistence is unavailable.
+        }
+
+        return failure;
     }
 
     private async Task<bool> TryAcquireRiotRefreshLeaseAsync(string owner, CancellationToken cancellationToken)
@@ -2287,8 +2726,34 @@ internal sealed class CSharpRefreshService
     {
         await _players.UpdateOneAsync(
             Builders<BsonDocument>.Filter.Eq("_id", playerId),
-            Builders<BsonDocument>.Update.Set("liveGame.checkedAt", checkedAt),
+            Builders<BsonDocument>.Update
+                .Set("liveGame.checkedAt", checkedAt)
+                .Set("liveGame.lastAttemptAt", checkedAt)
+                .Unset("liveGame.lastError")
+                .Unset("liveGame.lastErrorCode")
+                .Unset("liveGame.retryAfterAt"),
             cancellationToken: cancellationToken);
+    }
+
+    private async Task MarkLiveGameAttemptFailedAsync(
+        ObjectId playerId,
+        RefreshFailureInfo failure)
+    {
+        var update = Builders<BsonDocument>.Update
+            .Set("liveGame.lastAttemptAt", DateTime.UtcNow)
+            .Set("liveGame.lastError", failure.Message)
+            .Set("liveGame.lastErrorCode", failure.Code);
+        if (!failure.StopBatch)
+        {
+            update = update.Set(
+                "liveGame.retryAfterAt",
+                DateTime.UtcNow.Add(PlayerFailureBackoff(failure)));
+        }
+
+        await _players.UpdateOneAsync(
+            Builders<BsonDocument>.Filter.Eq("_id", playerId),
+            update,
+            cancellationToken: CancellationToken.None);
     }
 
     private async Task<string[]> LoadDiscordUserIdsForRiotIdsAsync(
@@ -2542,11 +3007,22 @@ internal sealed class CSharpRefreshService
                     puuid = currentPuuid;
                 }
             }
-            catch
+            catch (RiotApiException ex) when (ex.Status == 404)
             {
                 if (string.IsNullOrWhiteSpace(puuid))
                 {
-                    throw;
+                    throw new PlayerNotFoundException(
+                        "The linked Riot account was not found.",
+                        ex);
+                }
+            }
+            catch (RiotApiException ex) when (IsDecryptingBadRequest(ex))
+            {
+                if (string.IsNullOrWhiteSpace(puuid))
+                {
+                    throw new StaleRiotIdentityException(
+                        "Riot could not resolve the linked account identity.",
+                        ex);
                 }
             }
 
@@ -2567,7 +3043,9 @@ internal sealed class CSharpRefreshService
                 {
                     summoner = await RiotGetJsonAsync($"https://{platform}.api.riotgames.com/lol/summoner/v4/summoners/by-puuid/{Uri.EscapeDataString(puuid)}", "lol", cancellationToken);
                 }
-                catch (RiotApiException ex) when (IsDecryptingBadRequest(ex))
+                catch (RiotApiException ex) when (
+                    ex.Status == 404 ||
+                    IsDecryptingBadRequest(ex))
                 {
                     (platform, summoner) = await FindSeaSummonerByPuuidAsync(puuid, cancellationToken);
                 }
@@ -2637,7 +3115,8 @@ internal sealed class CSharpRefreshService
         }
         catch (Exception ex)
         {
-            if (!rankPersisted && !IsRateLimit(ex))
+            var failure = RefreshErrorClassifier.Classify(ex);
+            if (!rankPersisted && !failure.StopBatch)
             {
                 if (claimedRequestedAt is not null)
                 {
@@ -2728,7 +3207,16 @@ internal sealed class CSharpRefreshService
             }
             else
             {
-                match = await RiotGetJsonAsync($"https://{matchRegion}.api.riotgames.com/lol/match/v5/matches/{Uri.EscapeDataString(matchId)}", "lol", cancellationToken);
+                try
+                {
+                    match = await RiotGetJsonAsync($"https://{matchRegion}.api.riotgames.com/lol/match/v5/matches/{Uri.EscapeDataString(matchId)}", "lol", cancellationToken);
+                }
+                catch (RiotApiException ex) when (ex.Status == 404)
+                {
+                    // Match history can contain an ID whose detail has already
+                    // expired. Skip that resource without blaming the player.
+                    continue;
+                }
                 await StoreLolMatchDetailAsync(matchId, matchRegion, match, now, cancellationToken);
             }
 
@@ -2878,11 +3366,22 @@ internal sealed class CSharpRefreshService
                 puuid = currentPuuid;
             }
         }
-        catch
+        catch (RiotApiException ex) when (ex.Status == 404)
         {
             if (string.IsNullOrWhiteSpace(puuid))
             {
-                throw;
+                throw new PlayerNotFoundException(
+                    "The linked TFT account was not found.",
+                    ex);
+            }
+        }
+        catch (RiotApiException ex) when (IsDecryptingBadRequest(ex))
+        {
+            if (string.IsNullOrWhiteSpace(puuid))
+            {
+                throw new StaleRiotIdentityException(
+                    "Riot could not resolve the linked TFT account identity.",
+                    ex);
             }
         }
 
@@ -2908,8 +3407,28 @@ internal sealed class CSharpRefreshService
             Builders<BsonDocument>.Update.Combine(updates),
             cancellationToken: cancellationToken);
 
-        var ids = await GetStringArrayAsync($"https://{matchRegion}.api.riotgames.com/tft/match/v1/matches/by-puuid/{Uri.EscapeDataString(puuid)}/ids?start=0&count={config.MatchesCount}", "tft", cancellationToken);
+        List<string> ids;
+        try
+        {
+            ids = await GetStringArrayAsync(
+                $"https://{matchRegion}.api.riotgames.com/tft/match/v1/matches/by-puuid/{Uri.EscapeDataString(puuid)}/ids?start=0&count={config.MatchesCount}",
+                "tft",
+                cancellationToken);
+        }
+        catch (RiotApiException ex) when (ex.Status == 404)
+        {
+            throw new PlayerNotFoundException(
+                "TFT account not found.",
+                ex);
+        }
+        catch (RiotApiException ex) when (IsDecryptingBadRequest(ex))
+        {
+            throw new StaleRiotIdentityException(
+                "Riot could not resolve the saved TFT account identity.",
+                ex);
+        }
         var saved = 0;
+        var missingMatchDetails = 0;
         foreach (var matchId in ids)
         {
             var cached = await _tftMatches.Find(Builders<BsonDocument>.Filter.Eq("matchId", matchId))
@@ -2923,7 +3442,17 @@ internal sealed class CSharpRefreshService
             }
             else
             {
-                match = await RiotGetJsonAsync($"https://{matchRegion}.api.riotgames.com/tft/match/v1/matches/{Uri.EscapeDataString(matchId)}", "tft", cancellationToken);
+                try
+                {
+                    match = await RiotGetJsonAsync($"https://{matchRegion}.api.riotgames.com/tft/match/v1/matches/{Uri.EscapeDataString(matchId)}", "tft", cancellationToken);
+                }
+                catch (RiotApiException ex) when (ex.Status == 404)
+                {
+                    // A missing match detail is a stale match resource, not a
+                    // missing TFT player.
+                    missingMatchDetails++;
+                    continue;
+                }
                 await StoreTftMatchDetailAsync(matchId, matchRegion, match, now, cancellationToken);
             }
 
@@ -2948,19 +3477,29 @@ internal sealed class CSharpRefreshService
         await PrunePlayerMatchesAsync(_tftPlayerMatches, playerId, "gameDatetime", cancellationToken);
         await PruneUnreferencedMatchDetailsAsync(_tftMatches, _tftPlayerMatches, cancellationToken);
 
+        if (
+            ids.Count > 0 &&
+            saved == 0 &&
+            missingMatchDetails < ids.Count)
+        {
+            throw new StaleRiotIdentityException(
+                "TFT matches were returned, but none matched the saved account identity.");
+        }
+
         await _players.UpdateOneAsync(
             Builders<BsonDocument>.Filter.Eq("_id", playerId),
             Builders<BsonDocument>.Update
                 .Set("tftPuuid", puuid)
                 .Set("matchRegion", matchRegion)
                 .Set("tftMatchSync.lastSyncAt", now)
+                .Set("tftMatchSync.lastAttemptAt", now)
+                .Set("tftMatchSync.consecutiveFailures", 0)
                 .Set("lastRefreshAt", now)
-                .Set("updatedAt", now),
+                .Set("updatedAt", now)
+                .Unset("tftMatchSync.retryAfterAt")
+                .Unset("tftMatchSync.lastError")
+                .Unset("tftMatchSync.lastErrorCode"),
             cancellationToken: cancellationToken);
-        if (ids.Count > 0 && saved == 0)
-        {
-            throw new InvalidOperationException("TFT matches found, but none matched this player's puuid.");
-        }
 
         await TrySyncDiscordGuildRolesForPlayerAsync(playerId, cancellationToken);
     }
@@ -3823,7 +4362,34 @@ internal sealed class CSharpRefreshService
         }
         request.Content = body;
 
-        using var response = await _http.SendAsync(request, cancellationToken);
+        HttpResponseMessage response;
+        try
+        {
+            response = await _http.SendAsync(request, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (TaskCanceledException ex)
+        {
+            throw new DiscordApiException(
+                408,
+                "Discord API request timed out.",
+                null,
+                ex);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new DiscordApiException(
+                0,
+                "The tray could not reach Discord.",
+                null,
+                ex);
+        }
+
+        using (response)
+        {
         var text = await response.Content.ReadAsStringAsync(cancellationToken);
         if (response.IsSuccessStatusCode)
         {
@@ -3835,7 +4401,13 @@ internal sealed class CSharpRefreshService
             return JsonDocument.Parse(text).RootElement.Clone();
         }
 
-        throw new InvalidOperationException($"Discord API {(int)response.StatusCode}: {ParseDiscordError(text, response.ReasonPhrase ?? "Request failed")}");
+        throw new DiscordApiException(
+            (int)response.StatusCode,
+            ParseDiscordError(
+                text,
+                response.ReasonPhrase ?? "Discord request failed"),
+            RetryAfterMilliseconds(response));
+        }
     }
 
     private async Task<JsonElement> SendDiscordChannelMessageAsync(string channelId, LiveDiscordMessage message, CancellationToken cancellationToken)
@@ -3959,7 +4531,7 @@ internal sealed class CSharpRefreshService
         }
         catch
         {
-            return string.IsNullOrWhiteSpace(text) ? fallback : text;
+            return fallback;
         }
     }
 
@@ -3972,21 +4544,29 @@ internal sealed class CSharpRefreshService
 
     private async Task<(string Platform, JsonElement Summoner)> FindSeaSummonerByPuuidAsync(string puuid, CancellationToken cancellationToken)
     {
+        var sawDecryptFailure = false;
         foreach (var platform in SeaPlatforms)
         {
             try
             {
                 return (platform, await RiotGetJsonAsync($"https://{platform}.api.riotgames.com/lol/summoner/v4/summoners/by-puuid/{Uri.EscapeDataString(puuid)}", "lol", cancellationToken));
             }
-            catch (RiotApiException ex) when (ex.Status == 404 || IsDecryptingBadRequest(ex))
+            catch (RiotApiException ex) when (ex.Status == 404)
             {
             }
-            catch (HttpRequestException)
+            catch (RiotApiException ex) when (IsDecryptingBadRequest(ex))
             {
+                sawDecryptFailure = true;
             }
         }
 
-        throw new InvalidOperationException("LoL account not found on SEA platforms.");
+        if (sawDecryptFailure)
+        {
+            throw new StaleRiotIdentityException(
+                "Riot could not resolve the saved LoL account identity.");
+        }
+
+        throw new PlayerNotFoundException("LoL account not found on SEA platforms.");
     }
 
     private async Task<JsonElement> FindTftLeagueAsync(string puuid, string? preferredPlatform, CancellationToken cancellationToken)
@@ -3998,18 +4578,26 @@ internal sealed class CSharpRefreshService
         }
         platforms.AddRange(SeaPlatforms.Where(p => !platforms.Contains(p)));
 
+        var sawDecryptFailure = false;
         foreach (var platform in platforms)
         {
             try
             {
                 return await RiotGetJsonAsync($"https://{platform}.api.riotgames.com/tft/league/v1/by-puuid/{Uri.EscapeDataString(puuid)}", "tft", cancellationToken);
             }
-            catch (RiotApiException ex) when (ex.Status == 404 || IsDecryptingBadRequest(ex))
+            catch (RiotApiException ex) when (ex.Status == 404)
             {
             }
-            catch (HttpRequestException)
+            catch (RiotApiException ex) when (IsDecryptingBadRequest(ex))
             {
+                sawDecryptFailure = true;
             }
+        }
+
+        if (sawDecryptFailure)
+        {
+            throw new StaleRiotIdentityException(
+                "Riot could not resolve the saved TFT account identity.");
         }
 
         return JsonDocument.Parse("[]").RootElement.Clone();
@@ -4018,6 +4606,7 @@ internal sealed class CSharpRefreshService
     private async Task<(string Platform, JsonElement Game)?> FindActiveGameAsync(string puuid, string? preferredPlatform, CancellationToken cancellationToken)
     {
         var preferred = preferredPlatform?.Trim().ToLowerInvariant();
+        var sawDecryptFailure = false;
         if (!string.IsNullOrWhiteSpace(preferred) && preferred != "auto")
         {
             try
@@ -4033,6 +4622,7 @@ internal sealed class CSharpRefreshService
             }
             catch (RiotApiException ex) when (IsDecryptingBadRequest(ex))
             {
+                sawDecryptFailure = true;
                 // A decrypting error means the stored platform may be stale. Fall
                 // back to the remaining shards so a moved/misclassified player is
                 // not incorrectly reported as offline.
@@ -4049,12 +4639,19 @@ internal sealed class CSharpRefreshService
                 var game = await RiotGetJsonAsync($"https://{platform}.api.riotgames.com/lol/spectator/v5/active-games/by-summoner/{Uri.EscapeDataString(puuid)}", "lol", cancellationToken);
                 return (platform, game);
             }
-            catch (RiotApiException ex) when (ex.Status == 404 || IsDecryptingBadRequest(ex))
+            catch (RiotApiException ex) when (ex.Status == 404)
             {
             }
-            catch (HttpRequestException)
+            catch (RiotApiException ex) when (IsDecryptingBadRequest(ex))
             {
+                sawDecryptFailure = true;
             }
+        }
+
+        if (sawDecryptFailure)
+        {
+            throw new StaleRiotIdentityException(
+                "Riot could not resolve the saved account identity for live-game checks.");
         }
 
         return null;
@@ -4068,52 +4665,96 @@ internal sealed class CSharpRefreshService
             for (var attempt = 0; attempt < RiotMaxAttempts; attempt++)
             {
                 await WaitForRiotPermitAsync(cancellationToken);
-
-                using var request = new HttpRequestMessage(HttpMethod.Get, url);
-                request.Headers.Add("X-Riot-Token", RiotKey(game));
-                request.Headers.Add("Accept-Language", "en-US,en;q=0.9");
-
-                HttpResponseMessage response;
                 try
                 {
-                    response = await _http.SendAsync(request, cancellationToken);
-                }
-                catch
-                {
-                    _riotNextRequestAt = DateTimeOffset.UtcNow.AddMilliseconds(RiotRequestSpacingMs);
-                    throw;
-                }
-
-                using (response)
-                {
+                    using var request = new HttpRequestMessage(HttpMethod.Get, url);
+                    request.Headers.Add("X-Riot-Token", RiotKey(game));
+                    request.Headers.Add("Accept-Language", "en-US,en;q=0.9");
+                    using var response = await _http.SendAsync(request, cancellationToken);
                     var text = await response.Content.ReadAsStringAsync(cancellationToken);
-                    _riotNextRequestAt = DateTimeOffset.UtcNow.AddMilliseconds(RiotRequestSpacingMs);
                     if (response.IsSuccessStatusCode)
                     {
-                        return JsonDocument.Parse(text).RootElement.Clone();
+                        try
+                        {
+                            return JsonDocument.Parse(text).RootElement.Clone();
+                        }
+                        catch (JsonException) when (attempt < RiotMaxAttempts - 1)
+                        {
+                            BlockRiotRequestsFor(
+                                TransientRetryDelayMilliseconds(attempt, null));
+                            continue;
+                        }
+                        catch (JsonException ex)
+                        {
+                            throw new JsonException(
+                                "Riot's API returned an unreadable response.",
+                                ex);
+                        }
                     }
 
+                    var status = (int)response.StatusCode;
                     var retryAfterMs = RetryAfterMilliseconds(response);
-                    if ((int)response.StatusCode == 429)
+                    if (status == 429)
                     {
                         var pauseMs = retryAfterMs ?? RiotFallbackRetryAfterMs;
                         retryAfterMs = pauseMs;
-                        var blockedUntil = DateTimeOffset.UtcNow.AddMilliseconds(pauseMs);
-                        if (blockedUntil > _riotBlockedUntil)
-                        {
-                            _riotBlockedUntil = blockedUntil;
-                        }
-
+                        BlockRiotRequestsFor(pauseMs);
                         if (attempt < RiotMaxAttempts - 1)
                         {
                             continue;
                         }
                     }
+                    else if (IsTransientRiotStatus(status))
+                    {
+                        if (attempt < RiotMaxAttempts - 1)
+                        {
+                            BlockRiotRequestsFor(
+                                TransientRetryDelayMilliseconds(
+                                    attempt,
+                                    retryAfterMs));
+                            continue;
+                        }
+
+                        BlockRiotRequestsFor((int)TimeSpan.FromMinutes(15).TotalMilliseconds);
+                    }
 
                     throw new RiotApiException(
-                        (int)response.StatusCode,
+                        status,
                         ParseRiotError(text, response.ReasonPhrase ?? "Riot API error"),
                         retryAfterMs);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (TaskCanceledException ex)
+                {
+                    if (attempt < RiotMaxAttempts - 1)
+                    {
+                        BlockRiotRequestsFor(
+                            TransientRetryDelayMilliseconds(attempt, null));
+                        continue;
+                    }
+
+                    BlockRiotRequestsFor((int)TimeSpan.FromMinutes(15).TotalMilliseconds);
+                    throw new TimeoutException("Riot's API request timed out.", ex);
+                }
+                catch (HttpRequestException)
+                {
+                    if (attempt < RiotMaxAttempts - 1)
+                    {
+                        BlockRiotRequestsFor(
+                            TransientRetryDelayMilliseconds(attempt, null));
+                        continue;
+                    }
+
+                    BlockRiotRequestsFor((int)TimeSpan.FromMinutes(15).TotalMilliseconds);
+                    throw;
+                }
+                finally
+                {
+                    _riotNextRequestAt =
+                        DateTimeOffset.UtcNow.AddMilliseconds(RiotRequestSpacingMs);
                 }
             }
 
@@ -4122,6 +4763,35 @@ internal sealed class CSharpRefreshService
         finally
         {
             RiotRequestGate.Release();
+        }
+    }
+
+    private static bool IsTransientRiotStatus(int status)
+    {
+        return status is
+            408 or 425 or
+            500 or 502 or 503 or 504 or
+            520 or 521 or 522 or 523 or 524 or 525 or 526;
+    }
+
+    private static int TransientRetryDelayMilliseconds(
+        int attempt,
+        int? retryAfterMs)
+    {
+        var exponentialMs = Math.Min(15_000, 1_500 * (1 << Math.Min(attempt, 3)));
+        var jitterMs = Random.Shared.Next(200, 800);
+        return Math.Max(
+            retryAfterMs ?? 0,
+            exponentialMs + jitterMs);
+    }
+
+    private static void BlockRiotRequestsFor(int delayMs)
+    {
+        var blockedUntil = DateTimeOffset.UtcNow.AddMilliseconds(
+            Math.Max(1000, delayMs));
+        if (blockedUntil > _riotBlockedUntil)
+        {
+            _riotBlockedUntil = blockedUntil;
         }
     }
 
@@ -4330,6 +5000,7 @@ internal sealed class CSharpRefreshService
             Builders<BsonDocument>.Update.Combine(
                 Builders<BsonDocument>.Update.Set("rankRefresh.startedAt", startedAt),
                 Builders<BsonDocument>.Update.Unset("rankRefresh.lastError"),
+                Builders<BsonDocument>.Update.Unset("rankRefresh.lastErrorCode"),
                 Builders<BsonDocument>.Update.Unset("rankRefresh.retryAfterAt")),
             cancellationToken: cancellationToken);
     }
@@ -4348,6 +5019,7 @@ internal sealed class CSharpRefreshService
                 Builders<BsonDocument>.Update.Unset("rankRefresh.requestedAt"),
                 Builders<BsonDocument>.Update.Unset("rankRefresh.startedAt"),
                 Builders<BsonDocument>.Update.Unset("rankRefresh.lastError"),
+                Builders<BsonDocument>.Update.Unset("rankRefresh.lastErrorCode"),
                 Builders<BsonDocument>.Update.Unset("rankRefresh.retryAfterAt")),
             cancellationToken: cancellationToken);
     }
@@ -4363,6 +5035,7 @@ internal sealed class CSharpRefreshService
             Builders<BsonDocument>.Filter.Exists("rankRefresh.requestedAt", false),
             Builders<BsonDocument>.Update.Combine(
                 Builders<BsonDocument>.Update.Unset("rankRefresh.lastError"),
+                Builders<BsonDocument>.Update.Unset("rankRefresh.lastErrorCode"),
                 Builders<BsonDocument>.Update.Unset("rankRefresh.retryAfterAt")),
             cancellationToken: cancellationToken);
     }
@@ -4371,7 +5044,8 @@ internal sealed class CSharpRefreshService
         ObjectId playerId,
         Exception error)
     {
-        var message = CompactRankRefreshError(error);
+        var failure = RefreshErrorClassifier.Classify(error);
+        var failedAt = DateTime.UtcNow;
         try
         {
             await _players.UpdateOneAsync(
@@ -4380,8 +5054,10 @@ internal sealed class CSharpRefreshService
                 Builders<BsonDocument>.Update.Combine(
                     Builders<BsonDocument>.Update.Set(
                         "rankRefresh.retryAfterAt",
-                        DateTime.UtcNow.AddMinutes(30)),
-                    Builders<BsonDocument>.Update.Set("rankRefresh.lastError", message)),
+                        failedAt.Add(PlayerFailureBackoff(failure))),
+                    Builders<BsonDocument>.Update.Set("rankRefresh.lastAttemptAt", failedAt),
+                    Builders<BsonDocument>.Update.Set("rankRefresh.lastError", failure.Message),
+                    Builders<BsonDocument>.Update.Set("rankRefresh.lastErrorCode", failure.Code)),
                 cancellationToken: CancellationToken.None);
         }
         catch
@@ -4395,7 +5071,7 @@ internal sealed class CSharpRefreshService
         DateTime requestedAt,
         Exception error)
     {
-        var message = CompactRankRefreshError(error);
+        var failure = RefreshErrorClassifier.Classify(error);
         var failedAt = DateTime.UtcNow;
 
         try
@@ -4408,8 +5084,9 @@ internal sealed class CSharpRefreshService
                     Builders<BsonDocument>.Update.Set("rankRefresh.lastAttemptAt", failedAt),
                     Builders<BsonDocument>.Update.Set(
                         "rankRefresh.retryAfterAt",
-                        failedAt.AddMinutes(5)),
-                    Builders<BsonDocument>.Update.Set("rankRefresh.lastError", message),
+                        failedAt.Add(PlayerFailureBackoff(failure))),
+                    Builders<BsonDocument>.Update.Set("rankRefresh.lastError", failure.Message),
+                    Builders<BsonDocument>.Update.Set("rankRefresh.lastErrorCode", failure.Code),
                     Builders<BsonDocument>.Update.Unset("rankRefresh.requestedAt"),
                     Builders<BsonDocument>.Update.Unset("rankRefresh.startedAt")),
                 cancellationToken: CancellationToken.None);
@@ -4421,20 +5098,32 @@ internal sealed class CSharpRefreshService
         }
     }
 
-    private static string CompactRankRefreshError(Exception error)
+    private async Task MarkTftRefreshFailedAsync(
+        ObjectId playerId,
+        RefreshFailureInfo failure)
     {
-        var message = string.Join(
-            " ",
-            (error.Message ?? "Rank update failed")
-                .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-        if (message.Length > 180)
-        {
-            message = message[..180];
-        }
+        var failedAt = DateTime.UtcNow;
+        await _players.UpdateOneAsync(
+            Builders<BsonDocument>.Filter.Eq("_id", playerId),
+            Builders<BsonDocument>.Update
+                .Set("tftMatchSync.lastAttemptAt", failedAt)
+                .Set(
+                    "tftMatchSync.retryAfterAt",
+                    failedAt.Add(PlayerFailureBackoff(failure)))
+                .Set("tftMatchSync.lastError", failure.Message)
+                .Set("tftMatchSync.lastErrorCode", failure.Code)
+                .Inc("tftMatchSync.consecutiveFailures", 1),
+            cancellationToken: CancellationToken.None);
+    }
 
-        return string.IsNullOrWhiteSpace(message)
-            ? "Rank update failed"
-            : message;
+    private static TimeSpan PlayerFailureBackoff(RefreshFailureInfo failure)
+    {
+        return failure.Code is
+            RefreshErrorCodes.PlayerNotFound or
+            RefreshErrorCodes.StaleIdentity or
+            RefreshErrorCodes.PlayerData
+                ? TimeSpan.FromHours(6)
+                : TimeSpan.FromHours(1);
     }
 
     private static string AccountRegion()
@@ -4512,13 +5201,51 @@ internal sealed class CSharpRefreshService
         }
         catch
         {
-            return string.IsNullOrWhiteSpace(text) ? fallback : text;
+            return fallback;
         }
     }
 
-    private static bool IsRateLimit(Exception ex)
+    private static void ApplySystemicCooldown(
+        CronResult result,
+        RefreshFailureInfo failure,
+        Exception exception)
     {
-        return ex is RiotApiException { Status: 429 };
+        if (!failure.StopBatch)
+        {
+            return;
+        }
+
+        if (exception is DiscordApiException)
+        {
+            return;
+        }
+
+        var cooldownMs = FailureCooldownMilliseconds(failure, exception);
+        result.RetryAfterMs = result.RetryAfterMs is { } existing
+            ? Math.Max(existing, cooldownMs)
+            : cooldownMs;
+
+        if (failure.Code is
+            RefreshErrorCodes.RateLimited or
+            RefreshErrorCodes.RiotUpstream or
+            RefreshErrorCodes.Timeout or
+            RefreshErrorCodes.Network or
+            RefreshErrorCodes.AuthInvalid)
+        {
+            BlockRiotRequestsFor(cooldownMs);
+        }
+    }
+
+    private static int FailureCooldownMilliseconds(
+        RefreshFailureInfo failure,
+        Exception exception)
+    {
+        var configuredMs = (int)Math.Min(
+            TimeSpan.FromHours(1).TotalMilliseconds,
+            TimeSpan.FromMinutes(
+                Math.Max(1, failure.BaseBackoffMinutes)).TotalMilliseconds);
+        var providerMs = RetryAfterMs(exception) ?? 0;
+        return Math.Max(providerMs, configuredMs);
     }
 
     private static bool IsDecryptingBadRequest(RiotApiException ex)
@@ -4528,19 +5255,733 @@ internal sealed class CSharpRefreshService
 
     private static int? RetryAfterMs(Exception ex)
     {
-        return ex is RiotApiException riot ? riot.RetryAfterMs : null;
+        return ex switch
+        {
+            RiotApiException riot => riot.RetryAfterMs,
+            CronApiException cron => cron.RetryAfterMs,
+            DiscordApiException discord => discord.RetryAfterMs,
+            _ => null,
+        };
     }
 
-    private static int ComputeRiotRateLimitCooldownMs(Exception ex)
-    {
-        return Math.Max(RiotFallbackRetryAfterMs, RetryAfterMs(ex) ?? RiotFallbackRetryAfterMs);
-    }
 }
 
 internal sealed class RiotApiException(int status, string message, int? retryAfterMs = null) : Exception(message)
 {
     public int Status { get; } = status;
     public int? RetryAfterMs { get; } = retryAfterMs;
+}
+
+internal sealed class CronApiException(
+    int status,
+    string message,
+    int? retryAfterMs = null,
+    Exception? innerException = null) : Exception(message, innerException)
+{
+    public int Status { get; } = status;
+    public int? RetryAfterMs { get; } = retryAfterMs;
+}
+
+internal sealed class DiscordApiException(
+    int status,
+    string message,
+    int? retryAfterMs = null,
+    Exception? innerException = null) : Exception(message, innerException)
+{
+    public int Status { get; } = status;
+    public int? RetryAfterMs { get; } = retryAfterMs;
+}
+
+internal sealed class PlayerNotFoundException : Exception
+{
+    public PlayerNotFoundException(string message) : base(message)
+    {
+    }
+
+    public PlayerNotFoundException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+}
+
+internal sealed class StaleRiotIdentityException : Exception
+{
+    public StaleRiotIdentityException(string message) : base(message)
+    {
+    }
+
+    public StaleRiotIdentityException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+}
+
+internal static class RefreshErrorCodes
+{
+    public const string PlayerNotFound = "player_not_found";
+    public const string ResourceNotFound = "resource_not_found";
+    public const string StaleIdentity = "stale_identity";
+    public const string PlayerData = "player_data";
+    public const string RateLimited = "rate_limited";
+    public const string AuthInvalid = "auth_invalid";
+    public const string RiotUpstream = "riot_upstream";
+    public const string Timeout = "timeout";
+    public const string Network = "network";
+    public const string Database = "database";
+    public const string Configuration = "configuration";
+    public const string Discord = "discord";
+    public const string RefreshBusy = "refresh_busy";
+    public const string Protocol = "protocol";
+    public const string Server = "server";
+    public const string Unknown = "unknown";
+}
+
+internal sealed record RefreshFailureInfo(
+    string Code,
+    string Title,
+    string Message,
+    bool Retryable,
+    bool StopBatch,
+    int BaseBackoffMinutes,
+    int? Status = null);
+
+internal static class RefreshErrorClassifier
+{
+    private static readonly Regex WhitespacePattern = new(@"\s+", RegexOptions.Compiled);
+    private static readonly Regex HtmlPattern = new(@"<[^>]{1,500}>", RegexOptions.Compiled);
+    private static readonly Regex SecretPattern = new(
+        @"(?i)\b(RGAPI|Bearer)\s*[-A-Za-z0-9._~+/=]+",
+        RegexOptions.Compiled);
+    private static readonly Regex NamedSecretPattern = new(
+        @"(?i)\b([A-Za-z][A-Za-z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)|password)\s*[:=]\s*(?:""[^""]*""|'[^']*'|[^\s,;]+)",
+        RegexOptions.Compiled);
+    private static readonly Regex UriUserInfoPattern = new(
+        @"(?i)\b((?:mongodb(?:\+srv)?|https?)://)[^@\s/]+@",
+        RegexOptions.Compiled);
+    private static readonly Regex DiscordTokenPattern = new(
+        @"\b[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{20,}\b",
+        RegexOptions.Compiled);
+    private static readonly Regex OpaqueIdentifierPattern = new(
+        @"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{40,}(?![A-Za-z0-9_-])",
+        RegexOptions.Compiled);
+    private static readonly Regex StatusPattern = new(
+        @"(?i)(?:HTTP|Cron|Discord(?:\s+API)?|Riot(?:\s+API)?(?:\s+error(?:\s+code)?)?)\s*[:=]?\s*(\d{3})",
+        RegexOptions.Compiled);
+
+    public static RefreshFailureInfo Classify(Exception exception)
+    {
+        var ex = Unwrap(exception);
+        if (ex is PlayerNotFoundException)
+        {
+            return Known(RefreshErrorCodes.PlayerNotFound);
+        }
+
+        if (ex is StaleRiotIdentityException)
+        {
+            return Known(RefreshErrorCodes.StaleIdentity);
+        }
+
+        if (ex is RiotApiException riot)
+        {
+            return ClassifyRiot(riot);
+        }
+
+        if (ex is CronApiException cron)
+        {
+            return ClassifyCron(cron);
+        }
+
+        if (ex is DiscordApiException discord)
+        {
+            return ClassifyDiscord(discord.Status);
+        }
+
+        if (ex is MongoException)
+        {
+            return Known(RefreshErrorCodes.Database);
+        }
+
+        if (ex is TimeoutException or TaskCanceledException)
+        {
+            return Known(RefreshErrorCodes.Timeout);
+        }
+
+        if (ex is HttpRequestException requestException)
+        {
+            return requestException.StatusCode is { } status
+                ? ClassifyHttpStatus((int)status, requestException.Message)
+                : Known(RefreshErrorCodes.Network);
+        }
+
+        if (ex is JsonException)
+        {
+            return Known(RefreshErrorCodes.Protocol);
+        }
+
+        return Classify(ex.Message);
+    }
+
+    public static RefreshFailureInfo Classify(CronError error)
+    {
+        RefreshFailureInfo failure;
+        if (!string.IsNullOrWhiteSpace(error.Code))
+        {
+            failure = Known(NormalizeCode(error.Code), error.UpstreamStatus);
+        }
+        else if (error.UpstreamStatus is { } status)
+        {
+            failure = ClassifyHttpStatus(status, error.Error);
+        }
+        else
+        {
+            failure = Classify(error.Error);
+        }
+
+        return error.Retryable is { } retryable
+            ? failure with { Retryable = retryable }
+            : failure;
+    }
+
+    public static RefreshFailureInfo Classify(string? raw)
+    {
+        var message = SafeText(raw, 360);
+        var lower = message.ToLowerInvariant();
+        var status = ExtractStatus(message);
+
+        if (
+            lower.Contains("discord") &&
+            !lower.Contains("missing discord"))
+        {
+            return ClassifyDiscord(status);
+        }
+
+        if (
+            lower.Contains("rate limit") ||
+            lower.Contains("too many request") ||
+            status == 429)
+        {
+            return Known(RefreshErrorCodes.RateLimited, 429);
+        }
+
+        if (
+            lower.Contains("decrypt") ||
+            lower.Contains("saved account identity") ||
+            lower.Contains("riot id or region may have changed") ||
+            lower.Contains("none matched this player") ||
+            lower.Contains("none matched this player's") ||
+            lower.Contains("identity has changed"))
+        {
+            return Known(RefreshErrorCodes.StaleIdentity, status);
+        }
+
+        if (
+            lower.Contains("player not found") ||
+            lower.Contains("account not found") ||
+            lower.Contains("lol account not found") ||
+            (status == 404 &&
+             (lower.Contains("player") ||
+              lower.Contains("account"))))
+        {
+            return Known(RefreshErrorCodes.PlayerNotFound, 404);
+        }
+
+        if (status == 404)
+        {
+            return Known(RefreshErrorCodes.ResourceNotFound, status);
+        }
+
+        if (
+            lower.Contains("missing gamename") ||
+            lower.Contains("missing tagline") ||
+            lower.Contains("missing tft puuid") ||
+            lower.Contains("did not return a puuid") ||
+            lower.Contains("player record"))
+        {
+            return Known(RefreshErrorCodes.PlayerData, status);
+        }
+
+        if (
+            status is 401 or 403 ||
+            lower.Contains("api key") && (lower.Contains("expired") || lower.Contains("invalid") || lower.Contains("reject")) ||
+            lower.Contains("unauthorized") ||
+            lower.Contains("forbidden"))
+        {
+            return Known(RefreshErrorCodes.AuthInvalid, status);
+        }
+
+        if (
+            status is 408 or 504 ||
+            lower.Contains("timed out") ||
+            lower.Contains("timeout"))
+        {
+            return Known(RefreshErrorCodes.Timeout, status);
+        }
+
+        if (
+            status is 500 or 502 or 503 or 520 or 521 or 522 or 523 or 524 or 525 or 526 ||
+            lower.Contains("riot's api gateway") ||
+            lower.Contains("riot api gateway") ||
+            lower.Contains("riot service unavailable"))
+        {
+            return Known(RefreshErrorCodes.RiotUpstream, status);
+        }
+
+        if (
+            lower.Contains("mongodb") ||
+            lower.Contains("mongo ") ||
+            lower.Contains("database") ||
+            lower.Contains("querysrv"))
+        {
+            return Known(RefreshErrorCodes.Database, status);
+        }
+
+        if (
+            lower.Contains("connection refused") ||
+            lower.Contains("name resolution") ||
+            lower.Contains("no such host") ||
+            lower.Contains("network") ||
+            lower.Contains("fetch failed") ||
+            lower.Contains("dns") ||
+            lower.Contains("socket") ||
+            lower.Contains("could not reach"))
+        {
+            return Known(RefreshErrorCodes.Network, status);
+        }
+
+        if (
+            lower.Contains("config.json") ||
+            lower.Contains("missing env") ||
+            lower.Contains("missing cron token") ||
+            lower.Contains("missing scheduler") ||
+            lower.Contains("missing discord_bot_token") ||
+            lower.Contains("configuration"))
+        {
+            return Known(RefreshErrorCodes.Configuration, status);
+        }
+
+        if (lower.Contains("another refresh") || lower.Contains("refresh busy"))
+        {
+            return Known(RefreshErrorCodes.RefreshBusy, status);
+        }
+
+        if (lower.Contains("discord"))
+        {
+            return Known(RefreshErrorCodes.Discord, status);
+        }
+
+        if (
+            lower.Contains("json") ||
+            lower.Contains("unreadable response") ||
+            lower.Contains("invalid response") ||
+            lower.Contains("response format"))
+        {
+            return Known(RefreshErrorCodes.Protocol, status);
+        }
+
+        if (status is >= 500 and <= 599)
+        {
+            return Known(RefreshErrorCodes.Server, status);
+        }
+
+        return new RefreshFailureInfo(
+            RefreshErrorCodes.Unknown,
+            "Refresh error",
+            string.IsNullOrWhiteSpace(message)
+                ? "The refresh failed for an unexpected reason. Open the log for details."
+                : message,
+            true,
+            false,
+            0,
+            status);
+    }
+
+    public static RefreshFailureInfo? Dominant(IEnumerable<RefreshFailureInfo> failures)
+    {
+        return failures
+            .OrderByDescending(failure => FailurePriority(failure.Code))
+            .FirstOrDefault();
+    }
+
+    public static string SafeDiagnostic(string operation, Exception exception)
+    {
+        var ex = Unwrap(exception);
+        var status = ex switch
+        {
+            RiotApiException riot => $" HTTP {riot.Status}",
+            CronApiException cron => $" HTTP {cron.Status}",
+            DiscordApiException discord => $" HTTP {discord.Status}",
+            HttpRequestException request when request.StatusCode is { } code => $" HTTP {(int)code}",
+            _ => string.Empty,
+        };
+        return SafeText(
+            $"{operation} failed ({ex.GetType().Name}{status}): {ex}",
+            5000);
+    }
+
+    public static string SafeText(string? raw, int maxLength = 360)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return string.Empty;
+        }
+
+        var value = raw.Replace('\0', ' ');
+        value = HtmlPattern.Replace(value, " ");
+        value = SecretPattern.Replace(value, "$1 [redacted]");
+        value = NamedSecretPattern.Replace(value, "$1=[redacted]");
+        value = UriUserInfoPattern.Replace(value, "$1[redacted]@");
+        value = DiscordTokenPattern.Replace(value, "[redacted-token]");
+        value = OpaqueIdentifierPattern.Replace(value, "[redacted-id]");
+        value = WhitespacePattern.Replace(value, " ").Trim();
+        return value.Length <= maxLength ? value : $"{value[..maxLength]}...";
+    }
+
+    private static Exception Unwrap(Exception exception)
+    {
+        if (exception is AggregateException aggregate)
+        {
+            return aggregate.Flatten().InnerExceptions.FirstOrDefault() ?? exception;
+        }
+
+        return exception;
+    }
+
+    private static RefreshFailureInfo ClassifyRiot(RiotApiException exception)
+    {
+        if (exception.Status == 400 &&
+            exception.Message.Contains("decrypt", StringComparison.OrdinalIgnoreCase))
+        {
+            return Known(RefreshErrorCodes.StaleIdentity, exception.Status);
+        }
+
+        return exception.Status switch
+        {
+            401 or 403 => new RefreshFailureInfo(
+                RefreshErrorCodes.AuthInvalid,
+                "Riot key rejected",
+                "The Riot API key was rejected or has expired. Update the key before refreshes can continue.",
+                false,
+                true,
+                60,
+                exception.Status),
+            404 => Known(RefreshErrorCodes.ResourceNotFound, exception.Status),
+            408 or 504 => Known(RefreshErrorCodes.Timeout, exception.Status),
+            429 => Known(RefreshErrorCodes.RateLimited, exception.Status),
+            500 or 502 or 503 or 520 or 521 or 522 or 523 or 524 or 525 or 526 =>
+                Known(RefreshErrorCodes.RiotUpstream, exception.Status),
+            _ => Classify(exception.Message) with { Status = exception.Status },
+        };
+    }
+
+    private static RefreshFailureInfo ClassifyCron(CronApiException exception)
+    {
+        if (exception.Status == 0)
+        {
+            return new RefreshFailureInfo(
+                RefreshErrorCodes.Network,
+                "RiftBoard website unavailable",
+                "The tray could not reach the RiftBoard website. Check the connection; it will retry automatically.",
+                true,
+                true,
+                15);
+        }
+
+        if (exception.Status is 401 or 403)
+        {
+            return new RefreshFailureInfo(
+                RefreshErrorCodes.AuthInvalid,
+                "Refresh token rejected",
+                "The website rejected the tray's refresh token. Update the cron token in the tray settings.",
+                false,
+                true,
+                60,
+                exception.Status);
+        }
+
+        if (exception.Status == 202)
+        {
+            return Known(RefreshErrorCodes.RefreshBusy, exception.Status);
+        }
+
+        if (exception.Status is 408 or 504)
+        {
+            return new RefreshFailureInfo(
+                RefreshErrorCodes.Timeout,
+                "RiftBoard website timed out",
+                $"The RiftBoard website refresh timed out{StatusSuffix(exception.Status)}. The tray will retry automatically.",
+                true,
+                true,
+                15,
+                exception.Status);
+        }
+
+        var bodyFailure = Classify(exception.Message);
+        if (bodyFailure.Code != RefreshErrorCodes.Unknown)
+        {
+            return bodyFailure with { Status = exception.Status };
+        }
+
+        return exception.Status switch
+        {
+            429 => Known(RefreshErrorCodes.RateLimited, exception.Status),
+            >= 500 and <= 599 => Known(RefreshErrorCodes.Server, exception.Status),
+            _ => Classify(exception.Message) with { Status = exception.Status },
+        };
+    }
+
+    private static RefreshFailureInfo ClassifyDiscord(int? status)
+    {
+        return status switch
+        {
+            0 => new RefreshFailureInfo(
+                RefreshErrorCodes.Discord,
+                "Discord unavailable",
+                "The tray could not reach Discord. It will retry the live-game update automatically.",
+                true,
+                true,
+                15),
+            401 or 403 => new RefreshFailureInfo(
+                RefreshErrorCodes.Discord,
+                "Discord credentials rejected",
+                "Discord rejected the bot token or channel permissions. Check the Discord bot configuration.",
+                false,
+                true,
+                60,
+                status),
+            408 or 504 => new RefreshFailureInfo(
+                RefreshErrorCodes.Discord,
+                "Discord timed out",
+                $"Discord timed out{StatusSuffix(status)}. The tray will retry automatically.",
+                true,
+                true,
+                15,
+                status),
+            429 => new RefreshFailureInfo(
+                RefreshErrorCodes.Discord,
+                "Discord rate limited",
+                "Discord is rate limiting live-game posts. The tray will wait and retry automatically.",
+                true,
+                true,
+                5,
+                status),
+            >= 500 and <= 599 => new RefreshFailureInfo(
+                RefreshErrorCodes.Discord,
+                "Discord unavailable",
+                $"Discord is temporarily unavailable{StatusSuffix(status)}. The tray will retry automatically.",
+                true,
+                true,
+                15,
+                status),
+            _ => new RefreshFailureInfo(
+                RefreshErrorCodes.Discord,
+                "Discord update failed",
+                $"Discord rejected the live-game update{StatusSuffix(status)}. Check the bot and channel permissions.",
+                false,
+                false,
+                0,
+                status),
+        };
+    }
+
+    private static RefreshFailureInfo ClassifyHttpStatus(int status, string? detail)
+    {
+        return status switch
+        {
+            401 or 403 => Known(RefreshErrorCodes.AuthInvalid, status),
+            404 => Known(RefreshErrorCodes.ResourceNotFound, status),
+            408 or 504 => Known(RefreshErrorCodes.Timeout, status),
+            429 => Known(RefreshErrorCodes.RateLimited, status),
+            500 or 502 or 503 or 520 or 521 or 522 or 523 or 524 or 525 or 526 =>
+                Known(RefreshErrorCodes.RiotUpstream, status),
+            >= 500 and <= 599 => Known(RefreshErrorCodes.Server, status),
+            _ => Classify(detail) with { Status = status },
+        };
+    }
+
+    private static RefreshFailureInfo Known(string code, int? status = null)
+    {
+        return NormalizeCode(code) switch
+        {
+            RefreshErrorCodes.PlayerNotFound => new RefreshFailureInfo(
+                RefreshErrorCodes.PlayerNotFound,
+                "Player not found",
+                "The player or linked Riot account was not found. Check the Riot ID, tag, and region.",
+                false,
+                false,
+                0,
+                status),
+            RefreshErrorCodes.ResourceNotFound => new RefreshFailureInfo(
+                RefreshErrorCodes.ResourceNotFound,
+                "Riot data not found",
+                "A Riot match or account resource was not found. The saved reference may be stale.",
+                false,
+                false,
+                0,
+                status),
+            RefreshErrorCodes.StaleIdentity => new RefreshFailureInfo(
+                RefreshErrorCodes.StaleIdentity,
+                "Account needs attention",
+                "Riot could not resolve the saved account identity. The Riot ID or region may have changed.",
+                false,
+                false,
+                0,
+                status),
+            RefreshErrorCodes.PlayerData => new RefreshFailureInfo(
+                RefreshErrorCodes.PlayerData,
+                "Player data incomplete",
+                "The player record is missing Riot account data needed for refresh.",
+                false,
+                false,
+                0,
+                status),
+            RefreshErrorCodes.RateLimited => new RefreshFailureInfo(
+                RefreshErrorCodes.RateLimited,
+                "Rate limited",
+                "Riot is rate limiting refreshes. The tray will wait and retry automatically.",
+                true,
+                true,
+                10,
+                status ?? 429),
+            RefreshErrorCodes.AuthInvalid => new RefreshFailureInfo(
+                RefreshErrorCodes.AuthInvalid,
+                "Credentials rejected",
+                "Refresh credentials were rejected or have expired. Check the Riot API key or cron token.",
+                false,
+                true,
+                60,
+                status),
+            RefreshErrorCodes.RiotUpstream => new RefreshFailureInfo(
+                RefreshErrorCodes.RiotUpstream,
+                "Riot service unavailable",
+                status == 520
+                    ? "Riot's API gateway is temporarily unavailable (HTTP 520). This is not a missing player."
+                    : $"Riot's API is temporarily unavailable{StatusSuffix(status)}. The tray will retry automatically.",
+                true,
+                true,
+                15,
+                status),
+            RefreshErrorCodes.Timeout => new RefreshFailureInfo(
+                RefreshErrorCodes.Timeout,
+                "Riot request timed out",
+                $"Riot's API timed out{StatusSuffix(status)}. The tray will retry automatically.",
+                true,
+                true,
+                15,
+                status),
+            RefreshErrorCodes.Network => new RefreshFailureInfo(
+                RefreshErrorCodes.Network,
+                "Network unavailable",
+                "The tray could not reach Riot's API. Check the connection; it will retry automatically.",
+                true,
+                true,
+                15,
+                status),
+            RefreshErrorCodes.Database => new RefreshFailureInfo(
+                RefreshErrorCodes.Database,
+                "Database unavailable",
+                "RiftBoard could not reach its database. The tray will retry automatically.",
+                true,
+                true,
+                15,
+                status),
+            RefreshErrorCodes.Configuration => new RefreshFailureInfo(
+                RefreshErrorCodes.Configuration,
+                "Configuration needed",
+                "The refresh agent configuration is incomplete or invalid. Check config.json and the required environment values.",
+                false,
+                true,
+                60,
+                status),
+            RefreshErrorCodes.Discord => new RefreshFailureInfo(
+                RefreshErrorCodes.Discord,
+                "Discord update failed",
+                "Discord could not accept the live-game update. The tray will retry it automatically.",
+                true,
+                false,
+                0,
+                status),
+            RefreshErrorCodes.RefreshBusy => new RefreshFailureInfo(
+                RefreshErrorCodes.RefreshBusy,
+                "Refresh already running",
+                "Another refresh is already running. The tray will try again later.",
+                true,
+                false,
+                0,
+                status),
+            RefreshErrorCodes.Protocol => new RefreshFailureInfo(
+                RefreshErrorCodes.Protocol,
+                "Unreadable response",
+                "The refresh service returned an unreadable response. The tray will retry automatically.",
+                true,
+                true,
+                15,
+                status),
+            RefreshErrorCodes.Server => new RefreshFailureInfo(
+                RefreshErrorCodes.Server,
+                "Refresh service unavailable",
+                $"The refresh service is temporarily unavailable{StatusSuffix(status)}. The tray will retry automatically.",
+                true,
+                true,
+                15,
+                status),
+            _ => new RefreshFailureInfo(
+                RefreshErrorCodes.Unknown,
+                "Refresh error",
+                "The refresh failed for an unexpected reason. Open the log for details.",
+                true,
+                false,
+                0,
+                status),
+        };
+    }
+
+    private static int FailurePriority(string code)
+    {
+        return NormalizeCode(code) switch
+        {
+            RefreshErrorCodes.Configuration or RefreshErrorCodes.AuthInvalid => 100,
+            RefreshErrorCodes.Database => 95,
+            RefreshErrorCodes.Network or RefreshErrorCodes.Timeout or RefreshErrorCodes.RiotUpstream => 90,
+            RefreshErrorCodes.RateLimited => 85,
+            RefreshErrorCodes.Server or RefreshErrorCodes.Protocol => 80,
+            RefreshErrorCodes.Unknown => 60,
+            RefreshErrorCodes.Discord => 50,
+            RefreshErrorCodes.StaleIdentity or RefreshErrorCodes.PlayerData => 40,
+            RefreshErrorCodes.ResourceNotFound => 35,
+            RefreshErrorCodes.PlayerNotFound => 30,
+            _ => 10,
+        };
+    }
+
+    private static string NormalizeCode(string? code)
+    {
+        return (code ?? string.Empty)
+            .Trim()
+            .ToLowerInvariant()
+            .Replace('-', '_')
+            switch
+            {
+                "riot_rate_limited" => RefreshErrorCodes.RateLimited,
+                "riot_rate_limit" => RefreshErrorCodes.RateLimited,
+                "database_error" => RefreshErrorCodes.Database,
+                "network_error" => RefreshErrorCodes.Network,
+                "server_error" => RefreshErrorCodes.Server,
+                var normalized => normalized,
+            };
+    }
+
+    private static int? ExtractStatus(string message)
+    {
+        var match = StatusPattern.Match(message);
+        return match.Success && int.TryParse(match.Groups[1].Value, out var status)
+            ? status
+            : null;
+    }
+
+    private static string StatusSuffix(int? status)
+    {
+        return status is { } value ? $" (HTTP {value})" : string.Empty;
+    }
 }
 
 internal sealed record LiveDiscordMessage(string Content, object[] Embeds, string[] AllowedUserIds);
@@ -4573,7 +6014,15 @@ internal sealed record TrayStatus
     public string Error { get; init; } = "None";
 }
 
-internal sealed record TickOutcome(int Ok, int Fail, int Skipped, int Scanned, string? PlayerSummary, string? ErrorSummary)
+internal sealed record TickOutcome(
+    int Ok,
+    int Fail,
+    int Skipped,
+    int Scanned,
+    string? PlayerSummary,
+    string? ErrorSummary,
+    int? RetryAfterMs = null,
+    RefreshFailureInfo? Failure = null)
 {
     public string LogLine => $"Refreshed {Ok} players, failed {Fail}, skipped {Skipped}, scanned {Scanned}.{(string.IsNullOrWhiteSpace(ErrorSummary) ? string.Empty : $" Errors: {ErrorSummary}")}";
 }
@@ -4756,6 +6205,8 @@ internal sealed record JobConfig
 internal sealed class CronResponse
 {
     public bool Ok { get; init; }
+    public bool Skipped { get; init; }
+    public string? Reason { get; init; }
     public string? Error { get; init; }
     public CronResult? Result { get; init; }
 }
@@ -4768,7 +6219,7 @@ internal sealed class CronResult
     public int Scanned { get; set; }
     public List<CronError> Errors { get; set; } = [];
     public List<CronPlayer> Players { get; set; } = [];
-    internal int? RateLimitCooldownMs { get; set; }
+    public int? RetryAfterMs { get; set; }
 }
 
 internal sealed class CronError
@@ -4776,6 +6227,9 @@ internal sealed class CronError
     public string? PlayerId { get; init; }
     public string? Name { get; init; }
     public string Error { get; init; } = "Refresh failed";
+    public string? Code { get; init; }
+    public bool? Retryable { get; init; }
+    public int? UpstreamStatus { get; init; }
 }
 
 internal sealed class CronPlayer

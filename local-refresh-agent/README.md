@@ -14,6 +14,12 @@ npm run tray:community
 
 `npm run tray:host` also refreshes the root `RiftBoardRefreshTray.exe` in this folder for the host machine.
 
+Validate the tray error handling before packaging:
+
+```powershell
+dotnet run --project .\tests\RiftBoardRefreshTray.SmokeTests\RiftBoardRefreshTray.SmokeTests.csproj -c Release
+```
+
 Use:
 
 - Double-click `RiftBoardRefreshTray.exe`
@@ -42,6 +48,8 @@ Behavior:
 - refreshes `5` players every `10` minutes by default
 - checks live games every `15` minutes by default
 - includes rank refresh and the latest `5` LoL/TFT matches, with historical backfill disabled
+- retries bounded transient Riot failures (`408`, `5xx`, `520`) and pauses the whole runner after a shared provider outage
+- distinguishes missing players and stale Riot identities from rate limits, credentials, network, database, Discord, and provider errors
 - spaces direct Riot calls and pauses all direct polling when Riot returns `429`
 - direct mode shares one Mongo-backed Riot lease with the website, so two runners cannot spend the same key at once
 

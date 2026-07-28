@@ -22,6 +22,10 @@
 !/local-refresh-agent/src/RiftBoardRefreshTray/
 !/local-refresh-agent/src/RiftBoardRefreshTray/Program.cs
 !/local-refresh-agent/src/RiftBoardRefreshTray/RiftBoardRefreshTray.csproj
+!/local-refresh-agent/tests/
+!/local-refresh-agent/tests/RiftBoardRefreshTray.SmokeTests/
+!/local-refresh-agent/tests/RiftBoardRefreshTray.SmokeTests/Program.cs
+!/local-refresh-agent/tests/RiftBoardRefreshTray.SmokeTests/RiftBoardRefreshTray.SmokeTests.csproj
 
 
 # next.js
