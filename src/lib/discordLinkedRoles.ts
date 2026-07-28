@@ -274,7 +274,10 @@ export async function saveVerifiedDiscordLinkFromCandidate(input: {
   await assertPlayerLinkAvailable(input.discordUserId, player._id);
   const [existingLink, currentPrimary] = await Promise.all([
     DiscordLink.findOne(
-      { discordUserId: input.discordUserId, playerId: player._id },
+      {
+        discordUserId: input.discordUserId,
+        playerId: player._id,
+      } as Record<string, unknown>,
       { isPrimary: 1 }
     ).lean<{ isPrimary?: boolean } | null>(),
     findPrimaryDiscordLink(input.discordUserId),
@@ -331,7 +334,10 @@ export async function saveVerifiedDiscordLinkFromRso(input: {
   await assertPlayerLinkAvailable(input.discordUserId, input.player._id);
   const [existingLink, currentPrimary] = await Promise.all([
     DiscordLink.findOne(
-      { discordUserId: input.discordUserId, playerId: input.player._id },
+      {
+        discordUserId: input.discordUserId,
+        playerId: input.player._id,
+      } as Record<string, unknown>,
       { isPrimary: 1 }
     ).lean<{ isPrimary?: boolean } | null>(),
     findPrimaryDiscordLink(input.discordUserId),
