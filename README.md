@@ -67,11 +67,25 @@ npm.cmd run dev
 
 ### Environment
 
-Copy `.env.example` to `.env.local` and fill in your secrets before local development.
+RiftBoard uses three environment profiles:
+
+- `.env.example` is the committed key schema and contains only safe defaults.
+- `.env` is the private production profile used as the source when copying values into Vercel.
+- `.env.local` is the private local-development override.
+
+Both private files are ignored by Git and stored as plaintext. Keep secrets out of
+`.env.example`. Synchronize the profiles after adding or renaming a setting:
 
 ```powershell
-Copy-Item .env.example .env.local
+npm.cmd run env:sync
+npm.cmd run env:check
 ```
+
+The sync command preserves existing values and canonicalizes keys, comments, and ordering. It never
+copies a local-only value into `.env`. A missing `.env` key receives the example default; a missing
+`.env.local` key inherits `.env` and then the example default. Harmless duplicate declarations are
+collapsed, while conflicting non-empty duplicates or unknown keys stop the sync without deleting
+anything. Command output contains key names only, never values.
 
 Important variables:
 
@@ -130,6 +144,8 @@ npm run dev
 ```bash
 npm run build
 npm run lint
+npm run env:check
+npm run env:sync
 npm run discord:register
 npm run discord:worker
 ```

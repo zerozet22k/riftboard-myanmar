@@ -412,7 +412,7 @@ export default async function LeaderboardPage() {
                 Solo/Duo and Flex rankings, match history, and champion stats for Myanmar players.
               </p>
 
-              <div className="mt-7 max-w-2xl rounded-[24px] border border-white/8 bg-black/25 p-3 shadow-xl shadow-black/20">
+              <div className="mt-7 max-w-2xl">
                 <div className="mb-2 px-1 text-xs font-medium uppercase tracking-[0.16em] text-zinc-500">
                   Find a player
                 </div>
