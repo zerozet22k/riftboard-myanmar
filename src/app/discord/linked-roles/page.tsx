@@ -162,6 +162,8 @@ function noticeText(status?: string, message?: string, riotId?: string) {
     "confirm-riot-ownership": "Confirm that the Riot account belongs to you before adding it.",
     "no-riot-connection": "No verified Riot account was found on Discord. Use Riot Sign On instead.",
     "missing-discord-session": "Your Discord session expired. Sign in again.",
+    "session-ticket-invalid": "Discord sign-in expired before the session was saved. Continue with Discord again.",
+    "session-completion-failed": "Discord sign-in finished, but RiftBoard could not save the session. Try again.",
     "missing-rso-state": "Riot sign-in expired. Start Add Riot account again.",
     "invalid-rso-state": "Riot sign-in did not match this browser. Start Add Riot account again.",
     "guild-membership-required": "Join the RiftBoard Discord server before signing in.",
@@ -425,7 +427,13 @@ export default async function DiscordLinkedRolesPage({
   const linkedAccounts = viewer?.discordUserId
     ? await loadLinkedAccounts(viewer.discordUserId)
     : [];
-  const notice = noticeText(status, message, riotId);
+  const notice =
+    status === "connected" && !viewer
+      ? ({
+          tone: "red",
+          text: "Discord sign-in finished, but this browser did not keep the session. Continue with Discord again.",
+        } as const)
+      : noticeText(status, message, riotId);
   const nextReturnTo = normalizeReturnTo(returnTo);
   const discordName =
     viewer?.discordUsername ??

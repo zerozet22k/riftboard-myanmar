@@ -7,6 +7,7 @@ import {
 import { syncDiscordGuildRankRoleForStoredLink } from "@/lib/discordGuildRoles";
 import {
   clearPendingDiscordBindCookie,
+  discordSessionCookieIsSecure,
   normalizeReturnTo,
   readPendingDiscordBindCookieValue,
   setDiscordSessionCookie,
@@ -76,7 +77,11 @@ export async function POST(req: NextRequest) {
     }
 
     const response = NextResponse.redirect(target, 303);
-    setDiscordSessionCookie(response, { discordUserId: pending.discordUserId }, req.nextUrl.protocol === "https:");
+    setDiscordSessionCookie(
+      response,
+      { discordUserId: pending.discordUserId },
+      discordSessionCookieIsSecure(req)
+    );
     clearPendingDiscordBindCookie(response);
     return response;
   } catch (error) {

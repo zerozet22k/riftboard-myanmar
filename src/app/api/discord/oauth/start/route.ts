@@ -7,6 +7,16 @@ import { oauthRequestOrigin } from "@/lib/oauthRequest";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+function noStore(response: NextResponse) {
+  response.headers.set(
+    "Cache-Control",
+    "no-store, no-cache, must-revalidate, max-age=0"
+  );
+  response.headers.set("Pragma", "no-cache");
+  response.headers.set("Referrer-Policy", "no-referrer");
+  return response;
+}
+
 export async function GET(req: NextRequest) {
   const returnTo = normalizeReturnTo(req.nextUrl.searchParams.get("returnTo"));
   const callbackUrl = new URL(getDiscordRedirectUri());
@@ -18,12 +28,12 @@ export async function GET(req: NextRequest) {
   if (oauthRequestOrigin(req) !== callbackUrl.origin) {
     const canonicalStartUrl = new URL("/api/discord/oauth/start", callbackUrl.origin);
     canonicalStartUrl.searchParams.set("returnTo", returnTo);
-    return NextResponse.redirect(canonicalStartUrl);
+    return noStore(NextResponse.redirect(canonicalStartUrl, 303));
   }
 
   const state = crypto.randomBytes(24).toString("hex");
-  const response = NextResponse.redirect(makeDiscordOAuthUrl(state));
+  const response = NextResponse.redirect(makeDiscordOAuthUrl(state), 303);
 
   setDiscordOAuthStateCookie(response, { state, returnTo }, callbackUrl.protocol === "https:");
-  return response;
+  return noStore(response);
 }

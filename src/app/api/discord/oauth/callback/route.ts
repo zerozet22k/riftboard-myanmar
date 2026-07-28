@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   exchangeDiscordCode,
   getDiscordGuildId,
+  getDiscordRedirectUri,
   getDiscordUser,
   getDiscordUserGuilds,
 } from "@/lib/discord";
@@ -9,6 +10,7 @@ import { saveDiscordAccountFromOAuth } from "@/lib/discordAccountStore";
 import {
   clearDiscordOAuthStateCookie,
   clearPendingDiscordBindCookie,
+  makeDiscordLoginCompletionTicket,
   normalizeReturnTo,
   readDiscordOAuthStateCookieValue,
   setDiscordSessionCookie,
@@ -25,7 +27,10 @@ function redirectWithStatus(
   riotId?: string,
   returnTo?: string | null
 ) {
-  const url = new URL("/discord/linked-roles", req.url);
+  const url = new URL(
+    "/discord/linked-roles",
+    new URL(getDiscordRedirectUri()).origin
+  );
   url.searchParams.set("status", status);
   if (message) url.searchParams.set("message", message);
   if (riotId) url.searchParams.set("riotId", riotId);
@@ -33,7 +38,48 @@ function redirectWithStatus(
   if (safeReturnTo !== "/discord/linked-roles") {
     url.searchParams.set("returnTo", safeReturnTo);
   }
-  return NextResponse.redirect(url);
+  const response = NextResponse.redirect(url, 303);
+  response.headers.set(
+    "Cache-Control",
+    "no-store, no-cache, must-revalidate, max-age=0"
+  );
+  response.headers.set("Pragma", "no-cache");
+  response.headers.set("Referrer-Policy", "no-referrer");
+  return response;
+}
+
+function loginCompletionResponse(
+  discordUserId: string,
+  oauthState: string,
+  returnTo: string | null | undefined
+) {
+  const callbackUrl = new URL(getDiscordRedirectUri());
+  const completionUrl = new URL(
+    "/api/discord/session/complete",
+    callbackUrl.origin
+  );
+  completionUrl.searchParams.set(
+    "ticket",
+    makeDiscordLoginCompletionTicket({
+      discordUserId,
+      oauthState,
+      returnTo,
+    })
+  );
+
+  const response = NextResponse.redirect(completionUrl, 303);
+  response.headers.set(
+    "Cache-Control",
+    "no-store, no-cache, must-revalidate, max-age=0"
+  );
+  response.headers.set("Pragma", "no-cache");
+  response.headers.set("Referrer-Policy", "no-referrer");
+  setDiscordSessionCookie(
+    response,
+    { discordUserId },
+    callbackUrl.protocol === "https:"
+  );
+  return response;
 }
 
 export async function GET(req: NextRequest) {
@@ -125,19 +171,11 @@ export async function GET(req: NextRequest) {
     });
     connectedDiscordUserId = discordUser.id;
 
-    const response = redirectWithStatus(
-      req,
-      "connected",
-      "discord-account-connected",
-      undefined,
+    const response = loginCompletionResponse(
+      discordUser.id,
+      storedState.state,
       storedState.returnTo
     );
-    setDiscordSessionCookie(
-      response,
-      { discordUserId: discordUser.id },
-      req.nextUrl.protocol === "https:"
-    );
-    clearDiscordOAuthStateCookie(response);
     clearPendingDiscordBindCookie(response);
     return response;
   } catch (error) {
@@ -149,10 +187,11 @@ export async function GET(req: NextRequest) {
       storedState.returnTo
     );
     if (connectedDiscordUserId) {
+      const callbackUrl = new URL(getDiscordRedirectUri());
       setDiscordSessionCookie(
         response,
         { discordUserId: connectedDiscordUserId },
-        req.nextUrl.protocol === "https:"
+        callbackUrl.protocol === "https:"
       );
     }
     clearDiscordOAuthStateCookie(response);

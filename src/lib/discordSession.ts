@@ -13,16 +13,27 @@ import { decryptDiscordSecret, encryptDiscordSecret } from "@/lib/discord";
 import { normalizeOAuthReturnTo } from "@/lib/oauthRequest";
 import { Player } from "@/models/player";
 
-const DISCORD_SESSION_COOKIE = "discord_session";
+const SECURE_DISCORD_SESSION_COOKIE = "__Host-riftboard_session";
+const LOCAL_DISCORD_SESSION_COOKIE = "riftboard_session";
+const LEGACY_DISCORD_SESSION_COOKIE = "discord_session";
 const DISCORD_OAUTH_STATE_COOKIE = "discord_oauth_state";
 const DISCORD_PENDING_BIND_COOKIE = "discord_pending_bind";
 const SESSION_MAX_AGE = 60 * 60 * 24 * 30;
 const SHORT_STATE_MAX_AGE = 60 * 10;
+const LOGIN_COMPLETION_MAX_AGE = 60 * 2;
 
 type SignedSessionPayload = {
   v: 1;
   discordUserId: string;
   issuedAt: number;
+};
+
+type DiscordLoginCompletionPayload = {
+  v: 1;
+  discordUserId: string;
+  oauthState: string;
+  returnTo: string;
+  createdAt: number;
 };
 
 export type DiscordViewerSession = {
@@ -128,6 +139,18 @@ function baseCookieOptions(secure: boolean, maxAge: number) {
   };
 }
 
+export function discordSessionCookieIsSecure(req: NextRequest) {
+  const forwardedProtocol = req.headers
+    .get("x-forwarded-proto")
+    ?.split(",")[0]
+    ?.trim()
+    .replace(/:$/, "");
+  return (
+    req.nextUrl.protocol === "https:" ||
+    forwardedProtocol === "https"
+  );
+}
+
 export function normalizeReturnTo(input: string | undefined | null) {
   return normalizeOAuthReturnTo(input, "/discord/linked-roles");
 }
@@ -137,8 +160,11 @@ export function setDiscordSessionCookie(
   payload: Omit<SignedSessionPayload, "v" | "issuedAt">,
   secure: boolean
 ) {
+  const cookieName = secure
+    ? SECURE_DISCORD_SESSION_COOKIE
+    : LOCAL_DISCORD_SESSION_COOKIE;
   response.cookies.set(
-    DISCORD_SESSION_COOKIE,
+    cookieName,
     sealPayload<SignedSessionPayload>({
       v: 1,
       discordUserId: payload.discordUserId,
@@ -146,10 +172,71 @@ export function setDiscordSessionCookie(
     }),
     baseCookieOptions(secure, SESSION_MAX_AGE)
   );
+
+  for (const staleName of [
+    LEGACY_DISCORD_SESSION_COOKIE,
+    secure ? LOCAL_DISCORD_SESSION_COOKIE : SECURE_DISCORD_SESSION_COOKIE,
+  ]) {
+    response.cookies.set(staleName, "", {
+      httpOnly: true,
+      secure: staleName === SECURE_DISCORD_SESSION_COOKIE,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 0,
+    });
+  }
 }
 
 export function clearDiscordSessionCookie(response: NextResponse) {
-  response.cookies.set(DISCORD_SESSION_COOKIE, "", { path: "/", maxAge: 0 });
+  for (const cookieName of [
+    SECURE_DISCORD_SESSION_COOKIE,
+    LOCAL_DISCORD_SESSION_COOKIE,
+    LEGACY_DISCORD_SESSION_COOKIE,
+  ]) {
+    response.cookies.set(cookieName, "", {
+      httpOnly: true,
+      secure: cookieName === SECURE_DISCORD_SESSION_COOKIE,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 0,
+    });
+  }
+}
+
+export function makeDiscordLoginCompletionTicket(input: {
+  discordUserId: string;
+  oauthState: string;
+  returnTo?: string | null;
+}) {
+  return sealPayload<DiscordLoginCompletionPayload>({
+    v: 1,
+    discordUserId: String(input.discordUserId ?? "").trim(),
+    oauthState: String(input.oauthState ?? "").trim(),
+    returnTo: normalizeReturnTo(input.returnTo),
+    createdAt: Date.now(),
+  });
+}
+
+export function readDiscordLoginCompletionTicketValue(
+  token: string | undefined | null
+) {
+  const payload = unsealPayload<DiscordLoginCompletionPayload>(token);
+  if (!payload?.discordUserId || !payload.oauthState || payload.v !== 1) {
+    return null;
+  }
+  const createdAt = Number(payload.createdAt);
+  if (
+    !Number.isFinite(createdAt) ||
+    createdAt <= 0 ||
+    createdAt > Date.now() + 60_000 ||
+    Date.now() - createdAt > LOGIN_COMPLETION_MAX_AGE * 1000
+  ) {
+    return null;
+  }
+  return {
+    ...payload,
+    returnTo: normalizeReturnTo(payload.returnTo),
+  };
 }
 
 export function setDiscordOAuthStateCookie(
@@ -257,10 +344,29 @@ async function loadDiscordViewerSessionFromCookieValue(
     return null;
   }
 
+  let account;
   try {
-    const account = options?.verifyGuildMembership
+    account = options?.verifyGuildMembership
       ? (await loadVerifiedDiscordAccount(payload.discordUserId)).account
       : await loadStoredDiscordAccount(payload.discordUserId);
+  } catch (error) {
+    console.warn(
+      "[discord/session] Discord account restore failed",
+      error instanceof Error ? error.name : "UnknownError"
+    );
+    return null;
+  }
+
+  const ownerSession = {
+    discordUserId: String(account.discordUserId),
+    discordUsername: account.discordUsername ?? null,
+    playerId: null,
+    gameName: null,
+    tagLine: null,
+    linkId: null,
+  } satisfies DiscordViewerSession;
+
+  try {
     const link = await findPrimaryDiscordLink(payload.discordUserId);
     const player = link?._id
       ? await Player.findById(
@@ -270,16 +376,42 @@ async function loadDiscordViewerSessionFromCookieValue(
       : null;
 
     return {
-      discordUserId: String(account.discordUserId),
+      ...ownerSession,
       discordUsername: account.discordUsername ?? link?.discordUsername ?? null,
       playerId: player?._id ? String(player._id) : null,
       gameName: player?.gameName ?? null,
       tagLine: player?.tagLine ?? null,
       linkId: player?._id && link?._id ? String(link._id) : null,
     } satisfies DiscordViewerSession;
-  } catch {
-    return null;
+  } catch (error) {
+    console.warn(
+      "[discord/session] Optional Riot account restore failed",
+      error instanceof Error ? error.name : "UnknownError"
+    );
+    return ownerSession;
   }
+}
+
+async function loadDiscordViewerSessionFromCookieValues(
+  tokens: Array<string | undefined | null>,
+  options?: DiscordSessionLoadOptions
+) {
+  const uniqueTokens = [...new Set(tokens.filter((token): token is string => Boolean(token)))];
+  for (const token of uniqueTokens) {
+    const session = await loadDiscordViewerSessionFromCookieValue(token, options);
+    if (session) return session;
+  }
+  return null;
+}
+
+function discordSessionCookieValues(
+  readCookie: (name: string) => string | undefined
+) {
+  return [
+    readCookie(SECURE_DISCORD_SESSION_COOKIE),
+    readCookie(LOCAL_DISCORD_SESSION_COOKIE),
+    readCookie(LEGACY_DISCORD_SESSION_COOKIE),
+  ];
 }
 
 function asLinkedDiscordSession(
@@ -298,14 +430,16 @@ function asLinkedDiscordSession(
 
 export async function getOptionalDiscordSession() {
   const store = await cookies();
-  return loadDiscordViewerSessionFromCookieValue(store.get(DISCORD_SESSION_COOKIE)?.value);
+  return loadDiscordViewerSessionFromCookieValues(
+    discordSessionCookieValues((name) => store.get(name)?.value)
+  );
 }
 
 export async function requireDiscordSession(): Promise<DiscordLinkedSession> {
   const store = await cookies();
   const session = asLinkedDiscordSession(
-    await loadDiscordViewerSessionFromCookieValue(
-      store.get(DISCORD_SESSION_COOKIE)?.value,
+    await loadDiscordViewerSessionFromCookieValues(
+      discordSessionCookieValues((name) => store.get(name)?.value),
       { verifyGuildMembership: true }
     )
   );
@@ -317,8 +451,8 @@ export async function getOptionalDiscordSessionFromRequest(
   req: NextRequest,
   options?: DiscordSessionLoadOptions
 ) {
-  return loadDiscordViewerSessionFromCookieValue(
-    req.cookies.get(DISCORD_SESSION_COOKIE)?.value,
+  return loadDiscordViewerSessionFromCookieValues(
+    discordSessionCookieValues((name) => req.cookies.get(name)?.value),
     options
   );
 }

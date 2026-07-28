@@ -9,6 +9,7 @@ import {
 } from "@/lib/discordLinkedRoles";
 import {
   clearPendingDiscordBindCookie,
+  discordSessionCookieIsSecure,
   getOptionalDiscordSessionFromRequest,
   setDiscordSessionCookie,
 } from "@/lib/discordSession";
@@ -223,7 +224,11 @@ export async function GET(req: NextRequest) {
 
       const response = NextResponse.redirect(target);
       setRsoSessionCookie(response, { puuid }, req.nextUrl.protocol === "https:");
-      setDiscordSessionCookie(response, { discordUserId: discordSession.discordUserId }, req.nextUrl.protocol === "https:");
+      setDiscordSessionCookie(
+        response,
+        { discordUserId: discordSession.discordUserId },
+        discordSessionCookieIsSecure(req)
+      );
       clearRsoOAuthStateCookie(response);
       clearPendingDiscordBindCookie(response);
       return response;
