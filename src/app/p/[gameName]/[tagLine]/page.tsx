@@ -25,6 +25,9 @@ import {
 } from "@/lib/profileComments";
 import { bestRankSnapshot } from "@/lib/rank";
 import {
+  latestLolRankFetchAt,
+} from "@/lib/rankRefresh";
+import {
   absoluteUrl,
   getSiteBannerUrl,
   getSiteOpenGraphImages,
@@ -64,7 +67,6 @@ type PlayerView = {
   matchRegion?: string | null;
   profileIconId?: number | null;
   summonerLevel?: number | null;
-  lastRefreshAt?: Date | null;
   masterySyncedAt?: Date | null;
   solo?: PeakRankLike | null;
   flex?: PeakRankLike | null;
@@ -140,13 +142,6 @@ function safeDecode(seg: unknown) {
   } catch {
     return String(seg ?? "");
   }
-}
-
-function isoOrNull(value: Date | string | null | undefined) {
-  if (!value) return null;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return parsed.toISOString();
 }
 
 function rankLine(tier?: string | null, division?: string | null, lp?: number | null) {
@@ -517,7 +512,6 @@ export default async function PlayerProfilePage({
       matchRegion: 1,
       profileIconId: 1,
       summonerLevel: 1,
-      lastRefreshAt: 1,
       masterySyncedAt: 1,
       solo: 1,
       flex: 1,
@@ -649,10 +643,9 @@ export default async function PlayerProfilePage({
   const renderedAtMs = Date.now();
 
   const nameShown = `${player.gameName}#${player.tagLine}`;
-  const lastUpdatedShort =
-    formatDisplayMetaDateTime(player.lastRefreshAt) ??
-    formatDisplayMetaDateTime(isoOrNull(player.solo?.fetchedAt)) ??
-    formatDisplayMetaDateTime(isoOrNull(player.flex?.fetchedAt));
+  const lastUpdatedShort = formatDisplayMetaDateTime(
+    latestLolRankFetchAt(player)
+  );
   const masteryUpdatedShort = formatDisplayMetaDateTime(player.masterySyncedAt);
   const masteryPath = `${canonicalPath}/mastery`;
   const tftProfilePath = `/tft/p/${encodeURIComponent(canonicalGameName)}/${encodeURIComponent(canonicalTagLineLower)}`;
@@ -788,7 +781,10 @@ export default async function PlayerProfilePage({
 
             <div className="flex w-full flex-col gap-2">
               <div className="flex justify-start xl:justify-end">
-                <ProfileRefreshButton gameName={canonicalGameName} tagLine={canonicalTagLineLower} />
+                <ProfileRefreshButton
+                  gameName={canonicalGameName}
+                  tagLine={canonicalTagLineLower}
+                />
               </div>
               <HeroQueueSummary
                 title="Current ladder"

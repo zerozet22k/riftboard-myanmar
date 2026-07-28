@@ -36,6 +36,14 @@ import {
   prunePlayerMatches,
   pruneTftPlayerMatches,
 } from "@/lib/matchRetention";
+import {
+  latestLolRankFetchAt,
+  markPlayerRankRefreshCompleted,
+  markPlayerRankRefreshFailed,
+  markPlayerRankRefreshSchedulerFailed,
+  markPlayerRankRefreshStarted,
+  markPlayerRankRefreshSucceeded,
+} from "@/lib/rankRefresh";
 
 const SOLO = "RANKED_SOLO_5x5";
 const FLEX = "RANKED_FLEX_SR";
@@ -197,10 +205,29 @@ const COOLDOWN_MS = 2 * 60 * 1000;
 const MAX_MATCH_SYNC_COUNT = 100;
 const MATCH_SYNC_CONCURRENCY = 1;
 
-function lastSuccessfulRefreshAt(p: PlayerDoc): Date | null {
-  const candidates = [p?.lastRefreshAt, p?.solo?.fetchedAt, p?.flex?.fetchedAt, p?.tft?.fetchedAt]
-    .filter((d): d is Date => d instanceof Date)
-    .map((d) => new Date(d));
+function lastSuccessfulRefreshAt(
+  p: PlayerDoc,
+  opts?: {
+    syncLolProfile?: boolean;
+    syncTftMatches?: boolean;
+  }
+): Date | null {
+  const candidates: Date[] = [];
+  if (opts?.syncLolProfile !== false) {
+    const rankFetchedAt = latestLolRankFetchAt(p);
+    if (rankFetchedAt) candidates.push(rankFetchedAt);
+  }
+  if (opts?.syncTftMatches === true && p.tft?.fetchedAt instanceof Date) {
+    candidates.push(new Date(p.tft.fetchedAt));
+  }
+  if (
+    candidates.length === 0 &&
+    opts?.syncLolProfile === false &&
+    opts?.syncTftMatches !== true &&
+    p.lastRefreshAt instanceof Date
+  ) {
+    candidates.push(new Date(p.lastRefreshAt));
+  }
   if (!candidates.length) return null;
   candidates.sort((a, b) => b.getTime() - a.getTime());
   return candidates[0];
@@ -678,6 +705,7 @@ export async function refreshPlayerById(
     matchBackfillCount?: number;
 
     fullMastery?: boolean;
+    syncMastery?: boolean;
     syncTftMatches?: boolean;
     syncLolProfile?: boolean;
   }
@@ -686,11 +714,17 @@ export async function refreshPlayerById(
 
   let player = await Player.findById(playerId);
   if (!player) throw new Error("Player not found");
+  const rankRefreshPlayerId = player._id;
+  const rankRefreshRequestedAt = player.rankRefresh?.requestedAt;
+  await markPlayerRankRefreshStarted(
+    rankRefreshPlayerId,
+    rankRefreshRequestedAt
+  );
 
   const cooldownMs = opts?.cooldownMs ?? COOLDOWN_MS;
 
   if (!opts?.force) {
-    const last = lastSuccessfulRefreshAt(player);
+    const last = lastSuccessfulRefreshAt(player, opts);
     if (last) {
       const now = Date.now();
       const age = now - last.getTime();
@@ -734,6 +768,11 @@ export async function refreshPlayerById(
           (shouldBypassCooldownForLolMatches || shouldBypassCooldownForTftMatches);
         if (!canBypassForMatchSync) {
           const next = new Date(last.getTime() + cooldownMs);
+          await markPlayerRankRefreshCompleted(
+            rankRefreshPlayerId,
+            rankRefreshRequestedAt,
+            last
+          );
           return {
             ...player.toObject(),
             _skipped: true,
@@ -889,7 +928,7 @@ export async function refreshPlayerById(
   }
 
   // ✅ FIX: don’t silently swallow mastery write errors anymore
-  if (syncLolProfile) {
+  if (syncLolProfile && opts?.syncMastery !== false) {
     try {
       if (opts?.fullMastery) {
         await syncFullMastery(player, platform, puuid, now);
@@ -913,6 +952,9 @@ export async function refreshPlayerById(
 
   player.lastRefreshAt = now;
   await player.save();
+  if (syncLolProfile) {
+    await markPlayerRankRefreshSucceeded(player._id, now);
+  }
 
   for (const e of entries) {
     await insertRankIfChanged({
@@ -925,6 +967,13 @@ export async function refreshPlayerById(
       losses: e.losses,
       fetchedAt: now,
     });
+  }
+  if (syncLolProfile) {
+    await markPlayerRankRefreshCompleted(
+      rankRefreshPlayerId,
+      rankRefreshRequestedAt,
+      now
+    );
   }
 
   const syncMatches = opts?.syncMatches === true && player?.matchSync?.enabled !== false;
@@ -980,6 +1029,8 @@ export async function refreshAllPlayers(opts?: {
   syncMatches?: boolean;
   syncTftMatches?: boolean;
   syncLolProfile?: boolean;
+  syncMastery?: boolean;
+  includeRequestedRanks?: boolean;
   matchesCount?: number;
   matchBackfillCount?: number;
 }) {
@@ -990,28 +1041,98 @@ export async function refreshAllPlayers(opts?: {
 
   const q: Record<string, unknown> = {};
   if (opts?.leaderboardOnly) {
-    Object.assign(q, approvedCommunityLeaderboardQuery(opts?.leaderboardGroup ?? "burmese"));
-    q["leaderboard.status"] = opts?.leaderboardStatus ?? "approved";
+    Object.assign(q, {
+      ...approvedCommunityLeaderboardQuery(
+        opts?.leaderboardGroup ?? "burmese"
+      ),
+      "leaderboard.status": opts?.leaderboardStatus ?? "approved",
+    });
+  }
+  if (opts?.syncLolProfile !== false) {
+    q["track.lol"] = { $ne: false };
+    q.$nor = [
+      { "rankRefresh.retryAfterAt": { $gt: new Date() } },
+    ];
+  } else if (opts?.syncTftMatches === true) {
+    q["track.tft"] = { $ne: false };
   }
 
-  const playerSort: [string, 1][] =
-    opts?.syncMatches === true
-      ? [["matchSync.backfillLastSyncAt", 1], ["matchSync.lastSyncAt", 1], ["lastRefreshAt", 1], ["updatedAt", 1]]
+  const playerSort: [string, 1 | -1][] =
+    opts?.syncLolProfile !== false
+      ? [
+          ["solo.fetchedAt", 1],
+          ["flex.fetchedAt", 1],
+          ...(opts?.syncMatches === true &&
+          Number(opts?.matchBackfillCount ?? 0) > 0
+            ? ([["matchSync.backfillLastSyncAt", 1]] as [string, 1][])
+            : []),
+          ...(opts?.syncMatches === true
+            ? ([["matchSync.lastSyncAt", 1]] as [string, 1][])
+            : []),
+          ["updatedAt", 1],
+        ]
       : opts?.syncTftMatches === true
-        ? [["tftMatchSync.lastSyncAt", 1], ["lastRefreshAt", 1], ["updatedAt", 1]]
-        : [["lastRefreshAt", 1], ["updatedAt", 1]];
+        ? [
+            ["tftMatchSync.lastSyncAt", 1],
+            ["tft.fetchedAt", 1],
+            ["updatedAt", 1],
+          ]
+        : [["updatedAt", 1]];
 
-  const players = await Player.find(q, {
+  const playerProjection = {
     _id: 1,
     gameName: 1,
     tagLine: 1,
     lastRefreshAt: 1,
+    solo: 1,
+    flex: 1,
+    rankRefresh: 1,
     matchSync: 1,
     tftMatchSync: 1,
-  })
-    .sort(playerSort)
-    .limit(limit)
-    .lean();
+  } as const;
+
+  let players;
+  if (
+    opts?.leaderboardOnly &&
+    opts?.includeRequestedRanks &&
+    opts?.syncLolProfile !== false
+  ) {
+    const queuedPlayers = await Player.find(
+      {
+        "rankRefresh.requestedAt": { $type: "date" },
+        "track.lol": { $ne: false },
+      },
+      playerProjection
+    )
+      .sort({ "rankRefresh.requestedAt": 1, updatedAt: 1 })
+      .limit(limit)
+      .lean();
+
+    const remaining = limit - queuedPlayers.length;
+    if (remaining <= 0) {
+      players = queuedPlayers;
+    } else {
+      const regularQuery: Record<string, unknown> = { ...q };
+      if (queuedPlayers.length > 0) {
+        regularQuery._id = {
+          $nin: queuedPlayers.map((player) => player._id),
+        };
+      }
+      const regularPlayers = await Player.find(
+        regularQuery,
+        playerProjection
+      )
+        .sort(playerSort)
+        .limit(remaining)
+        .lean();
+      players = [...queuedPlayers, ...regularPlayers];
+    }
+  } else {
+    players = await Player.find(q, playerProjection)
+      .sort(playerSort)
+      .limit(limit)
+      .lean();
+  }
 
   const errors: { playerId: string; name?: string; error: string }[] = [];
   const playersSummary: { playerId: string; name?: string; status: "ok" | "skipped" | "failed" }[] = [];
@@ -1024,11 +1145,12 @@ export async function refreshAllPlayers(opts?: {
   for (const p of players) {
     try {
       const out = await refreshPlayerById(String(p._id), {
-        force: opts?.force,
+        force: opts?.force || Boolean(p.rankRefresh?.requestedAt),
         cooldownMs: opts?.cooldownMs,
         syncMatches: opts?.syncMatches === true,
         syncTftMatches: opts?.syncTftMatches === true,
         syncLolProfile: opts?.syncLolProfile,
+        syncMastery: opts?.syncMastery,
         matchesCount: opts?.matchesCount,
         matchBackfillCount: opts?.matchBackfillCount,
         fullMastery: false,
@@ -1055,6 +1177,16 @@ export async function refreshAllPlayers(opts?: {
       if (isRateLimit(e)) {
         rateLimited = true;
         retryAfterMs = rateLimitWaitMs(e, 120_000);
+      } else if (p.rankRefresh?.requestedAt) {
+        await markPlayerRankRefreshFailed(
+          p._id,
+          p.rankRefresh.requestedAt,
+          e
+        ).catch(() => undefined);
+      } else if (opts?.syncLolProfile !== false) {
+        await markPlayerRankRefreshSchedulerFailed(p._id, e).catch(
+          () => undefined
+        );
       }
       fail++;
       errors.push({

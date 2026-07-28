@@ -26,6 +26,15 @@ export type LeaderboardInfo = {
   note?: string;
 };
 
+export type RankRefreshInfo = {
+  requestedAt?: Date;
+  startedAt?: Date;
+  completedAt?: Date;
+  lastAttemptAt?: Date;
+  retryAfterAt?: Date;
+  lastError?: string;
+};
+
 export type RiotIdAlias = RiotIdAliasEntry;
 
 export type PlayerDoc = {
@@ -59,6 +68,7 @@ export type PlayerDoc = {
   masterySyncedAt?: Date;
 
   leaderboard?: LeaderboardInfo;
+  rankRefresh?: RankRefreshInfo;
 
 
   matchSync?: {
@@ -159,6 +169,14 @@ const PlayerSchema = new Schema<PlayerDoc>(
     masterySyncedAt: Date,
 
     leaderboard: { type: LeaderboardSchema, default: () => ({ group: null, status: null }) },
+    rankRefresh: {
+      requestedAt: Date,
+      startedAt: Date,
+      completedAt: Date,
+      lastAttemptAt: Date,
+      retryAfterAt: Date,
+      lastError: { type: String, trim: true },
+    },
 
     matchSync: {
       enabled: { type: Boolean, default: true },
@@ -202,6 +220,7 @@ PlayerSchema.index({ gameName: 1, tagLine: 1 });
 
 
 PlayerSchema.index({ lastRefreshAt: 1 });
+PlayerSchema.index({ "rankRefresh.requestedAt": -1 });
 
 export const Player =
   (mongoose.models.Player as mongoose.Model<PlayerDoc>) ??

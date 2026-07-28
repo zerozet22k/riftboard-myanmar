@@ -18,6 +18,10 @@ import {
   normalizeRiotIdPart,
 } from "@/lib/playerIdentity";
 import {
+  markPlayerRankRefreshFailed,
+  queuePlayerRankRefresh,
+} from "@/lib/rankRefresh";
+import {
   clearRsoOAuthStateCookie,
   exchangeRsoCode,
   fetchRsoUserInfo,
@@ -25,9 +29,12 @@ import {
   readRsoOAuthStateCookieValue,
   setRsoSessionCookie,
 } from "@/lib/riotAuth";
-import { getRsoAccountMe } from "@/lib/riot";
+import { getRsoAccountMe, isRiot429 } from "@/lib/riot";
 import { refreshPlayerById } from "@/lib/refresh";
-import { withRiotRefreshLease } from "@/lib/schedulerLease";
+import {
+  RiotRefreshBusyError,
+  withRiotRefreshLease,
+} from "@/lib/schedulerLease";
 import { Player } from "@/models/player";
 import { oauthProviderErrorMessage } from "@/lib/oauthRequest";
 
@@ -42,33 +49,59 @@ function redirectOAuthError(req: NextRequest, returnTo: string | undefined | nul
   return NextResponse.redirect(target);
 }
 
-async function refreshLinkedPlayer(playerId: unknown) {
+async function refreshLinkedPlayer(
+  playerId: unknown,
+  requestedAt: Date | string | null | undefined
+) {
   try {
-    await withRiotRefreshLease(() =>
+    const refreshed = await withRiotRefreshLease(() =>
       refreshPlayerById(String(playerId), {
         force: true,
         cooldownMs: 0,
         syncMatches: false,
         syncTftMatches: false,
+        syncMastery: false,
         matchesCount: 5,
         fullMastery: false,
       })
     );
+    const profilePath = canonicalPlayerPath(
+      refreshed.gameName,
+      refreshed.tagLine
+    );
+    revalidatePath("/");
     revalidatePath("/leaderboard");
     revalidatePath("/tft");
+    revalidatePath("/discord/linked-roles");
+    revalidatePath(profilePath);
+    return true;
   } catch (error) {
-    console.error("[riot/oauth] linked player refresh failed", error);
+    const queuedForRetry =
+      error instanceof RiotRefreshBusyError || isRiot429(error);
+    if (!queuedForRetry) {
+      await markPlayerRankRefreshFailed(
+        playerId,
+        requestedAt,
+        error
+      ).catch(() => undefined);
+    }
+    console.error(
+      "[riot/oauth] linked player refresh failed",
+      error instanceof Error ? error.name : "UnknownError"
+    );
+    return false;
   }
 }
 
 function scheduleLinkedAccountRefresh(
   playerId: unknown,
   linkId: string,
-  syncRoles: boolean
+  syncRoles: boolean,
+  requestedAt: Date | string | null | undefined
 ) {
   after(async () => {
-    await refreshLinkedPlayer(playerId);
-    if (!syncRoles) return;
+    const refreshed = await refreshLinkedPlayer(playerId, requestedAt);
+    if (!refreshed || !syncRoles) return;
 
     try {
       await syncDiscordLinkedRoleForStoredLink(linkId, { force: true });
@@ -210,10 +243,15 @@ export async function GET(req: NextRequest) {
         },
       });
 
+      const queuedRefresh = await queuePlayerRankRefresh(
+        player._id,
+        { force: true }
+      );
       scheduleLinkedAccountRefresh(
         player._id,
         String(bound.link._id),
-        bound.isPrimary
+        bound.isPrimary,
+        queuedRefresh.requestedAt
       );
 
       const target = new URL(normalizeReturnTo(savedState.returnTo), req.url);
@@ -242,7 +280,14 @@ export async function GET(req: NextRequest) {
     );
 
     if (player?._id) {
-      await refreshLinkedPlayer(player._id);
+      const queuedRefresh = await queuePlayerRankRefresh(
+        player._id,
+        { force: true }
+      );
+      await refreshLinkedPlayer(
+        player._id,
+        queuedRefresh.requestedAt
+      );
     }
 
     const target = new URL(

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import type { Metadata } from "next";
 import AccountHubPostAction from "@/components/AccountHubPostAction";
+import ProfileRefreshButton from "@/components/ProfileRefreshButton";
 import {
   hasCommunityAccessCookieValue,
   hasStoredCommunityAccessForDiscordUser,
@@ -13,6 +14,11 @@ import {
 } from "@/lib/discordSession";
 import { dbConnect } from "@/lib/mongodb";
 import { canonicalPlayerPath } from "@/lib/playerIdentity";
+import {
+  isRankRefreshPending,
+  latestLolRankFetchAt,
+  type RankRefreshStateLike,
+} from "@/lib/rankRefresh";
 import {
   getCommunityDiscordUrl,
   isCommunityCodeRequired,
@@ -33,13 +39,16 @@ type NoticeTone = "emerald" | "red" | "sky";
 
 type LinkedAccountRow = {
   linkId: string;
+  gameName: string;
+  tagLine: string;
   riotId: string;
   profileHref: string;
   platform: string;
   rank: string;
   verification: string;
   isRoleAccount: boolean;
-  syncedAt: Date | string | null;
+  rankUpdatedAt: Date | null;
+  rankRefreshPending: boolean;
 };
 
 type LeanLink = {
@@ -49,8 +58,6 @@ type LeanLink = {
   tagLine?: string;
   verificationSource?: string | null;
   isPrimary?: boolean;
-  lastSyncedAt?: Date | string | null;
-  guildRankRolesSyncedAt?: Date | string | null;
   updatedAt?: Date | string | null;
 };
 
@@ -61,7 +68,12 @@ type LeanPlayer = {
     tier?: string | null;
     division?: string | null;
     lp?: number | null;
+    fetchedAt?: Date | string | null;
   } | null;
+  flex?: {
+    fetchedAt?: Date | string | null;
+  } | null;
+  rankRefresh?: RankRefreshStateLike | null;
 };
 
 function noticeText(status?: string, message?: string, riotId?: string) {
@@ -80,8 +92,8 @@ function noticeText(status?: string, message?: string, riotId?: string) {
     return {
       tone: "emerald",
       text: riotId
-        ? `${riotId} is now connected to your Discord account.${roleWarning}`
-        : `Your Riot account is connected.${roleWarning}`,
+        ? `${riotId} is connected. Its rank is updating now.${roleWarning}`
+        : `Your Riot account is connected and its rank is updating now.${roleWarning}`,
     } as const;
   }
 
@@ -209,6 +221,12 @@ function Notice({ tone, text }: { tone: NoticeTone; text: string }) {
 }
 
 function displayRank(player?: LeanPlayer) {
+  if (!latestLolRankFetchAt(player ?? {})) {
+    return isRankRefreshPending(player?.rankRefresh)
+      ? "Updating rank..."
+      : "Rank not checked yet";
+  }
+
   const tier = String(player?.solo?.tier ?? "").trim().toUpperCase();
   if (!tier) return "Solo unranked";
 
@@ -226,17 +244,17 @@ function verificationLabel(source?: string | null) {
   return "Added by RiftBoard staff";
 }
 
-function formatSyncDate(value: Date | string | null) {
-  if (!value) return "Not synced yet";
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return "Not synced yet";
+function formatRankDate(value: Date | null) {
+  if (!value || Number.isNaN(value.getTime())) return "Rank not checked yet";
 
-  return `Synced ${new Intl.DateTimeFormat("en", {
+  return `Rank updated ${new Intl.DateTimeFormat("en", {
     day: "numeric",
     month: "short",
     year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
     timeZone: "Asia/Yangon",
-  }).format(date)}`;
+  }).format(value)}`;
 }
 
 async function loadLinkedAccounts(discordUserId: string): Promise<LinkedAccountRow[]> {
@@ -253,8 +271,6 @@ async function loadLinkedAccounts(discordUserId: string): Promise<LinkedAccountR
       tagLine: 1,
       verificationSource: 1,
       isPrimary: 1,
-      lastSyncedAt: 1,
-      guildRankRolesSyncedAt: 1,
       updatedAt: 1,
     }
   )
@@ -265,7 +281,7 @@ async function loadLinkedAccounts(discordUserId: string): Promise<LinkedAccountR
   const players = playerIds.length
     ? ((await Player.find(
         { _id: { $in: playerIds } },
-        { _id: 1, platform: 1, solo: 1 }
+        { _id: 1, platform: 1, solo: 1, flex: 1, rankRefresh: 1 }
       ).lean()) as unknown as LeanPlayer[])
     : [];
   const playerById = new Map(players.map((player) => [String(player._id), player]));
@@ -274,18 +290,19 @@ async function loadLinkedAccounts(discordUserId: string): Promise<LinkedAccountR
     const gameName = String(link.gameName ?? "").trim();
     const tagLine = String(link.tagLine ?? "").trim();
     const player = playerById.get(String(link.playerId));
+    const rankUpdatedAt = latestLolRankFetchAt(player ?? {});
     return {
       linkId: String(link._id),
+      gameName,
+      tagLine,
       riotId: `${gameName}#${tagLine}`,
       profileHref: canonicalPlayerPath(gameName, tagLine),
       platform: String(player?.platform ?? "").trim().toUpperCase() || "AUTO",
       rank: displayRank(player),
       verification: verificationLabel(link.verificationSource),
       isRoleAccount: link.isPrimary === true,
-      syncedAt:
-        link.guildRankRolesSyncedAt ??
-        link.lastSyncedAt ??
-        null,
+      rankUpdatedAt,
+      rankRefreshPending: isRankRefreshPending(player?.rankRefresh),
     };
   });
 }
@@ -326,7 +343,7 @@ function RiotAccountRow({ account }: { account: LinkedAccountRow }) {
             <span>{account.rank}</span>
           </div>
           <div className="mt-1 text-xs text-zinc-500">
-            {account.verification} · {formatSyncDate(account.syncedAt)}
+            {account.verification} · {formatRankDate(account.rankUpdatedAt)}
           </div>
         </div>
 
@@ -337,6 +354,13 @@ function RiotAccountRow({ account }: { account: LinkedAccountRow }) {
           >
             Open profile
           </Link>
+          <ProfileRefreshButton
+            gameName={account.gameName}
+            tagLine={account.tagLine}
+            initialPending={account.rankRefreshPending}
+            retryPending
+            compact
+          />
           {account.isRoleAccount ? (
             <AccountHubPostAction
               action="/api/discord/bind/sync"

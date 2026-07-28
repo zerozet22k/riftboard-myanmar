@@ -5,6 +5,7 @@ import AdSenseSlot from "@/components/AdSenseSlot";
 import { dbConnect } from "@/lib/mongodb";
 import HomeSearch from "@/components/HomeSearch";
 import { bestRankSnapshot } from "@/lib/rank";
+import { latestLolRankFetchAt } from "@/lib/rankRefresh";
 import { getLeaderboardAdSlotId } from "@/lib/adsense";
 import {
   absoluteUrl,
@@ -86,7 +87,6 @@ type LeaderboardPlayer = {
   solo?: RankSnapshot | null;
   flex?: RankSnapshot | null;
   mains?: PlayerMain[] | null;
-  lastRefreshAt?: Date | string | null;
 };
 
 type RankHistoryRow = {
@@ -146,10 +146,7 @@ function topMains(p: LeaderboardPlayer): NonNullable<LeaderboardRow["mains"]> {
 }
 
 function lastUpdatedIso(p: LeaderboardPlayer): string | null {
-  const d = p?.lastRefreshAt ?? p?.solo?.fetchedAt ?? p?.flex?.fetchedAt ?? null;
-  if (!d) return null;
-  const t = new Date(d).getTime();
-  return Number.isFinite(t) ? new Date(t).toISOString() : null;
+  return latestLolRankFetchAt(p)?.toISOString() ?? null;
 }
 
 function pHref(gameName: string, tagLine: string) {
@@ -235,7 +232,6 @@ export default async function LeaderboardPage() {
       solo: 1,
       flex: 1,
       mains: 1,
-      lastRefreshAt: 1,
       updatedAt: 1,
     }
   ).lean<LeaderboardPlayer[]>();

@@ -3,7 +3,6 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import ProfileAvatar from "@/components/ProfileAvatar";
-import ProfileRefreshButton from "@/components/ProfileRefreshButton";
 import RankEmblem from "@/components/RankEmblem";
 import TftMatchHistory, { type TftMatchRow } from "@/components/TftMatchHistory";
 import {
@@ -455,9 +454,6 @@ export default async function TftPlayerProfilePage({
             </div>
 
             <div className="flex w-full flex-col gap-2">
-              <div className="flex justify-start xl:justify-end">
-                <ProfileRefreshButton gameName={canonicalGameName} tagLine={canonicalTagLineLower} mode="tft" />
-              </div>
               <RankCard
                 title="TFT Ranked"
                 current={tft}

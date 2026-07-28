@@ -108,6 +108,8 @@ export async function GET(req: NextRequest) {
             force,
             syncMatches,
             syncTftMatches,
+            syncMastery: false,
+            includeRequestedRanks: true,
             matchesCount,
             matchBackfillCount,
         });

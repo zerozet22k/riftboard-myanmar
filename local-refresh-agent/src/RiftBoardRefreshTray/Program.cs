@@ -941,6 +941,7 @@ internal sealed class RefreshLoop
     private readonly object _rateLimitSync = new();
     private CancellationTokenSource? _cts;
     private Task? _rankTask;
+    private Task? _queuedRankTask;
     private Task? _tftTask;
     private Task? _liveTask;
     private bool _lastRankFailed;
@@ -998,6 +999,7 @@ internal sealed class RefreshLoop
 
             _cts = new CancellationTokenSource();
             _rankTask = RunJobAsync(RefreshJob.Rank, _cts.Token);
+            _queuedRankTask = RunQueuedRankRequestsAsync(_cts.Token);
             _tftTask = RunJobAsync(RefreshJob.Tft, _cts.Token);
             _liveTask = RunJobAsync(RefreshJob.Live, _cts.Token);
             _updateState("running");
@@ -1013,6 +1015,7 @@ internal sealed class RefreshLoop
     public async Task StopAsync()
     {
         Task? rankTask;
+        Task? queuedRankTask;
         Task? tftTask;
         Task? liveTask;
 
@@ -1026,10 +1029,12 @@ internal sealed class RefreshLoop
 
             _cts.Cancel();
             rankTask = _rankTask;
+            queuedRankTask = _queuedRankTask;
             tftTask = _tftTask;
             liveTask = _liveTask;
             _cts = null;
             _rankTask = null;
+            _queuedRankTask = null;
             _tftTask = null;
             _liveTask = null;
             _updateState("stopped");
@@ -1047,6 +1052,11 @@ internal sealed class RefreshLoop
         if (rankTask is not null)
         {
             try { await rankTask; } catch (OperationCanceledException) { }
+        }
+
+        if (queuedRankTask is not null)
+        {
+            try { await queuedRankTask; } catch (OperationCanceledException) { }
         }
 
         if (tftTask is not null)
@@ -1129,6 +1139,70 @@ internal sealed class RefreshLoop
             _updateCurrent("Idle");
             updateNext(DateTimeOffset.Now.Add(delay));
             await Task.Delay(delay, cancellationToken);
+        }
+    }
+
+    private async Task RunQueuedRankRequestsAsync(CancellationToken cancellationToken)
+    {
+        var directService = (CSharpRefreshService?)null;
+        var pollInterval = TimeSpan.FromSeconds(20);
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                var config = await AgentConfig.LoadAsync(
+                    Path.Combine(_baseDirectory, "config.json"),
+                    cancellationToken);
+                if (!config.CronOnly && config.RankJob.Enabled)
+                {
+                    directService ??= new CSharpRefreshService(_repoRoot);
+
+                    await _tickGate.WaitAsync(cancellationToken);
+                    CronResult result;
+                    try
+                    {
+                        result = await directService.RefreshOneQueuedRankAsync(
+                            config.RankJob,
+                            cancellationToken);
+                    }
+                    finally
+                    {
+                        _tickGate.Release();
+                    }
+
+                    if (result.Scanned > 0)
+                    {
+                        var outcome = new TickOutcome(
+                            result.Ok,
+                            result.Fail,
+                            result.Skipped,
+                            result.Scanned,
+                            BuildCronPlayerSummary(result.Players),
+                            PrefixError("Queued rank", BuildCronErrorSummary(result.Errors)));
+                        _rankLogger.Info($"Queued rank: {outcome.LogLine}");
+                        _updateRankStatus(FormatPhaseStatus(outcome));
+                        _updateRankLast(
+                            $"{DateTimeOffset.Now:hh:mm tt} - {result.Ok} queued rank saved" +
+                            (result.Fail > 0 ? $", {result.Fail} failed" : string.Empty));
+                        SetFailureState(
+                            RefreshJob.Rank,
+                            result.Fail > 0,
+                            outcome.ErrorSummary ?? outcome.LogLine);
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _rankLogger.Error($"Queued rank watcher failed: {ex}");
+                _updateLastError(ex.Message);
+            }
+
+            await Task.Delay(pollInterval, cancellationToken);
         }
     }
 
@@ -1601,6 +1675,140 @@ internal sealed class CSharpRefreshService
         }
     }
 
+    public async Task<CronResult> RefreshOneQueuedRankAsync(
+        JobConfig config,
+        CancellationToken cancellationToken)
+    {
+        // Avoid even touching the shared Riot lease when there is no durable
+        // owner request waiting.
+        var hasQueuedRequest = await _players
+            .Find(QueuedRankRefreshFilter())
+            .Project(Builders<BsonDocument>.Projection.Include("_id"))
+            .Limit(1)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (hasQueuedRequest is null)
+        {
+            return new CronResult();
+        }
+
+        var leaseOwner = $"{Environment.MachineName}:{Environment.ProcessId}:queued-rank:{Guid.NewGuid():N}";
+        if (!await TryAcquireRiotRefreshLeaseAsync(leaseOwner, cancellationToken))
+        {
+            return new CronResult { Skipped = 1 };
+        }
+
+        var releaseLease = true;
+        try
+        {
+            var result = await RefreshOneQueuedRankWithLeaseAsync(config, cancellationToken);
+            if (result.RateLimitCooldownMs is { } cooldownMs)
+            {
+                releaseLease = false;
+                await HoldRiotRefreshLeaseForCooldownAsync(leaseOwner, cooldownMs);
+            }
+
+            return result;
+        }
+        catch (RiotApiException ex) when (IsRateLimit(ex))
+        {
+            releaseLease = false;
+            await HoldRiotRefreshLeaseForCooldownAsync(
+                leaseOwner,
+                ComputeRiotRateLimitCooldownMs(ex));
+            throw;
+        }
+        finally
+        {
+            if (releaseLease)
+            {
+                try
+                {
+                    await ReleaseRiotRefreshLeaseAsync(leaseOwner);
+                }
+                catch
+                {
+                    // The fixed lease expiry makes a failed release recoverable.
+                }
+            }
+        }
+    }
+
+    private async Task<CronResult> RefreshOneQueuedRankWithLeaseAsync(
+        JobConfig config,
+        CancellationToken cancellationToken)
+    {
+        var result = new CronResult();
+        var player = await _players
+            .Find(QueuedRankRefreshFilter())
+            .Sort(Builders<BsonDocument>.Sort.Ascending("rankRefresh.requestedAt").Ascending("updatedAt"))
+            .Limit(1)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (player is null)
+        {
+            return result;
+        }
+
+        result.Scanned = 1;
+        var id = player.GetValue("_id").AsObjectId;
+        var name = $"{ReadString(player, "gameName")}#{ReadString(player, "tagLine")}";
+        var rankOnlyConfig = config with
+        {
+            Limit = 1,
+            SyncMatches = false,
+            SyncTftMatches = false,
+            MatchBackfillCount = 0,
+        };
+
+        try
+        {
+            await RefreshRankAsync(
+                player,
+                rankOnlyConfig,
+                cancellationToken,
+                syncTftRank: false);
+            result.Ok = 1;
+            result.Players.Add(new CronPlayer
+            {
+                PlayerId = id.ToString(),
+                Name = name,
+                Status = "ok",
+            });
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            result.Fail = 1;
+            result.Errors.Add(new CronError
+            {
+                PlayerId = id.ToString(),
+                Name = name,
+                Error = ex.Message,
+            });
+            result.Players.Add(new CronPlayer
+            {
+                PlayerId = id.ToString(),
+                Name = name,
+                Status = "failed",
+            });
+            if (IsRateLimit(ex))
+            {
+                result.RateLimitCooldownMs = ComputeRiotRateLimitCooldownMs(ex);
+            }
+        }
+
+        return result;
+    }
+
+    private static FilterDefinition<BsonDocument> QueuedRankRefreshFilter()
+    {
+        return Builders<BsonDocument>.Filter.Type(
+            "rankRefresh.requestedAt",
+            BsonType.DateTime);
+    }
+
     private async Task<CronResult> RefreshWithLeaseAsync(RefreshJob job, JobConfig config, CancellationToken cancellationToken)
     {
         if (job == RefreshJob.Live)
@@ -1609,20 +1817,86 @@ internal sealed class CSharpRefreshService
         }
 
         var result = new CronResult();
-        var filter = Builders<BsonDocument>.Filter.Eq("leaderboard.group", "burmese") &
-                     Builders<BsonDocument>.Filter.Eq("leaderboard.status", "approved");
-        filter &= job == RefreshJob.Tft
-            ? Builders<BsonDocument>.Filter.Ne("track.tft", false) &
-              Builders<BsonDocument>.Filter.Ne("tftMatchSync.enabled", false)
-            : Builders<BsonDocument>.Filter.Ne("track.lol", false) &
-              Builders<BsonDocument>.Filter.Ne("matchSync.enabled", false);
-        var sort = job == RefreshJob.Tft
-            ? Builders<BsonDocument>.Sort.Ascending("tftMatchSync.lastSyncAt").Ascending("lastRefreshAt").Ascending("updatedAt")
-            : config.SyncMatches
-                ? Builders<BsonDocument>.Sort.Ascending("matchSync.backfillLastSyncAt").Ascending("matchSync.lastSyncAt").Ascending("lastRefreshAt").Ascending("updatedAt")
-                : Builders<BsonDocument>.Sort.Ascending("lastRefreshAt").Ascending("updatedAt");
+        var approvedLeaderboard =
+            Builders<BsonDocument>.Filter.Eq("leaderboard.group", "burmese") &
+            Builders<BsonDocument>.Filter.Eq("leaderboard.status", "approved");
 
-        var players = await _players.Find(filter).Sort(sort).Limit(config.Limit).ToListAsync(cancellationToken);
+        List<BsonDocument> players;
+        if (job == RefreshJob.Rank)
+        {
+            var lolTrackingEnabled = Builders<BsonDocument>.Filter.Ne("track.lol", false);
+            var queuedRankRefresh = QueuedRankRefreshFilter();
+
+            // User-requested rank updates are durable and may belong to a linked
+            // account that is not on the public leaderboard. Drain those first,
+            // oldest request first, then use the remaining batch capacity for
+            // the stalest approved rank snapshots.
+            var queuedPlayers = await _players
+                .Find(queuedRankRefresh)
+                .Sort(Builders<BsonDocument>.Sort.Ascending("rankRefresh.requestedAt").Ascending("updatedAt"))
+                .Limit(config.Limit)
+                .ToListAsync(cancellationToken);
+
+            players = queuedPlayers;
+            var remaining = config.Limit - queuedPlayers.Count;
+            if (remaining > 0)
+            {
+                var retryReady =
+                    Builders<BsonDocument>.Filter.Exists("rankRefresh.retryAfterAt", false) |
+                    Builders<BsonDocument>.Filter.Lte("rankRefresh.retryAfterAt", DateTime.UtcNow);
+                var regularFilter =
+                    approvedLeaderboard &
+                    lolTrackingEnabled &
+                    retryReady;
+                if (queuedPlayers.Count > 0)
+                {
+                    regularFilter &= Builders<BsonDocument>.Filter.Nin(
+                        "_id",
+                        queuedPlayers.Select(player => player.GetValue("_id"))
+                    );
+                }
+
+                var rankSortParts = new List<SortDefinition<BsonDocument>>
+                {
+                    Builders<BsonDocument>.Sort.Ascending("solo.fetchedAt"),
+                    Builders<BsonDocument>.Sort.Ascending("flex.fetchedAt"),
+                };
+                if (config.SyncMatches && config.MatchBackfillCount > 0)
+                {
+                    rankSortParts.Add(Builders<BsonDocument>.Sort.Ascending("matchSync.backfillLastSyncAt"));
+                }
+                if (config.SyncMatches)
+                {
+                    rankSortParts.Add(Builders<BsonDocument>.Sort.Ascending("matchSync.lastSyncAt"));
+                }
+                rankSortParts.Add(Builders<BsonDocument>.Sort.Ascending("lastRefreshAt"));
+                rankSortParts.Add(Builders<BsonDocument>.Sort.Ascending("updatedAt"));
+
+                var regularPlayers = await _players
+                    .Find(regularFilter)
+                    .Sort(Builders<BsonDocument>.Sort.Combine(rankSortParts))
+                    .Limit(remaining)
+                    .ToListAsync(cancellationToken);
+                players.AddRange(regularPlayers);
+            }
+        }
+        else
+        {
+            var tftFilter =
+                approvedLeaderboard &
+                Builders<BsonDocument>.Filter.Ne("track.tft", false) &
+                Builders<BsonDocument>.Filter.Ne("tftMatchSync.enabled", false);
+            var tftSort = Builders<BsonDocument>.Sort
+                .Ascending("tftMatchSync.lastSyncAt")
+                .Ascending("tft.fetchedAt")
+                .Ascending("updatedAt");
+            players = await _players
+                .Find(tftFilter)
+                .Sort(tftSort)
+                .Limit(config.Limit)
+                .ToListAsync(cancellationToken);
+        }
+
         result.Scanned = players.Count;
 
         foreach (var player in players)
@@ -1633,7 +1907,11 @@ internal sealed class CSharpRefreshService
             {
                 if (job == RefreshJob.Rank)
                 {
-                    await RefreshRankAsync(player, config, cancellationToken);
+                    await RefreshRankAsync(
+                        player,
+                        config,
+                        cancellationToken,
+                        syncTftRank: false);
                 }
                 else
                 {
@@ -2227,83 +2505,156 @@ internal sealed class CSharpRefreshService
         }
     }
 
-    private async Task RefreshRankAsync(BsonDocument player, JobConfig config, CancellationToken cancellationToken)
+    private async Task RefreshRankAsync(
+        BsonDocument player,
+        JobConfig config,
+        CancellationToken cancellationToken,
+        bool syncTftRank = true)
     {
         var now = DateTime.UtcNow;
         var playerId = player.GetValue("_id").AsObjectId;
-        var gameName = ReadString(player, "gameName") ?? throw new InvalidOperationException("Player missing gameName");
-        var tagLine = ReadString(player, "tagLine") ?? throw new InvalidOperationException("Player missing tagLine");
-        var puuid = ReadString(player, "puuid");
+        var claimedRequestedAt = NestedDateTimeValue(
+            player,
+            "rankRefresh",
+            "requestedAt");
+        if (claimedRequestedAt is not null)
+        {
+            await MarkRankRefreshStartedAsync(
+                playerId,
+                claimedRequestedAt.Value,
+                now,
+                cancellationToken);
+        }
+
+        var puuid = ReadString(player, "puuid") ?? "";
+        var matchRegion = "";
+        var rankPersisted = false;
         try
         {
-            var account = await GetAccountByRiotIdAsync(gameName, tagLine, "lol", cancellationToken);
-            var currentPuuid = account.GetProperty("puuid").GetString();
-            if (!string.IsNullOrWhiteSpace(currentPuuid))
-            {
-                puuid = currentPuuid;
-            }
-        }
-        catch
-        {
-            if (string.IsNullOrWhiteSpace(puuid))
-            {
-                throw;
-            }
-        }
-
-        if (string.IsNullOrWhiteSpace(puuid))
-        {
-            throw new InvalidOperationException("Riot account did not return a puuid.");
-        }
-
-        var platform = ReadString(player, "platform");
-        JsonElement summoner;
-        if (string.IsNullOrWhiteSpace(platform) || platform == "auto")
-        {
-            (platform, summoner) = await FindSeaSummonerByPuuidAsync(puuid, cancellationToken);
-        }
-        else
-        {
+            var gameName = ReadString(player, "gameName") ?? throw new InvalidOperationException("Player missing gameName");
+            var tagLine = ReadString(player, "tagLine") ?? throw new InvalidOperationException("Player missing tagLine");
             try
             {
-                summoner = await RiotGetJsonAsync($"https://{platform}.api.riotgames.com/lol/summoner/v4/summoners/by-puuid/{Uri.EscapeDataString(puuid)}", "lol", cancellationToken);
+                var account = await GetAccountByRiotIdAsync(gameName, tagLine, "lol", cancellationToken);
+                var currentPuuid = account.GetProperty("puuid").GetString();
+                if (!string.IsNullOrWhiteSpace(currentPuuid))
+                {
+                    puuid = currentPuuid;
+                }
             }
-            catch (RiotApiException ex) when (IsDecryptingBadRequest(ex))
+            catch
+            {
+                if (string.IsNullOrWhiteSpace(puuid))
+                {
+                    throw;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(puuid))
+            {
+                throw new InvalidOperationException("Riot account did not return a puuid.");
+            }
+
+            var platform = ReadString(player, "platform");
+            JsonElement summoner;
+            if (string.IsNullOrWhiteSpace(platform) || platform == "auto")
             {
                 (platform, summoner) = await FindSeaSummonerByPuuidAsync(puuid, cancellationToken);
             }
+            else
+            {
+                try
+                {
+                    summoner = await RiotGetJsonAsync($"https://{platform}.api.riotgames.com/lol/summoner/v4/summoners/by-puuid/{Uri.EscapeDataString(puuid)}", "lol", cancellationToken);
+                }
+                catch (RiotApiException ex) when (IsDecryptingBadRequest(ex))
+                {
+                    (platform, summoner) = await FindSeaSummonerByPuuidAsync(puuid, cancellationToken);
+                }
+            }
+
+            var entries = await RiotGetJsonAsync($"https://{platform}.api.riotgames.com/lol/league/v4/entries/by-puuid/{Uri.EscapeDataString(puuid)}", "lol", cancellationToken);
+            var tftLeague = syncTftRank
+                ? await FindTftLeagueAsync(puuid, platform, cancellationToken)
+                : (JsonElement?)null;
+            matchRegion = PlatformToMatchRegion(platform);
+            var completedAt = DateTime.UtcNow;
+
+            var updates = new List<UpdateDefinition<BsonDocument>>
+            {
+                Builders<BsonDocument>.Update.Set("puuid", puuid),
+                Builders<BsonDocument>.Update.Set("tftPuuid", puuid),
+                Builders<BsonDocument>.Update.Set("platform", platform),
+                Builders<BsonDocument>.Update.Set("matchRegion", matchRegion),
+                Builders<BsonDocument>.Update.Set("lastRefreshAt", now),
+                Builders<BsonDocument>.Update.Set("updatedAt", now),
+            };
+            SetJsonString(updates, "summonerId", summoner, "id");
+            SetJsonInt(updates, "profileIconId", summoner, "profileIconId");
+            SetJsonString(updates, "summonerName", summoner, "name");
+            SetJsonInt(updates, "summonerLevel", summoner, "summonerLevel");
+            SetJsonLong(updates, "revisionDate", summoner, "revisionDate");
+            ApplyLeagueSnapshot(updates, entries, "RANKED_SOLO_5x5", "solo", now);
+            ApplyLeagueSnapshot(updates, entries, "RANKED_FLEX_SR", "flex", now);
+            if (tftLeague is { } tftEntries)
+            {
+                ApplyLeagueSnapshot(updates, tftEntries, "RANKED_TFT", "tft", now);
+            }
+
+            await _players.UpdateOneAsync(
+                Builders<BsonDocument>.Filter.Eq("_id", playerId),
+                Builders<BsonDocument>.Update.Combine(updates),
+                cancellationToken: cancellationToken);
+            rankPersisted = true;
+            if (claimedRequestedAt is not null)
+            {
+                await MarkRankRefreshCompletedAsync(
+                    playerId,
+                    claimedRequestedAt.Value,
+                    completedAt,
+                    cancellationToken);
+            }
+            else
+            {
+                await ClearRankRefreshRetryBackoffAsync(
+                    playerId,
+                    cancellationToken);
+            }
+            await InsertRankEntriesAsync(playerId, entries, now, cancellationToken);
+            if (tftLeague is { } tftRankEntries)
+            {
+                await InsertRankEntriesAsync(
+                    playerId,
+                    tftRankEntries,
+                    now,
+                    cancellationToken);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Keep a queued request pending when the agent is shutting down.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            if (!rankPersisted && !IsRateLimit(ex))
+            {
+                if (claimedRequestedAt is not null)
+                {
+                    await MarkRankRefreshFailedAsync(
+                        playerId,
+                        claimedRequestedAt.Value,
+                        ex);
+                }
+                else
+                {
+                    await MarkRegularRankRefreshFailedAsync(playerId, ex);
+                }
+            }
+            throw;
         }
 
-        var entries = await RiotGetJsonAsync($"https://{platform}.api.riotgames.com/lol/league/v4/entries/by-puuid/{Uri.EscapeDataString(puuid)}", "lol", cancellationToken);
-        var tftLeague = await FindTftLeagueAsync(puuid, platform, cancellationToken);
-        var matchRegion = PlatformToMatchRegion(platform);
-
-        var updates = new List<UpdateDefinition<BsonDocument>>
-        {
-            Builders<BsonDocument>.Update.Set("puuid", puuid),
-            Builders<BsonDocument>.Update.Set("tftPuuid", puuid),
-            Builders<BsonDocument>.Update.Set("platform", platform),
-            Builders<BsonDocument>.Update.Set("matchRegion", matchRegion),
-            Builders<BsonDocument>.Update.Set("lastRefreshAt", now),
-            Builders<BsonDocument>.Update.Set("updatedAt", now),
-        };
-        SetJsonString(updates, "summonerId", summoner, "id");
-        SetJsonInt(updates, "profileIconId", summoner, "profileIconId");
-        SetJsonString(updates, "summonerName", summoner, "name");
-        SetJsonInt(updates, "summonerLevel", summoner, "summonerLevel");
-        SetJsonLong(updates, "revisionDate", summoner, "revisionDate");
-        ApplyLeagueSnapshot(updates, entries, "RANKED_SOLO_5x5", "solo", now);
-        ApplyLeagueSnapshot(updates, entries, "RANKED_FLEX_SR", "flex", now);
-        ApplyLeagueSnapshot(updates, tftLeague, "RANKED_TFT", "tft", now);
-
-        await _players.UpdateOneAsync(
-            Builders<BsonDocument>.Filter.Eq("_id", playerId),
-            Builders<BsonDocument>.Update.Combine(updates),
-            cancellationToken: cancellationToken);
-        await InsertRankEntriesAsync(playerId, entries, now, cancellationToken);
-        await InsertRankEntriesAsync(playerId, tftLeague, now, cancellationToken);
-
-        if (config.SyncMatches)
+        if (config.SyncMatches && NestedBooleanValue(player, "matchSync", "enabled") is not false)
         {
             await RefreshLolMatchesAsync(playerId, puuid, matchRegion, config, cancellationToken);
         }
@@ -2339,19 +2690,24 @@ internal sealed class CSharpRefreshService
             backfillWritten = await SaveLolMatchesAsync(playerId, puuid, matchRegion, olderIds, now, cancellationToken);
         }
 
+        var updates = new List<UpdateDefinition<BsonDocument>>
+        {
+            Builders<BsonDocument>.Update.Set("matchSync.lastSyncAt", now),
+            Builders<BsonDocument>.Update.Set("matchSync.recentRequested", recentIds.Count),
+            Builders<BsonDocument>.Update.Set("matchSync.recentWritten", recentWritten),
+            Builders<BsonDocument>.Update.Set("matchSync.backfillStart", backfillStart),
+            Builders<BsonDocument>.Update.Set("matchSync.backfillRequested", backfillRequested),
+            Builders<BsonDocument>.Update.Set("matchSync.backfillWritten", backfillWritten),
+        };
+        if (config.MatchBackfillCount > 0)
+        {
+            updates.Add(Builders<BsonDocument>.Update.Set("matchSync.backfillLastSyncAt", now));
+            updates.Add(Builders<BsonDocument>.Update.Set("matchSync.backfillExhausted", backfillRequested == 0));
+        }
+
         await _players.UpdateOneAsync(
             Builders<BsonDocument>.Filter.Eq("_id", playerId),
-            Builders<BsonDocument>.Update.Combine(
-                Builders<BsonDocument>.Update.Set("matchSync.lastSyncAt", now),
-                Builders<BsonDocument>.Update.Set("matchSync.recentRequested", recentIds.Count),
-                Builders<BsonDocument>.Update.Set("matchSync.recentWritten", recentWritten),
-                config.MatchBackfillCount > 0
-                    ? Builders<BsonDocument>.Update.Set("matchSync.backfillLastSyncAt", now)
-                    : Builders<BsonDocument>.Update.Unset("matchSync.backfillLastSyncAt"),
-                Builders<BsonDocument>.Update.Set("matchSync.backfillStart", backfillStart),
-                Builders<BsonDocument>.Update.Set("matchSync.backfillRequested", backfillRequested),
-                Builders<BsonDocument>.Update.Set("matchSync.backfillWritten", backfillWritten),
-                Builders<BsonDocument>.Update.Set("matchSync.backfillExhausted", config.MatchBackfillCount > 0 && backfillRequested == 0)),
+            Builders<BsonDocument>.Update.Combine(updates),
             cancellationToken: cancellationToken);
     }
 
@@ -3275,6 +3631,7 @@ internal sealed class CSharpRefreshService
         var links = await _discordLinks.Find(
             Builders<BsonDocument>.Filter.Eq("playerId", playerId) &
             Builders<BsonDocument>.Filter.Eq("verifiedBinding", true) &
+            Builders<BsonDocument>.Filter.Eq("isPrimary", true) &
             Builders<BsonDocument>.Filter.In("verificationSource", new[] { "discord_connections", "riot_rso", "legacy_manual" }))
             .ToListAsync(cancellationToken);
         if (links.Count == 0)
@@ -3834,7 +4191,16 @@ internal sealed class CSharpRefreshService
     {
         if (entries.ValueKind != JsonValueKind.Array) return;
         var entry = entries.EnumerateArray().FirstOrDefault(e => string.Equals(GetString(e, "queueType"), queue, StringComparison.OrdinalIgnoreCase));
-        if (entry.ValueKind == JsonValueKind.Undefined) return;
+        if (entry.ValueKind == JsonValueKind.Undefined)
+        {
+            // A successful empty queue response means the player is currently
+            // unranked. Replace the old snapshot so a stale tier is never kept.
+            updates.Add(Builders<BsonDocument>.Update.Set(path, new BsonDocument
+            {
+                ["fetchedAt"] = now,
+            }));
+            return;
+        }
         updates.Add(Builders<BsonDocument>.Update.Set(path, new BsonDocument
         {
             ["tier"] = GetString(entry, "tier") ?? "",
@@ -3926,6 +4292,149 @@ internal sealed class CSharpRefreshService
     private static string? ReadString(BsonDocument doc, string key)
     {
         return doc.TryGetValue(key, out var value) && value.IsString ? value.AsString : null;
+    }
+
+    private static DateTime? NestedDateTimeValue(BsonDocument doc, string objectKey, string key)
+    {
+        if (!doc.TryGetValue(objectKey, out var nested) || !nested.IsBsonDocument)
+        {
+            return null;
+        }
+
+        return nested.AsBsonDocument.TryGetValue(key, out var value) && value.IsBsonDateTime
+            ? value.AsBsonDateTime.ToUniversalTime()
+            : null;
+    }
+
+    private static bool? NestedBooleanValue(BsonDocument doc, string objectKey, string key)
+    {
+        if (!doc.TryGetValue(objectKey, out var nested) || !nested.IsBsonDocument)
+        {
+            return null;
+        }
+
+        return nested.AsBsonDocument.TryGetValue(key, out var value) && value.IsBoolean
+            ? value.AsBoolean
+            : null;
+    }
+
+    private async Task MarkRankRefreshStartedAsync(
+        ObjectId playerId,
+        DateTime requestedAt,
+        DateTime startedAt,
+        CancellationToken cancellationToken)
+    {
+        await _players.UpdateOneAsync(
+            Builders<BsonDocument>.Filter.Eq("_id", playerId) &
+            Builders<BsonDocument>.Filter.Eq("rankRefresh.requestedAt", requestedAt),
+            Builders<BsonDocument>.Update.Combine(
+                Builders<BsonDocument>.Update.Set("rankRefresh.startedAt", startedAt),
+                Builders<BsonDocument>.Update.Unset("rankRefresh.lastError"),
+                Builders<BsonDocument>.Update.Unset("rankRefresh.retryAfterAt")),
+            cancellationToken: cancellationToken);
+    }
+
+    private async Task MarkRankRefreshCompletedAsync(
+        ObjectId playerId,
+        DateTime requestedAt,
+        DateTime completedAt,
+        CancellationToken cancellationToken)
+    {
+        await _players.UpdateOneAsync(
+            Builders<BsonDocument>.Filter.Eq("_id", playerId) &
+            Builders<BsonDocument>.Filter.Eq("rankRefresh.requestedAt", requestedAt),
+            Builders<BsonDocument>.Update.Combine(
+                Builders<BsonDocument>.Update.Set("rankRefresh.completedAt", completedAt),
+                Builders<BsonDocument>.Update.Unset("rankRefresh.requestedAt"),
+                Builders<BsonDocument>.Update.Unset("rankRefresh.startedAt"),
+                Builders<BsonDocument>.Update.Unset("rankRefresh.lastError"),
+                Builders<BsonDocument>.Update.Unset("rankRefresh.retryAfterAt")),
+            cancellationToken: cancellationToken);
+    }
+
+    private async Task ClearRankRefreshRetryBackoffAsync(
+        ObjectId playerId,
+        CancellationToken cancellationToken)
+    {
+        // Do not mutate queue state if an owner request arrived while this
+        // ordinary background refresh was in flight.
+        await _players.UpdateOneAsync(
+            Builders<BsonDocument>.Filter.Eq("_id", playerId) &
+            Builders<BsonDocument>.Filter.Exists("rankRefresh.requestedAt", false),
+            Builders<BsonDocument>.Update.Combine(
+                Builders<BsonDocument>.Update.Unset("rankRefresh.lastError"),
+                Builders<BsonDocument>.Update.Unset("rankRefresh.retryAfterAt")),
+            cancellationToken: cancellationToken);
+    }
+
+    private async Task MarkRegularRankRefreshFailedAsync(
+        ObjectId playerId,
+        Exception error)
+    {
+        var message = CompactRankRefreshError(error);
+        try
+        {
+            await _players.UpdateOneAsync(
+                Builders<BsonDocument>.Filter.Eq("_id", playerId) &
+                Builders<BsonDocument>.Filter.Exists("rankRefresh.requestedAt", false),
+                Builders<BsonDocument>.Update.Combine(
+                    Builders<BsonDocument>.Update.Set(
+                        "rankRefresh.retryAfterAt",
+                        DateTime.UtcNow.AddMinutes(30)),
+                    Builders<BsonDocument>.Update.Set("rankRefresh.lastError", message)),
+                cancellationToken: CancellationToken.None);
+        }
+        catch
+        {
+            // Keep the original Riot failure as the reported job error.
+        }
+    }
+
+    private async Task MarkRankRefreshFailedAsync(
+        ObjectId playerId,
+        DateTime requestedAt,
+        Exception error)
+    {
+        var message = CompactRankRefreshError(error);
+        var failedAt = DateTime.UtcNow;
+
+        try
+        {
+            await _players.UpdateOneAsync(
+                Builders<BsonDocument>.Filter.Eq("_id", playerId) &
+                Builders<BsonDocument>.Filter.Eq("rankRefresh.requestedAt", requestedAt),
+                Builders<BsonDocument>.Update.Combine(
+                    Builders<BsonDocument>.Update.Set("rankRefresh.completedAt", failedAt),
+                    Builders<BsonDocument>.Update.Set("rankRefresh.lastAttemptAt", failedAt),
+                    Builders<BsonDocument>.Update.Set(
+                        "rankRefresh.retryAfterAt",
+                        failedAt.AddMinutes(5)),
+                    Builders<BsonDocument>.Update.Set("rankRefresh.lastError", message),
+                    Builders<BsonDocument>.Update.Unset("rankRefresh.requestedAt"),
+                    Builders<BsonDocument>.Update.Unset("rankRefresh.startedAt")),
+                cancellationToken: CancellationToken.None);
+        }
+        catch
+        {
+            // The original refresh exception remains the useful failure. If this
+            // bookkeeping write also fails, the queued request remains retryable.
+        }
+    }
+
+    private static string CompactRankRefreshError(Exception error)
+    {
+        var message = string.Join(
+            " ",
+            (error.Message ?? "Rank update failed")
+                .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (message.Length > 180)
+        {
+            message = message[..180];
+        }
+
+        return string.IsNullOrWhiteSpace(message)
+            ? "Rank update failed"
+            : message;
     }
 
     private static string AccountRegion()
