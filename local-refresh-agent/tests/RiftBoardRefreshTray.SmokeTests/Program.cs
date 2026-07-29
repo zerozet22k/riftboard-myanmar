@@ -1,4 +1,5 @@
 using RiftBoardRefreshTray;
+using MongoDB.Bson;
 
 var failures = new List<string>();
 
@@ -58,6 +59,33 @@ Check(
     RefreshErrorCodes.Network,
     retryable: true,
     stopBatch: true);
+var missingPlatformHost = new HttpRequestException(
+    HttpRequestError.NameResolutionError,
+    "No such host is known");
+if (!CSharpRefreshService.IsMissingPlatformHost(missingPlatformHost))
+{
+    failures.Add("missing shard host: name-resolution failure was not skippable");
+}
+Check(
+    "Riot shard DNS",
+    RefreshErrorClassifier.Classify(
+        new RiotTransportException(
+            "ph2.api.riotgames.com",
+            missingPlatformHost)),
+    RefreshErrorCodes.Network,
+    retryable: true,
+    stopBatch: true);
+Check(
+    "confirmed decrypt survives missing shard host",
+    RefreshErrorClassifier.Classify(
+        new StaleRiotIdentityException(
+            "confirmed decrypting failure",
+            new RiotTransportException(
+                "ph2.api.riotgames.com",
+                missingPlatformHost))),
+    RefreshErrorCodes.StaleIdentity,
+    retryable: false,
+    stopBatch: false);
 Check(
     "remote website timeout",
     RefreshErrorClassifier.Classify(
@@ -121,6 +149,111 @@ if (realLogShape.Code != RefreshErrorCodes.RiotUpstream)
         $"real 520 log: expected {RefreshErrorCodes.RiotUpstream}, got {realLogShape.Code}");
 }
 
+var systemicSummary = RefreshLoop.BuildCronErrorSummary(
+[
+    new CronError
+    {
+        Name = "Keriya#sawny",
+        Error = "network",
+        Code = RefreshErrorCodes.Network,
+        Retryable = true,
+    },
+]);
+if (
+    systemicSummary?.Contains("Affected:", StringComparison.OrdinalIgnoreCase) ==
+    true)
+{
+    failures.Add("systemic summary: first in-flight player was shown as affected");
+}
+
+var savedIdentityLabel = CSharpRefreshService.FailurePlayerLabel(
+    "Keriya#sawny",
+    RefreshErrorClassifier.Classify(
+        new StaleRiotIdentityException("decrypt failed")));
+if (!savedIdentityLabel.Contains("(saved Riot ID)", StringComparison.Ordinal))
+{
+    failures.Add("stale identity label: did not identify the displayed name as saved");
+}
+
+if (
+    !CSharpRefreshService.HasSavedLolIdentity(" stored-puuid ") ||
+    CSharpRefreshService.HasSavedLolIdentity("   ") ||
+    CSharpRefreshService.HasSavedLolIdentity(null))
+{
+    failures.Add("identity anchor: existing players must resolve from their saved LoL PUUID");
+}
+
+if (
+    CSharpRefreshService.HasSeparateTftIdentityScope(
+        "shared",
+        " shared ",
+        null) ||
+    CSharpRefreshService.HasSeparateTftIdentityScope(
+        "shared",
+        null,
+        null) ||
+    !CSharpRefreshService.HasSeparateTftIdentityScope(
+        "lol",
+        "tft",
+        null) ||
+    !CSharpRefreshService.HasSeparateTftIdentityScope(
+        "lol",
+        "   ",
+        "legacy-tft"))
+{
+    failures.Add("TFT key scope: shared keys should reuse the LoL PUUID");
+}
+
+var providerOpaqueId = new string('P', 78);
+var providerDiagnostic = RefreshErrorClassifier.SafeDiagnostic(
+    "TFT refresh",
+    new StaleRiotIdentityException(
+        "saved identity failed",
+        new RiotApiException(
+            400,
+            $"Bad Request - Exception decrypting {providerOpaqueId}",
+            endpointHost: "asia.api.riotgames.com")));
+if (
+    !providerDiagnostic.Contains("HTTP 400", StringComparison.Ordinal) ||
+    !providerDiagnostic.Contains(
+        "host=asia.api.riotgames.com",
+        StringComparison.Ordinal) ||
+    providerDiagnostic.Contains(providerOpaqueId, StringComparison.Ordinal))
+{
+    failures.Add("provider diagnostic: host/status missing or opaque ID was not redacted");
+}
+
+var renamedPlayer = new BsonDocument
+{
+    ["gameName"] = "Keriya",
+    ["tagLine"] = "sawny",
+    ["riotIdAliases"] = new BsonArray
+    {
+        new BsonDocument
+        {
+            ["gameName"] = "PeyzPal",
+            ["tagLine"] = "sawny",
+            ["gameNameNorm"] = "peyzpal",
+            ["tagLineNorm"] = "sawny",
+            ["observedAt"] = DateTime.UtcNow.AddDays(-1),
+        },
+    },
+};
+var renamedAliases = CSharpRefreshService.BuildCanonicalRiotIdAliases(
+    renamedPlayer,
+    "PeyzPal",
+    "sawny",
+    DateTime.UtcNow);
+if (
+    renamedAliases.Count != 1 ||
+    renamedAliases[0]["gameName"] != "Keriya" ||
+    renamedAliases.Any(alias =>
+        alias["gameNameNorm"] == "peyzpal" &&
+        alias["tagLineNorm"] == "sawny"))
+{
+    failures.Add("canonical aliases: old Riot ID was not preserved cleanly");
+}
+
 var envFixtureRoot = Path.Combine(
     Path.GetTempPath(),
     $"riftboard-tray-env-smoke-{Guid.NewGuid():N}");
@@ -179,7 +312,7 @@ if (failures.Count > 0)
     return 1;
 }
 
-Console.WriteLine("RiftBoard tray smoke tests passed (19 checks).");
+Console.WriteLine("RiftBoard tray smoke tests passed (26 checks).");
 return 0;
 
 void Check(

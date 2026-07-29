@@ -8,6 +8,7 @@ import { Match } from "@/models/match";
 import { PlayerMatch } from "@/models/playerMatch";
 import { TftMatch } from "@/models/tftMatch";
 import { TftPlayerMatch } from "@/models/tftPlayerMatch";
+import { DiscordLink } from "@/models/discordLink";
 import {
   getAccountByPuuid,
   findSeaPlatformByPuuid,
@@ -21,6 +22,7 @@ import {
   getTftMatchById,
   findTftLeagueEntriesByPuuid,
   hasTftApiKey,
+  hasSeparateTftApiKey,
   platformToMatchRegion,
   isRiot404,
   isRiot429,
@@ -30,6 +32,11 @@ import {
 } from "@/lib/riot";
 import { normalizeRiotIdPart, syncCanonicalRiotId } from "@/lib/playerIdentity";
 import { mergePlayers } from "@/lib/playerMerge";
+import {
+  canMergeRiotIdentities,
+  hasStoredRiotIdentity,
+  isTftRetryBackoffActive,
+} from "@/lib/riotIdentityPolicy.mjs";
 import { approvedCommunityLeaderboardQuery } from "@/lib/communityLeaderboard";
 import {
   PLAYER_MATCH_RETENTION_LIMIT,
@@ -51,6 +58,8 @@ const TFT = "RANKED_TFT";
 
 type PlayerDocument = HydratedDocument<PlayerDoc>;
 type RankComparable = Pick<RankSnapshot, "tier" | "division" | "lp" | "wins" | "losses">;
+class RiotIdentityConflictError extends Error {}
+
 export type RefreshPlayerResult = PlayerDoc & {
   _id: Types.ObjectId;
   _skipped?: boolean;
@@ -193,6 +202,60 @@ function isRateLimit(e: unknown) {
 function rateLimitWaitMs(e: unknown, fallbackMs = 2000) {
   const ra = (e as { retryAfterMs?: unknown } | null)?.retryAfterMs;
   return typeof ra === "number" && ra > 0 ? ra : fallbackMs;
+}
+
+function classifyTftFailure(e: unknown) {
+  const status = (e as { status?: unknown } | null)?.status;
+  if (
+    e instanceof RiotIdentityConflictError ||
+    isRiot404(e) ||
+    isRiotDecryptingBadRequest(e)
+  ) {
+    return { code: "stale_identity", retryMs: 6 * 60 * 60 * 1000 };
+  }
+  if (status === 401 || status === 403) {
+    return { code: "auth_invalid", retryMs: 60 * 60 * 1000 };
+  }
+  if (typeof status === "number" && status >= 500) {
+    return { code: "riot_upstream", retryMs: 60 * 60 * 1000 };
+  }
+  if (e instanceof TypeError) {
+    return { code: "network", retryMs: 60 * 60 * 1000 };
+  }
+  return { code: "unknown", retryMs: 60 * 60 * 1000 };
+}
+
+function setTftFailure(
+  player: PlayerDocument,
+  now: Date,
+  message: string,
+  e: unknown,
+  stage: "identity" | "matches"
+) {
+  const current = subdocumentValue(player.tftMatchSync);
+  const { code, retryMs } = classifyTftFailure(e);
+  const failures = Math.max(0, Number(current.consecutiveFailures ?? 0) || 0);
+  player.tftMatchSync = {
+    ...current,
+    lastAttemptAt: now,
+    retryAfterAt: new Date(now.getTime() + retryMs),
+    lastError: message,
+    lastErrorCode: code,
+    lastErrorStage: stage,
+    consecutiveFailures: failures + 1,
+  };
+}
+
+function clearTftFailure(player: PlayerDocument) {
+  const current = subdocumentValue(player.tftMatchSync);
+  player.tftMatchSync = {
+    ...current,
+    retryAfterAt: undefined,
+    lastError: undefined,
+    lastErrorCode: undefined,
+    lastErrorStage: undefined,
+    consecutiveFailures: 0,
+  };
 }
 
 function normalize(s: string) {
@@ -612,7 +675,16 @@ async function syncRecentTftMatches(params: {
 
   const ids = await getTftMatchIdsByPuuid({ puuid, matchRegion, start: 0, count });
   if (!Array.isArray(ids) || ids.length === 0) {
-    player.tftMatchSync = { ...(player.tftMatchSync ?? {}), lastSyncAt: now };
+    player.tftMatchSync = {
+      ...subdocumentValue(player.tftMatchSync),
+      lastSyncAt: now,
+      lastAttemptAt: now,
+      retryAfterAt: undefined,
+      lastError: undefined,
+      lastErrorCode: undefined,
+      lastErrorStage: undefined,
+      consecutiveFailures: 0,
+    };
     await player.save();
     return;
   }
@@ -689,7 +761,16 @@ async function syncRecentTftMatches(params: {
 
   await pruneTftPlayerMatches(player._id);
 
-  player.tftMatchSync = { ...(player.tftMatchSync ?? {}), lastSyncAt: now };
+  player.tftMatchSync = {
+    ...subdocumentValue(player.tftMatchSync),
+    lastSyncAt: now,
+    lastAttemptAt: now,
+    retryAfterAt: undefined,
+    lastError: undefined,
+    lastErrorCode: undefined,
+    lastErrorStage: undefined,
+    consecutiveFailures: 0,
+  };
   await player.save();
 }
 
@@ -714,14 +795,18 @@ export async function refreshPlayerById(
 
   let player = await Player.findById(playerId);
   if (!player) throw new Error("Player not found");
-  const rankRefreshPlayerId = player._id;
-  const rankRefreshRequestedAt = player.rankRefresh?.requestedAt;
+  let rankRefreshPlayerId = player._id;
+  let rankRefreshRequestedAt = player.rankRefresh?.requestedAt;
   await markPlayerRankRefreshStarted(
     rankRefreshPlayerId,
     rankRefreshRequestedAt
   );
 
   const cooldownMs = opts?.cooldownMs ?? COOLDOWN_MS;
+  let tftRetryBlocked = isTftRetryBackoffActive(
+    player.tftMatchSync?.retryAfterAt,
+    { force: opts?.force }
+  );
 
   if (!opts?.force) {
     const last = lastSuccessfulRefreshAt(player, opts);
@@ -732,7 +817,8 @@ export async function refreshPlayerById(
         opts?.strictCooldown !== true &&
         opts?.syncTftMatches === true &&
         hasTftApiKey() &&
-        player?.tftMatchSync?.enabled !== false;
+        player?.tftMatchSync?.enabled !== false &&
+        !tftRetryBlocked;
       const wantsLolMatchSync =
         opts?.strictCooldown !== true &&
         opts?.syncMatches === true &&
@@ -787,48 +873,231 @@ export async function refreshPlayerById(
   const now = new Date();
 
   let puuid = String(player.puuid ?? "").trim();
-  let accountFromRiotId: RiotAccount | null = null;
+  let canonicalIdentityFailure: unknown = null;
+  let canonicalIdentity: {
+    puuid: string;
+    gameName: string;
+    tagLine: string;
+  } | null = null;
   try {
-    const acct = await getPuuidByRiotId(player.gameName, player.tagLine);
-    accountFromRiotId = acct;
-    if (acct?.puuid && acct.puuid !== puuid) {
-      puuid = acct.puuid;
-      player.puuid = puuid;
-      player.tftPuuid = acct.puuid;
-      await player.save();
+    let account: RiotAccount;
+    const anchoredByPuuid = hasStoredRiotIdentity(puuid);
+    if (anchoredByPuuid) {
+      // The PUUID is the durable identity. Looking up a saved Riot ID first can
+      // silently rebind a profile if an old name is later reused.
+      account = await getAccountByPuuid(puuid);
+    } else {
+      const accountFromRiotId = await getPuuidByRiotId(
+        player.gameName,
+        player.tagLine
+      );
+      const candidatePuuid = String(accountFromRiotId?.puuid ?? "").trim();
+      if (!candidatePuuid) {
+        throw new Error("Riot returned an empty LoL PUUID");
+      }
+      account =
+        accountFromRiotId.gameName && accountFromRiotId.tagLine
+          ? accountFromRiotId
+          : await getAccountByPuuid(candidatePuuid);
     }
+
+    const returnedPuuid = String(account?.puuid ?? "").trim();
+    if (anchoredByPuuid && returnedPuuid && returnedPuuid !== puuid) {
+      throw new RiotIdentityConflictError(
+        "Riot returned a different durable identity for this tracked account."
+      );
+    }
+    const canonicalPuuid = anchoredByPuuid
+      ? puuid
+      : returnedPuuid;
+    if (!canonicalPuuid || !account?.gameName || !account?.tagLine) {
+      throw new Error("Riot returned an incomplete account identity");
+    }
+
+    canonicalIdentity = {
+      puuid: canonicalPuuid,
+      gameName: account.gameName,
+      tagLine: account.tagLine,
+    };
   } catch (e) {
     if (isRateLimit(e)) throw e;
+    if (e instanceof RiotIdentityConflictError) throw e;
     if (!puuid) throw e;
-    console.error("Riot ID PUUID sync failed:", e);
+    canonicalIdentityFailure = e;
+    console.error("Account sync failed:", e);
   }
 
-  try {
-    const account =
-      accountFromRiotId?.gameName && accountFromRiotId?.tagLine
-        ? accountFromRiotId
-        : await getAccountByPuuid(puuid);
-    if (account?.gameName && account?.tagLine) {
-      const currentGameNameNorm = normalizeRiotIdPart(account.gameName);
-      const currentTagLineNorm = normalizeRiotIdPart(account.tagLine);
-      const duplicate = await Player.findOne({
-        gameNameNorm: currentGameNameNorm,
-        tagLineNorm: currentTagLineNorm,
-      });
+  if (canonicalIdentity) {
+    const currentGameNameNorm = normalizeRiotIdPart(canonicalIdentity.gameName);
+    const currentTagLineNorm = normalizeRiotIdPart(canonicalIdentity.tagLine);
+    const identityCollision = await Player.findOne({
+      _id: { $ne: player._id },
+      $or: [
+        {
+          gameNameNorm: currentGameNameNorm,
+          tagLineNorm: currentTagLineNorm,
+        },
+        {
+          riotIdAliases: {
+            $elemMatch: {
+              gameNameNorm: currentGameNameNorm,
+              tagLineNorm: currentTagLineNorm,
+            },
+          },
+        },
+        { puuid: canonicalIdentity.puuid },
+      ],
+    }).select({ _id: 1, puuid: 1 });
 
-      if (duplicate && String(duplicate._id) !== String(player._id)) {
-        player = await mergePlayers(String(duplicate._id), String(player._id));
-        const fresh = await Player.findById(player._id);
-        if (!fresh) throw new Error("Player merge target disappeared during refresh");
-        player = fresh;
-        puuid = player.puuid || puuid;
+    if (identityCollision) {
+      if (
+        !canMergeRiotIdentities(
+          canonicalIdentity.puuid,
+          identityCollision.puuid
+        )
+      ) {
+        throw new RiotIdentityConflictError(
+          "The current Riot identity conflicts with another tracked account."
+        );
       }
-
-      syncCanonicalRiotId(player, account.gameName, account.tagLine, now);
+      const collisionOwnsCanonicalIdentity =
+        String(identityCollision.puuid ?? "").trim() ===
+        canonicalIdentity.puuid;
+      player = collisionOwnsCanonicalIdentity
+        ? await mergePlayers(
+            String(identityCollision._id),
+            String(player._id)
+          )
+        : await mergePlayers(
+            String(player._id),
+            String(identityCollision._id)
+          );
+      rankRefreshPlayerId = player._id;
+      rankRefreshRequestedAt = player.rankRefresh?.requestedAt;
+      tftRetryBlocked = isTftRetryBackoffActive(
+        player.tftMatchSync?.retryAfterAt,
+        { force: opts?.force }
+      );
     }
-  } catch (e) {
-    if (isRateLimit(e)) throw e;
-    console.error("Account sync failed:", e);
+
+    const identityBefore = `${player.gameName}#${player.tagLine}`;
+    syncCanonicalRiotId(
+      player,
+      canonicalIdentity.gameName,
+      canonicalIdentity.tagLine,
+      now
+    );
+    player.puuid = canonicalIdentity.puuid;
+    puuid = canonicalIdentity.puuid;
+    await player.save();
+
+    try {
+      await DiscordLink.updateMany(
+        {
+          playerId: player._id,
+          $or: [
+            { gameName: { $ne: player.gameName } },
+            { tagLine: { $ne: player.tagLine } },
+          ],
+        },
+        { $set: { gameName: player.gameName, tagLine: player.tagLine } }
+      );
+    } catch (e) {
+      console.error("Discord-linked Riot ID sync failed:", e);
+    }
+
+    if (identityBefore !== `${player.gameName}#${player.tagLine}`) {
+      console.info(
+        `Riot ID updated: ${identityBefore} -> ${player.gameName}#${player.tagLine}`
+      );
+    }
+  }
+
+  const wantsTftProfileSync =
+    opts?.syncTftMatches === true &&
+    hasTftApiKey();
+  let tftProfileFailure: unknown = null;
+  let tftPuuid = "";
+  if (wantsTftProfileSync) {
+    // This is the scheduler's TFT attempt timestamp, including rank-only work
+    // while match history is in backoff. Keeping it current prevents one
+    // broken profile from staying at the front of every batch.
+    player.tftMatchSync = {
+      ...subdocumentValue(player.tftMatchSync),
+      lastAttemptAt: now,
+    };
+    await player.save();
+
+    if (canonicalIdentityFailure) {
+      tftProfileFailure = canonicalIdentityFailure;
+      setTftFailure(
+        player,
+        now,
+        canonicalIdentityFailure instanceof RiotIdentityConflictError
+          ? canonicalIdentityFailure.message
+          : `Could not verify the current Riot identity for ${player.gameName}#${player.tagLine}.`,
+        canonicalIdentityFailure,
+        "identity"
+      );
+      await player.save();
+    } else if (hasSeparateTftApiKey()) {
+      try {
+        // Riot can encrypt PUUIDs differently for different API-key scopes.
+        // Resolve the TFT identity from the current canonical Riot ID instead
+        // of reusing the LoL-scoped PUUID saved on the player.
+        const tftAccount = await getPuuidByRiotId(
+          player.gameName,
+          player.tagLine,
+          "tft"
+        );
+        tftPuuid = String(tftAccount?.puuid ?? "").trim();
+        if (!tftPuuid) {
+          throw new Error("Riot returned an empty TFT PUUID");
+        }
+        const tftIdentityChanged =
+          String(player.tftPuuid ?? "").trim() !== tftPuuid;
+        player.tftPuuid = tftPuuid;
+        const recoveredIdentity =
+          player.tftMatchSync?.lastErrorStage === "identity";
+        if (recoveredIdentity) {
+          clearTftFailure(player);
+          tftRetryBlocked = false;
+        }
+        if (tftIdentityChanged || recoveredIdentity) {
+          await player.save();
+        }
+      } catch (e) {
+        if (isRateLimit(e)) throw e;
+        tftProfileFailure = e;
+        // A saved value may predate separate TFT-key support and may simply be
+        // a copied LoL PUUID, so do not send it to TFT endpoints as a fallback.
+        if (String(player.tftPuuid ?? "").trim() === puuid) {
+          player.tftPuuid = undefined;
+        }
+        setTftFailure(
+          player,
+          now,
+          `Could not resolve the TFT identity for ${player.gameName}#${player.tagLine}.`,
+          e,
+          "identity"
+        );
+        await player.save();
+        console.error(
+          `TFT identity sync failed for ${player.gameName}#${player.tagLine}:`,
+          e
+        );
+      }
+    } else {
+      // With no dedicated TFT key (or the same key for both products), Riot's
+      // PUUID scope is shared and the historical behavior remains valid.
+      tftPuuid = puuid;
+      player.tftPuuid = puuid;
+      if (player.tftMatchSync?.lastErrorStage === "identity") {
+        clearTftFailure(player);
+        tftRetryBlocked = false;
+        await player.save();
+      }
+    }
   }
 
   let platform = String(player.platform || "auto").toLowerCase().trim();
@@ -880,11 +1149,8 @@ export async function refreshPlayerById(
       : { fetchedAt: now };
   }
 
-  if (opts?.syncTftMatches === true && hasTftApiKey()) {
+  if (wantsTftProfileSync && tftPuuid) {
     try {
-      const tftPuuid = String(player.tftPuuid ?? puuid).trim();
-      if (!player.tftPuuid && tftPuuid) player.tftPuuid = tftPuuid;
-
       const foundTftLeague = await findTftLeagueEntriesByPuuid(tftPuuid, platform);
       const { entries: tftEntries } = foundTftLeague;
       const tft = tftEntries.find((entry) => entry.queueType === TFT);
@@ -914,16 +1180,11 @@ export async function refreshPlayerById(
       }
     } catch (e) {
       if (isRateLimit(e)) throw e;
-      if (!isRiot404(e)) {
-        console.error("TFT sync failed:", e);
-      }
+      tftProfileFailure = e;
+      console.error("TFT rank sync failed:", e);
       // Do not wipe a previously saved TFT rank just because Riot rejected one
-      // auxiliary TFT lookup. Match history and active-shard calls can fail
-      // independently from the player's actual ranked state.
-      player.tft = {
-        ...subdocumentValue(player.tft),
-        fetchedAt: player.tft?.fetchedAt ?? now,
-      };
+      // lookup. A valid unranked account returns HTTP 200 with an empty array;
+      // lookup failures must not masquerade as that successful result.
     }
   }
 
@@ -988,11 +1249,10 @@ export async function refreshPlayerById(
   }
 
   const syncTftMatches =
-    opts?.syncTftMatches === true &&
-    hasTftApiKey() &&
+    wantsTftProfileSync &&
+    !tftRetryBlocked &&
     player?.tftMatchSync?.enabled !== false;
   if (syncTftMatches) {
-    const tftPuuid = String(player.tftPuuid ?? puuid ?? "").trim();
     if (tftPuuid) {
       try {
         await syncRecentTftMatches({
@@ -1002,16 +1262,33 @@ export async function refreshPlayerById(
           count: Math.max(1, Math.min(MAX_MATCH_SYNC_COUNT, Number(opts?.matchesCount ?? 10) || 10)),
         });
       } catch (e) {
-        if (!isRiotDecryptingBadRequest(e) && !isRiot404(e)) throw e;
-        console.warn("TFT match sync skipped because Riot rejected this TFT puuid:", errToString(e));
-        player.tftMatchSync = Object.assign(subdocumentValue(player.tftMatchSync), {
-          lastError: "Riot could not return TFT match history for this account yet.",
-          lastAttemptAt: now,
-        });
+        if (isRateLimit(e)) throw e;
+        const expectedIdentityFailure =
+          isRiotDecryptingBadRequest(e) || isRiot404(e);
+        if (expectedIdentityFailure) {
+          console.warn(
+            "TFT match sync skipped because Riot rejected this TFT puuid:",
+            errToString(e)
+          );
+        } else {
+          console.error("TFT match sync failed:", e);
+        }
+        setTftFailure(
+          player,
+          now,
+          expectedIdentityFailure
+            ? "Riot could not return TFT match history for this account yet."
+            : "TFT match refresh failed; it will retry after a cooldown.",
+          e,
+          "matches"
+        );
         await player.save();
+        if (!expectedIdentityFailure) throw e;
       }
     }
   }
+
+  if (tftProfileFailure) throw tftProfileFailure;
 
   return player.toObject();
 }
@@ -1073,7 +1350,7 @@ export async function refreshAllPlayers(opts?: {
         ]
       : opts?.syncTftMatches === true
         ? [
-            ["tftMatchSync.lastSyncAt", 1],
+            ["tftMatchSync.lastAttemptAt", 1],
             ["tft.fetchedAt", 1],
             ["updatedAt", 1],
           ]

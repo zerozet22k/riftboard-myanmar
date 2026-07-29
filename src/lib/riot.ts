@@ -2,6 +2,7 @@ import {
   queuedRiotFetch,
   retryAfterMsFromResponse,
 } from "@/lib/riotRequestQueue";
+import { hasSeparateTftPuuidScope } from "@/lib/riotKeyScope.mjs";
 
 export type RiotAccount = { puuid: string; gameName?: string; tagLine?: string };
 
@@ -109,6 +110,10 @@ function getTftApiKey() {
 
 export function hasTftApiKey() {
   return !!(optEnv("RIOT_TFT_API_KEY") || optEnv("TFT_API_KEY") || optEnv("RIOT_API_KEY"));
+}
+
+export function hasSeparateTftApiKey() {
+  return hasSeparateTftPuuidScope(process.env);
 }
 
 export function getRiotApiKey(game: "lol" | "tft" = "lol") {
@@ -509,36 +514,36 @@ export async function getTftLeagueEntriesByPuuid(platform: string, puuid: string
 
 export async function findTftLeagueEntriesByPuuid(puuid: string, preferredPlatform?: string | null) {
   const preferred = String(preferredPlatform ?? "").trim().toLowerCase();
-  if (preferred && preferred !== "auto") {
-    try {
-      return {
-        platform: preferred,
-        entries: await getTftLeagueEntriesByPuuid(preferred, puuid),
-      };
-    } catch (e) {
-      if (isRiot404(e) || isRiotDecryptingBadRequest(e) || isMissingPlatformHost(e)) {
-        return { platform: preferred, entries: [] };
-      }
-      throw e;
-    }
-  }
-
   let shardPlatform = "";
-  try {
-    const shard = await getActiveShardByPuuid("tft", puuid);
-    shardPlatform = String(shard.activeShard ?? "").trim().toLowerCase();
-  } catch (e) {
-    if (isRiot429(e)) throw e;
-    // Some TFT product keys can read TFT League but not Account active-shard.
-    // Platform fallback below is enough for SEA players, so active-shard is best-effort.
-    if (!isRiot404(e) && !isRiot403(e)) {
-      console.warn("TFT active-shard lookup failed, falling back to SEA platforms:", e);
+  if (!preferred || preferred === "auto") {
+    try {
+      const shard = await getActiveShardByPuuid("tft", puuid);
+      shardPlatform = String(shard.activeShard ?? "").trim().toLowerCase();
+    } catch (e) {
+      if (isRiot429(e)) throw e;
+      // Some TFT product keys can read TFT League but not Account active-shard.
+      // Platform fallback below is enough for SEA players, so active-shard is best-effort.
+      if (!isRiot404(e) && !isRiot403(e)) {
+        console.warn("TFT active-shard lookup failed, falling back to SEA platforms:", e);
+      }
     }
   }
 
-  const candidates = shardPlatform
-    ? [shardPlatform]
-    : ["sg2", "th2", "ph2", "vn2", "tw2"];
+  const candidates = Array.from(
+    new Set(
+      [
+        preferred && preferred !== "auto" ? preferred : "",
+        shardPlatform,
+        "sg2",
+        "th2",
+        "ph2",
+        "vn2",
+        "tw2",
+      ].filter(Boolean)
+    )
+  );
+  let identityFailure: unknown = null;
+  let missingHostFailure: unknown = null;
 
   for (const platform of candidates) {
     try {
@@ -547,15 +552,24 @@ export async function findTftLeagueEntriesByPuuid(puuid: string, preferredPlatfo
         entries: await getTftLeagueEntriesByPuuid(platform, puuid),
       };
     } catch (e) {
-      if (isRiot404(e) || isRiotDecryptingBadRequest(e) || isMissingPlatformHost(e)) continue;
+      if (isRiot404(e) || isRiotDecryptingBadRequest(e)) {
+        identityFailure = e;
+        continue;
+      }
+      if (isMissingPlatformHost(e)) {
+        missingHostFailure = e;
+        continue;
+      }
       throw e;
     }
   }
 
-  return {
-    platform: preferred || null,
-    entries: [],
-  };
+  // An empty 200 response above is a valid unranked account. Reaching this
+  // point means every platform lookup failed, so do not overwrite a saved TFT
+  // rank with a fake successful/unranked refresh.
+  if (identityFailure) throw identityFailure;
+  if (missingHostFailure) throw missingHostFailure;
+  throw new RiotApiError(404, "TFT League account was not found on a SEA platform");
 }
 
 export async function findSeaPlatformByPuuid(puuid: string) {

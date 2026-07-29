@@ -86,6 +86,12 @@ export type PlayerDoc = {
   tftMatchSync?: {
     enabled?: boolean;
     lastSyncAt?: Date;
+    lastAttemptAt?: Date;
+    retryAfterAt?: Date;
+    lastError?: string;
+    lastErrorCode?: string;
+    lastErrorStage?: "identity" | "matches";
+    consecutiveFailures?: number;
   };
 
   track?: {
@@ -193,6 +199,15 @@ const PlayerSchema = new Schema<PlayerDoc>(
     tftMatchSync: {
       enabled: { type: Boolean, default: true },
       lastSyncAt: Date,
+      lastAttemptAt: Date,
+      retryAfterAt: Date,
+      lastError: { type: String, trim: true },
+      lastErrorCode: { type: String, trim: true },
+      lastErrorStage: {
+        type: String,
+        enum: ["identity", "matches"],
+      },
+      consecutiveFailures: { type: Number, default: 0, min: 0 },
     },
 
     track: {

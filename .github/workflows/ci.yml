@@ -44,5 +44,25 @@ jobs:
       - name: Test environment pipeline
         run: npm run test:env
 
+      - name: Test Riot identity scopes
+        run: npm run test:riot-identity
+
+      - name: Type-check web app
+        run: npm run typecheck
+
       - name: Lint
         run: npm run lint
+
+      - name: Set up .NET
+        if: runner.os == 'Windows'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Build refresh tray
+        if: runner.os == 'Windows'
+        run: dotnet build local-refresh-agent/src/RiftBoardRefreshTray/RiftBoardRefreshTray.csproj -c Release
+
+      - name: Test refresh tray
+        if: runner.os == 'Windows'
+        run: dotnet run --project local-refresh-agent/tests/RiftBoardRefreshTray.SmokeTests/RiftBoardRefreshTray.SmokeTests.csproj -c Release

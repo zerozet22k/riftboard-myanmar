@@ -400,7 +400,8 @@ internal sealed class SettingsForm : Form
     private readonly Label _liveStatusLabel;
     private readonly Label _liveLastLabel;
     private readonly Label _liveNextLabel;
-    private readonly Label _errorLabel;
+    private readonly TextBox _errorTextBox;
+    private readonly ToolTip _fullTextToolTip;
     private readonly CheckBox _rankEnabledBox;
     private readonly CheckBox _rankMatchesBox;
     private readonly NumericUpDown _rankIntervalBox;
@@ -441,11 +442,22 @@ internal sealed class SettingsForm : Form
         Text = "RiftBoard Refresh";
         Icon = (Icon)trayIcon.Clone();
         StartPosition = FormStartPosition.CenterScreen;
-        FormBorderStyle = FormBorderStyle.FixedDialog;
-        MaximizeBox = false;
+        AutoScaleMode = AutoScaleMode.Dpi;
+        FormBorderStyle = FormBorderStyle.Sizable;
+        MaximizeBox = true;
         MinimizeBox = false;
         ShowInTaskbar = false;
         ClientSize = new Size(1280, 780);
+        MinimumSize = new Size(960, 700);
+        SizeGripStyle = SizeGripStyle.Show;
+
+        _fullTextToolTip = new ToolTip
+        {
+            AutoPopDelay = 30_000,
+            InitialDelay = 400,
+            ReshowDelay = 100,
+            ShowAlways = true,
+        };
 
         FormClosing += (_, e) =>
         {
@@ -564,16 +576,23 @@ internal sealed class SettingsForm : Form
             }
         }
 
-        _errorLabel = new Label
+        _errorTextBox = new TextBox
         {
             AutoSize = false,
             Dock = DockStyle.Fill,
-            Height = 28,
-            TextAlign = ContentAlignment.MiddleLeft,
+            MinimumSize = new Size(0, 54),
+            Height = 54,
+            Multiline = true,
+            ReadOnly = true,
+            WordWrap = true,
+            ScrollBars = ScrollBars.Vertical,
+            BorderStyle = BorderStyle.FixedSingle,
+            BackColor = SystemColors.Window,
             ForeColor = Color.Firebrick,
-            AutoEllipsis = true,
+            TabStop = false,
+            AccessibleName = "Latest refresh details",
         };
-        root.Controls.Add(_errorLabel, 0, 3);
+        root.Controls.Add(_errorTextBox, 0, 3);
 
         var buttonBar = new FlowLayoutPanel
         {
@@ -642,21 +661,31 @@ internal sealed class SettingsForm : Form
     public void UpdateStatus(TrayStatus status)
     {
         _stateLabel.Text = status.State;
-        _currentLabel.Text = status.Current;
-        _rankStatusLabel.Text = status.RankStatus;
-        _rankLastLabel.Text = status.RankLast;
-        _rankNextLabel.Text = status.RankNext;
-        _tftStatusLabel.Text = status.TftStatus;
-        _tftLastLabel.Text = status.TftLast;
-        _tftNextLabel.Text = status.TftNext;
-        _liveStatusLabel.Text = status.LiveStatus;
-        _liveLastLabel.Text = status.LiveLast;
-        _liveNextLabel.Text = status.LiveNext;
-        _errorLabel.Text = status.Error;
+        SetDetailText(_currentLabel, status.Current);
+        SetDetailText(_rankStatusLabel, status.RankStatus);
+        SetDetailText(_rankLastLabel, status.RankLast);
+        SetDetailText(_rankNextLabel, status.RankNext);
+        SetDetailText(_tftStatusLabel, status.TftStatus);
+        SetDetailText(_tftLastLabel, status.TftLast);
+        SetDetailText(_tftNextLabel, status.TftNext);
+        SetDetailText(_liveStatusLabel, status.LiveStatus);
+        SetDetailText(_liveLastLabel, status.LiveLast);
+        SetDetailText(_liveNextLabel, status.LiveNext);
+        _errorTextBox.Text = status.Error;
 
         var running = !string.Equals(status.State, "Stopped", StringComparison.OrdinalIgnoreCase);
         _startButton.Enabled = !running;
         _stopButton.Enabled = running;
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _fullTextToolTip.Dispose();
+        }
+
+        base.Dispose(disposing);
     }
 
     public void AllowClose()
@@ -806,7 +835,7 @@ internal sealed class SettingsForm : Form
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-        root.Controls.Add(new Label
+        var endpointLabel = new Label
         {
             AutoSize = false,
             Dock = DockStyle.Top,
@@ -814,13 +843,25 @@ internal sealed class SettingsForm : Form
             Text = endpoint,
             ForeColor = Color.DimGray,
             AutoEllipsis = true,
-        }, 0, 0);
+            UseMnemonic = false,
+        };
+        _fullTextToolTip.SetToolTip(endpointLabel, endpoint);
+        root.Controls.Add(endpointLabel, 0, 0);
 
-        var statusGrid = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, Margin = new Padding(0, 4, 0, 10) };
-        statusGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        statusGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        var status = AddMetric(statusGrid, "Status");
-        var last = AddMetric(statusGrid, "Last");
+        var statusGrid = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            ColumnCount = 1,
+            RowCount = 2,
+            GrowStyle = TableLayoutPanelGrowStyle.FixedSize,
+            Margin = new Padding(0, 4, 0, 10),
+        };
+        statusGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        statusGrid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        statusGrid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        var status = AddMetric(statusGrid, "Status", valueLines: 2);
+        var last = AddMetric(statusGrid, "Last", valueLines: 2);
         root.Controls.Add(statusGrid, 0, 1);
 
         var settings = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2 };
@@ -849,29 +890,53 @@ internal sealed class SettingsForm : Form
         return new JobPanel(panel, status, last, enabled, interval, limit, delay, matches, hint, settings);
     }
 
-    private Label AddMetric(TableLayoutPanel table, string label)
+    private Label AddMetric(TableLayoutPanel table, string label, int valueLines = 1)
     {
-        var cell = new Panel { Dock = DockStyle.Fill, Height = 48, Margin = new Padding(0, 0, 10, 0) };
-        cell.Controls.Add(new Label
+        var caption = new Label
         {
-            AutoSize = false,
-            Dock = DockStyle.Top,
-            Height = 18,
+            AutoSize = true,
+            Dock = DockStyle.Fill,
             Text = label,
             ForeColor = Color.DimGray,
-        });
+            UseMnemonic = false,
+            Margin = new Padding(0),
+        };
         var value = new Label
         {
             AutoSize = false,
-            Dock = DockStyle.Bottom,
-            Height = 26,
-            TextAlign = ContentAlignment.MiddleLeft,
+            Dock = DockStyle.Fill,
+            TextAlign = valueLines > 1
+                ? ContentAlignment.TopLeft
+                : ContentAlignment.MiddleLeft,
             Font = new Font(Font, FontStyle.Bold),
-            AutoEllipsis = true,
+            AutoEllipsis = valueLines == 1,
+            UseMnemonic = false,
+            Margin = new Padding(0),
         };
-        cell.Controls.Add(value);
+
+        var lineHeight = TextRenderer.MeasureText("Ag", value.Font).Height;
+        var cell = new TableLayoutPanel
+        {
+            AutoSize = false,
+            Dock = DockStyle.Fill,
+            Height = caption.PreferredHeight + (lineHeight * valueLines) + 6,
+            ColumnCount = 1,
+            RowCount = 2,
+            Margin = new Padding(0, 0, 10, valueLines > 1 ? 6 : 0),
+        };
+        cell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        cell.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        cell.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        cell.Controls.Add(caption, 0, 0);
+        cell.Controls.Add(value, 0, 1);
         table.Controls.Add(cell);
         return value;
+    }
+
+    private void SetDetailText(Label label, string text)
+    {
+        label.Text = text;
+        _fullTextToolTip.SetToolTip(label, text);
     }
 
     private static void AddSettingRow(TableLayoutPanel table, string label, Control control, int row)
@@ -1162,6 +1227,10 @@ internal sealed class RefreshLoop
                         : RefreshErrorClassifier.Classify(failureText));
                 retryAfterMs = result.RetryAfterMs;
                 logger.Info(result.LogLine);
+                if (!string.IsNullOrWhiteSpace(result.DiagnosticSummary))
+                {
+                    logger.Error(result.DiagnosticSummary);
+                }
                 updateStatus(
                     failureInfo?.Code == RefreshErrorCodes.RateLimited
                         ? $"Rate limited - {FormatPhaseStatus(result)}"
@@ -1251,8 +1320,13 @@ internal sealed class RefreshLoop
                             BuildCronPlayerSummary(result.Players),
                             PrefixError("Queued rank", BuildCronErrorSummary(result.Errors)),
                             result.RetryAfterMs,
-                            BuildDominantFailure(result.Errors));
+                            BuildDominantFailure(result.Errors),
+                            BuildCronDiagnosticSummary(result.Errors));
                         _rankLogger.Info($"Queued rank: {outcome.LogLine}");
+                        if (!string.IsNullOrWhiteSpace(outcome.DiagnosticSummary))
+                        {
+                            _rankLogger.Error(outcome.DiagnosticSummary);
+                        }
                         _updateRankStatus(FormatPhaseStatus(outcome));
                         _updateRankLast(
                             $"{DateTimeOffset.Now:hh:mm tt} - {result.Ok} queued rank saved" +
@@ -1424,7 +1498,8 @@ internal sealed class RefreshLoop
             BuildCronPlayerSummary(result.Players),
             PrefixError(JobLabel(job), BuildCronErrorSummary(result.Errors)),
             result.RetryAfterMs,
-            BuildDominantFailure(result.Errors));
+            BuildDominantFailure(result.Errors),
+            BuildCronDiagnosticSummary(result.Errors));
     }
 
     private CSharpRefreshService DirectService() =>
@@ -1647,7 +1722,7 @@ internal sealed class RefreshLoop
         return string.IsNullOrWhiteSpace(detail) ? baseText : $"{baseText} - {detail}";
     }
 
-    private static string? BuildCronErrorSummary(IReadOnlyList<CronError>? errors)
+    internal static string? BuildCronErrorSummary(IReadOnlyList<CronError>? errors)
     {
         if (errors is null || errors.Count == 0)
         {
@@ -1668,14 +1743,19 @@ internal sealed class RefreshLoop
             .Select(group =>
             {
                 var failure = group.First().Failure;
-                var names = group
-                    .Select(item => string.IsNullOrWhiteSpace(item.Error.Name)
-                        ? item.Error.PlayerId
-                        : item.Error.Name)
-                    .Where(name => !string.IsNullOrWhiteSpace(name))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .Take(3)
-                    .ToArray();
+                // A stop-batch failure is systemic (network, Riot outage, auth,
+                // or rate limiting). The first player merely happened to be the
+                // request in flight, so do not imply that account caused it.
+                var names = failure.StopBatch
+                    ? Array.Empty<string>()
+                    : group
+                        .Select(item => string.IsNullOrWhiteSpace(item.Error.Name)
+                            ? item.Error.PlayerId
+                            : item.Error.Name)
+                        .Where(name => !string.IsNullOrWhiteSpace(name))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Take(3)
+                        .ToArray();
                 var affectedSuffix = group.Count() > names.Length
                     ? $" (+{group.Count() - names.Length} more)"
                     : string.Empty;
@@ -1694,6 +1774,24 @@ internal sealed class RefreshLoop
             ? $" (+{categoryCount - groups.Length} other error type)"
             : string.Empty;
         return string.Join(" | ", groups) + categorySuffix;
+    }
+
+    private static string? BuildCronDiagnosticSummary(IReadOnlyList<CronError>? errors)
+    {
+        if (errors is null || errors.Count == 0)
+        {
+            return null;
+        }
+
+        var diagnostics = errors
+            .Select(error => RefreshErrorClassifier.SafeText(error.Diagnostic, 1200))
+            .Where(diagnostic => !string.IsNullOrWhiteSpace(diagnostic))
+            .Distinct(StringComparer.Ordinal)
+            .Take(5)
+            .ToArray();
+        return diagnostics.Length == 0
+            ? null
+            : $"Technical diagnostics: {string.Join(" | ", diagnostics)}";
     }
 
     private static RefreshFailureInfo? BuildDominantFailure(
@@ -2068,7 +2166,7 @@ internal sealed class CSharpRefreshService
             result.Players.Add(new CronPlayer
             {
                 PlayerId = id.ToString(),
-                Name = name,
+                Name = PlayerRiotId(player),
                 Status = "ok",
             });
         }
@@ -2079,12 +2177,20 @@ internal sealed class CSharpRefreshService
         catch (Exception ex)
         {
             var failure = RefreshErrorClassifier.Classify(ex);
+            var currentName = PlayerRiotId(player);
+            if (string.IsNullOrWhiteSpace(currentName.Replace("#", "")))
+            {
+                currentName = name;
+            }
             result.Fail = 1;
             result.Errors.Add(new CronError
             {
                 PlayerId = id.ToString(),
-                Name = name,
+                Name = FailurePlayerLabel(currentName, failure),
                 Error = failure.Message,
+                Diagnostic = RefreshErrorClassifier.SafeDiagnostic(
+                    $"Queued rank for {currentName}",
+                    ex),
                 Code = failure.Code,
                 Retryable = failure.Retryable,
                 UpstreamStatus = failure.Status,
@@ -2092,7 +2198,7 @@ internal sealed class CSharpRefreshService
             result.Players.Add(new CronPlayer
             {
                 PlayerId = id.ToString(),
-                Name = name,
+                Name = FailurePlayerLabel(currentName, failure),
                 Status = "failed",
             });
             ApplySystemicCooldown(result, failure, ex);
@@ -2181,16 +2287,11 @@ internal sealed class CSharpRefreshService
         }
         else
         {
-            var retryReady =
-                Builders<BsonDocument>.Filter.Exists("tftMatchSync.retryAfterAt", false) |
-                Builders<BsonDocument>.Filter.Lte("tftMatchSync.retryAfterAt", DateTime.UtcNow);
             var tftFilter =
                 approvedLeaderboard &
-                Builders<BsonDocument>.Filter.Ne("track.tft", false) &
-                Builders<BsonDocument>.Filter.Ne("tftMatchSync.enabled", false) &
-                retryReady;
+                Builders<BsonDocument>.Filter.Ne("track.tft", false);
             var tftSort = Builders<BsonDocument>.Sort
-                .Ascending("tftMatchSync.lastSyncAt")
+                .Ascending("tftMatchSync.lastAttemptAt")
                 .Ascending("tft.fetchedAt")
                 .Ascending("updatedAt");
             players = await _players
@@ -2221,7 +2322,12 @@ internal sealed class CSharpRefreshService
                 }
 
                 result.Ok++;
-                result.Players.Add(new CronPlayer { PlayerId = id.ToString(), Name = name, Status = "ok" });
+                result.Players.Add(new CronPlayer
+                {
+                    PlayerId = id.ToString(),
+                    Name = PlayerRiotId(player),
+                    Status = "ok",
+                });
                 if (config.DelayMs > 0)
                 {
                     await Task.Delay(config.DelayMs, cancellationToken);
@@ -2234,6 +2340,11 @@ internal sealed class CSharpRefreshService
             catch (Exception ex)
             {
                 var failure = RefreshErrorClassifier.Classify(ex);
+                var currentName = PlayerRiotId(player);
+                if (string.IsNullOrWhiteSpace(currentName.Replace("#", "")))
+                {
+                    currentName = name;
+                }
                 if (job == RefreshJob.Tft && !failure.StopBatch)
                 {
                     try
@@ -2250,13 +2361,21 @@ internal sealed class CSharpRefreshService
                 result.Errors.Add(new CronError
                 {
                     PlayerId = id.ToString(),
-                    Name = name,
+                    Name = FailurePlayerLabel(currentName, failure),
                     Error = failure.Message,
+                    Diagnostic = RefreshErrorClassifier.SafeDiagnostic(
+                        $"{job} for {currentName}",
+                        ex),
                     Code = failure.Code,
                     Retryable = failure.Retryable,
                     UpstreamStatus = failure.Status,
                 });
-                result.Players.Add(new CronPlayer { PlayerId = id.ToString(), Name = name, Status = "failed" });
+                result.Players.Add(new CronPlayer
+                {
+                    PlayerId = id.ToString(),
+                    Name = FailurePlayerLabel(currentName, failure),
+                    Status = "failed",
+                });
                 ApplySystemicCooldown(result, failure, ex);
                 if (failure.StopBatch)
                 {
@@ -2996,40 +3115,10 @@ internal sealed class CSharpRefreshService
         var rankPersisted = false;
         try
         {
-            var gameName = ReadString(player, "gameName") ?? throw new InvalidOperationException("Player missing gameName");
-            var tagLine = ReadString(player, "tagLine") ?? throw new InvalidOperationException("Player missing tagLine");
-            try
-            {
-                var account = await GetAccountByRiotIdAsync(gameName, tagLine, "lol", cancellationToken);
-                var currentPuuid = account.GetProperty("puuid").GetString();
-                if (!string.IsNullOrWhiteSpace(currentPuuid))
-                {
-                    puuid = currentPuuid;
-                }
-            }
-            catch (RiotApiException ex) when (ex.Status == 404)
-            {
-                if (string.IsNullOrWhiteSpace(puuid))
-                {
-                    throw new PlayerNotFoundException(
-                        "The linked Riot account was not found.",
-                        ex);
-                }
-            }
-            catch (RiotApiException ex) when (IsDecryptingBadRequest(ex))
-            {
-                if (string.IsNullOrWhiteSpace(puuid))
-                {
-                    throw new StaleRiotIdentityException(
-                        "Riot could not resolve the linked account identity.",
-                        ex);
-                }
-            }
-
-            if (string.IsNullOrWhiteSpace(puuid))
-            {
-                throw new InvalidOperationException("Riot account did not return a puuid.");
-            }
+            var identity = await ResolveCanonicalLolIdentityAsync(
+                player,
+                cancellationToken);
+            puuid = identity.Puuid;
 
             var platform = ReadString(player, "platform");
             JsonElement summoner;
@@ -3049,24 +3138,48 @@ internal sealed class CSharpRefreshService
                 {
                     (platform, summoner) = await FindSeaSummonerByPuuidAsync(puuid, cancellationToken);
                 }
+                catch (RiotTransportException ex) when (
+                    IsMissingPlatformHost(ex))
+                {
+                    (platform, summoner) = await FindSeaSummonerByPuuidAsync(
+                        puuid,
+                        cancellationToken);
+                }
             }
 
             var entries = await RiotGetJsonAsync($"https://{platform}.api.riotgames.com/lol/league/v4/entries/by-puuid/{Uri.EscapeDataString(puuid)}", "lol", cancellationToken);
-            var tftLeague = syncTftRank
-                ? await FindTftLeagueAsync(puuid, platform, cancellationToken)
-                : (JsonElement?)null;
+            string? tftPuuid = null;
+            JsonElement? tftLeague = null;
+            if (syncTftRank)
+            {
+                var tftAccount = await ResolveTftAccountForCanonicalRiotIdAsync(
+                    identity.GameName,
+                    identity.TagLine,
+                    cancellationToken);
+                tftPuuid = tftAccount.Puuid;
+                tftLeague = await FindTftLeagueAsync(
+                    tftPuuid,
+                    platform,
+                    cancellationToken);
+            }
             matchRegion = PlatformToMatchRegion(platform);
             var completedAt = DateTime.UtcNow;
 
             var updates = new List<UpdateDefinition<BsonDocument>>
             {
                 Builders<BsonDocument>.Update.Set("puuid", puuid),
-                Builders<BsonDocument>.Update.Set("tftPuuid", puuid),
                 Builders<BsonDocument>.Update.Set("platform", platform),
                 Builders<BsonDocument>.Update.Set("matchRegion", matchRegion),
                 Builders<BsonDocument>.Update.Set("lastRefreshAt", now),
                 Builders<BsonDocument>.Update.Set("updatedAt", now),
             };
+            if (!string.IsNullOrWhiteSpace(tftPuuid))
+            {
+                updates.Add(
+                    Builders<BsonDocument>.Update.Set(
+                        "tftPuuid",
+                        tftPuuid));
+            }
             SetJsonString(updates, "summonerId", summoner, "id");
             SetJsonInt(updates, "profileIconId", summoner, "profileIconId");
             SetJsonString(updates, "summonerName", summoner, "name");
@@ -3350,44 +3463,44 @@ internal sealed class CSharpRefreshService
     {
         var now = DateTime.UtcNow;
         var playerId = player.GetValue("_id").AsObjectId;
-        var gameName = ReadString(player, "gameName") ?? throw new InvalidOperationException("Player missing gameName");
-        var tagLine = ReadString(player, "tagLine") ?? throw new InvalidOperationException("Player missing tagLine");
-        var puuid = ReadString(player, "tftPuuid") ?? ReadString(player, "puuid");
-        try
-        {
-            var account = await GetAccountByRiotIdAsync(
-                gameName,
-                tagLine,
-                "tft",
-                cancellationToken);
-            var currentPuuid = account.GetProperty("puuid").GetString();
-            if (!string.IsNullOrWhiteSpace(currentPuuid))
-            {
-                puuid = currentPuuid;
-            }
-        }
-        catch (RiotApiException ex) when (ex.Status == 404)
-        {
-            if (string.IsNullOrWhiteSpace(puuid))
-            {
-                throw new PlayerNotFoundException(
-                    "The linked TFT account was not found.",
-                    ex);
-            }
-        }
-        catch (RiotApiException ex) when (IsDecryptingBadRequest(ex))
-        {
-            if (string.IsNullOrWhiteSpace(puuid))
-            {
-                throw new StaleRiotIdentityException(
-                    "Riot could not resolve the linked TFT account identity.",
-                    ex);
-            }
-        }
+        var matchHistoryEnabled =
+            NestedBooleanValue(player, "tftMatchSync", "enabled") is not false;
+        var retryAfter =
+            NestedDateTimeValue(player, "tftMatchSync", "retryAfterAt");
+        var matchHistoryBlocked =
+            retryAfter is not null && retryAfter.Value > now;
+        await _players.UpdateOneAsync(
+            Builders<BsonDocument>.Filter.Eq("_id", playerId),
+            Builders<BsonDocument>.Update.Set(
+                "tftMatchSync.lastAttemptAt",
+                now),
+            cancellationToken: cancellationToken);
 
-        if (string.IsNullOrWhiteSpace(puuid))
+        // Riot PUUIDs are scoped to the API key/application. Resolve the
+        // canonical Riot ID through the LoL key and its saved LoL PUUID first,
+        // then exchange that current Riot ID through the TFT key. Reusing the
+        // LoL PUUID for TFT produces Riot's misleading "decrypting" error.
+        var lolIdentity = await ResolveCanonicalLolIdentityAsync(
+            player,
+            cancellationToken);
+        var tftIdentity = HasSeparateTftIdentityScope()
+            ? await ResolveTftAccountForCanonicalRiotIdAsync(
+                lolIdentity.GameName,
+                lolIdentity.TagLine,
+                cancellationToken)
+            : lolIdentity;
+        var puuid = tftIdentity.Puuid;
+        var recoveredIdentity =
+            string.Equals(
+                ReadNestedString(
+                    player,
+                    "tftMatchSync",
+                    "lastErrorStage"),
+                "identity",
+                StringComparison.OrdinalIgnoreCase);
+        if (recoveredIdentity)
         {
-            throw new InvalidOperationException("Missing TFT puuid.");
+            matchHistoryBlocked = false;
         }
 
         var platform = ReadString(player, "platform") ?? "sg2";
@@ -3399,13 +3512,43 @@ internal sealed class CSharpRefreshService
             Builders<BsonDocument>.Update.Set("matchRegion", matchRegion),
             Builders<BsonDocument>.Update.Set("lastRefreshAt", now),
             Builders<BsonDocument>.Update.Set("updatedAt", now),
+            Builders<BsonDocument>.Update.Set(
+                "tftMatchSync.lastAttemptAt",
+                now),
         };
+        if (recoveredIdentity)
+        {
+            updates.Add(
+                Builders<BsonDocument>.Update.Unset(
+                    "tftMatchSync.retryAfterAt"));
+            updates.Add(
+                Builders<BsonDocument>.Update.Unset(
+                    "tftMatchSync.lastError"));
+            updates.Add(
+                Builders<BsonDocument>.Update.Unset(
+                    "tftMatchSync.lastErrorCode"));
+            updates.Add(
+                Builders<BsonDocument>.Update.Unset(
+                    "tftMatchSync.lastErrorStage"));
+            updates.Add(
+                Builders<BsonDocument>.Update.Set(
+                    "tftMatchSync.consecutiveFailures",
+                    0));
+        }
         ApplyLeagueSnapshot(updates, tftLeague, "RANKED_TFT", "tft", now);
         await InsertRankEntriesAsync(playerId, tftLeague, now, cancellationToken);
         await _players.UpdateOneAsync(
             Builders<BsonDocument>.Filter.Eq("_id", playerId),
             Builders<BsonDocument>.Update.Combine(updates),
             cancellationToken: cancellationToken);
+
+        if (!matchHistoryEnabled || matchHistoryBlocked)
+        {
+            await TrySyncDiscordGuildRolesForPlayerAsync(
+                playerId,
+                cancellationToken);
+            return;
+        }
 
         List<string> ids;
         try
@@ -3498,7 +3641,8 @@ internal sealed class CSharpRefreshService
                 .Set("updatedAt", now)
                 .Unset("tftMatchSync.retryAfterAt")
                 .Unset("tftMatchSync.lastError")
-                .Unset("tftMatchSync.lastErrorCode"),
+                .Unset("tftMatchSync.lastErrorCode")
+                .Unset("tftMatchSync.lastErrorStage"),
             cancellationToken: cancellationToken);
 
         await TrySyncDiscordGuildRolesForPlayerAsync(playerId, cancellationToken);
@@ -3970,6 +4114,17 @@ internal sealed class CSharpRefreshService
     private static string PlayerRiotId(BsonDocument player)
     {
         return $"{ReadString(player, "gameName")}#{ReadString(player, "tagLine")}";
+    }
+
+    internal static string FailurePlayerLabel(
+        string savedRiotId,
+        RefreshFailureInfo failure)
+    {
+        return failure.Code is
+            RefreshErrorCodes.PlayerNotFound or
+            RefreshErrorCodes.StaleIdentity
+                ? $"{savedRiotId} (saved Riot ID)"
+                : savedRiotId;
     }
 
     private static string? PlayerDiscordLabel(BsonDocument player)
@@ -4542,9 +4697,445 @@ internal sealed class CSharpRefreshService
         return await RiotGetJsonAsync(url, game, cancellationToken);
     }
 
+    private sealed record ResolvedRiotIdentity(
+        string Puuid,
+        string GameName,
+        string TagLine);
+
+    internal static bool HasSavedLolIdentity(string? puuid)
+    {
+        return !string.IsNullOrWhiteSpace(puuid);
+    }
+
+    private async Task<ResolvedRiotIdentity> ResolveCanonicalLolIdentityAsync(
+        BsonDocument player,
+        CancellationToken cancellationToken)
+    {
+        var savedGameName = ReadString(player, "gameName") ??
+            throw new InvalidOperationException("Player missing gameName");
+        var savedTagLine = ReadString(player, "tagLine") ??
+            throw new InvalidOperationException("Player missing tagLine");
+        var savedPuuid = ReadString(player, "puuid");
+
+        JsonElement account;
+        if (HasSavedLolIdentity(savedPuuid))
+        {
+            // A PUUID is the durable account identity. A saved Riot ID can be
+            // renamed and later reused, so never rebind an existing profile by
+            // looking up its old display name first.
+            account = await GetAccountByPuuidAsync(
+                savedPuuid!,
+                "lol",
+                cancellationToken);
+        }
+        else
+        {
+            try
+            {
+                account = await GetAccountByRiotIdAsync(
+                    savedGameName,
+                    savedTagLine,
+                    "lol",
+                    cancellationToken);
+            }
+            catch (RiotApiException ex) when (
+                ex.Status == 404 ||
+                IsDecryptingBadRequest(ex))
+            {
+                if (ex.Status == 404)
+                {
+                    throw new PlayerNotFoundException(
+                        "The saved Riot ID was not found and no verified LoL identity is available.",
+                        ex);
+                }
+
+                throw new StaleRiotIdentityException(
+                    "Riot could not resolve the saved LoL account identity.",
+                    ex);
+            }
+        }
+
+        var identity = ReadResolvedAccount(
+            account,
+            "LoL account response was missing its current Riot identity.");
+        if (
+            HasSavedLolIdentity(savedPuuid) &&
+            !string.Equals(savedPuuid, identity.Puuid, StringComparison.Ordinal))
+        {
+            throw new StaleRiotIdentityException(
+                "Riot returned a different durable identity for this tracked LoL account.");
+        }
+        await PersistCanonicalRiotIdentityAsync(
+            player,
+            identity,
+            cancellationToken);
+        return identity;
+    }
+
+    private async Task<ResolvedRiotIdentity> ResolveTftAccountForCanonicalRiotIdAsync(
+        string gameName,
+        string tagLine,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var account = await GetAccountByRiotIdAsync(
+                gameName,
+                tagLine,
+                "tft",
+                cancellationToken);
+            return ReadResolvedAccount(
+                account,
+                "TFT account response was missing its application-scoped identity.");
+        }
+        catch (RiotApiException ex) when (
+            ex.Status == 404 ||
+            IsDecryptingBadRequest(ex))
+        {
+            throw new StaleRiotIdentityException(
+                "Riot could not map the current Riot ID to this TFT API application's identity.",
+                ex);
+        }
+    }
+
+    private async Task<JsonElement> GetAccountByPuuidAsync(
+        string puuid,
+        string game,
+        CancellationToken cancellationToken)
+    {
+        var regions = new[]
+            {
+                AccountRegion(),
+                "americas",
+                "asia",
+                "europe",
+            }
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        RiotApiException? decryptFailure = null;
+        var sawProviderResponse = false;
+        RiotTransportException? missingHostFailure = null;
+
+        foreach (var region in regions)
+        {
+            try
+            {
+                return await RiotGetJsonAsync(
+                    $"https://{region}.api.riotgames.com/riot/account/v1/accounts/by-puuid/{Uri.EscapeDataString(puuid)}",
+                    game,
+                    cancellationToken);
+            }
+            catch (RiotApiException ex) when (ex.Status == 404)
+            {
+                sawProviderResponse = true;
+            }
+            catch (RiotApiException ex) when (IsDecryptingBadRequest(ex))
+            {
+                decryptFailure = ex;
+                sawProviderResponse = true;
+            }
+            catch (RiotTransportException ex) when (IsMissingPlatformHost(ex))
+            {
+                // A missing optional regional hostname must not conceal a
+                // confirmed decrypting failure from another account region.
+                missingHostFailure = ex;
+            }
+        }
+
+        if (decryptFailure is not null)
+        {
+            throw new StaleRiotIdentityException(
+                "Riot could not decrypt the saved LoL account identity.",
+                decryptFailure);
+        }
+
+        if (!sawProviderResponse && missingHostFailure is not null)
+        {
+            throw missingHostFailure;
+        }
+
+        throw new PlayerNotFoundException(
+            "Riot account not found for the saved LoL identity.");
+    }
+
+    private static ResolvedRiotIdentity ReadResolvedAccount(
+        JsonElement account,
+        string missingMessage)
+    {
+        var puuid = account.TryGetProperty("puuid", out var puuidValue)
+            ? puuidValue.GetString()?.Trim()
+            : null;
+        var gameName = account.TryGetProperty("gameName", out var gameNameValue)
+            ? CleanRiotIdPart(gameNameValue.GetString())
+            : "";
+        var tagLine = account.TryGetProperty("tagLine", out var tagLineValue)
+            ? CleanRiotIdPart(tagLineValue.GetString())
+            : "";
+        if (
+            string.IsNullOrWhiteSpace(puuid) ||
+            string.IsNullOrWhiteSpace(gameName) ||
+            string.IsNullOrWhiteSpace(tagLine))
+        {
+            throw new StaleRiotIdentityException(missingMessage);
+        }
+
+        return new ResolvedRiotIdentity(puuid, gameName, tagLine);
+    }
+
+    private async Task PersistCanonicalRiotIdentityAsync(
+        BsonDocument player,
+        ResolvedRiotIdentity identity,
+        CancellationToken cancellationToken)
+    {
+        var playerId = player.GetValue("_id").AsObjectId;
+        var previousGameName = CleanRiotIdPart(ReadString(player, "gameName"));
+        var previousTagLine = CleanRiotIdPart(ReadString(player, "tagLine"));
+        var previousPuuid = ReadString(player, "puuid") ?? "";
+        var gameNameNorm = NormalizeRiotIdPart(identity.GameName);
+        var tagLineNorm = NormalizeRiotIdPart(identity.TagLine);
+        var renamed =
+            NormalizeRiotIdPart(previousGameName) != gameNameNorm ||
+            NormalizeRiotIdPart(previousTagLine) != tagLineNorm;
+        var puuidChanged = !string.Equals(
+            previousPuuid,
+            identity.Puuid,
+            StringComparison.Ordinal);
+        var presentationChanged =
+            !string.Equals(
+                previousGameName,
+                identity.GameName,
+                StringComparison.Ordinal) ||
+            !string.Equals(
+                previousTagLine,
+                identity.TagLine,
+                StringComparison.Ordinal);
+        var normalizedFieldsChanged =
+            !string.Equals(
+                ReadString(player, "gameNameNorm"),
+                gameNameNorm,
+                StringComparison.Ordinal) ||
+            !string.Equals(
+                ReadString(player, "tagLineNorm"),
+                tagLineNorm,
+                StringComparison.Ordinal);
+
+        if (!renamed && !puuidChanged)
+        {
+            if (presentationChanged || normalizedFieldsChanged)
+            {
+                await _players.UpdateOneAsync(
+                    Builders<BsonDocument>.Filter.Eq("_id", playerId),
+                    Builders<BsonDocument>.Update
+                        .Set("gameName", identity.GameName)
+                        .Set("tagLine", identity.TagLine)
+                        .Set("gameNameNorm", gameNameNorm)
+                        .Set("tagLineNorm", tagLineNorm)
+                        .Set("updatedAt", DateTime.UtcNow),
+                    cancellationToken: cancellationToken);
+            }
+
+            player["gameName"] = identity.GameName;
+            player["tagLine"] = identity.TagLine;
+            player["gameNameNorm"] = gameNameNorm;
+            player["tagLineNorm"] = tagLineNorm;
+            await SyncDiscordLinkRiotIdAsync(
+                playerId,
+                identity.GameName,
+                identity.TagLine,
+                cancellationToken);
+            return;
+        }
+
+        var canonicalCollision = new BsonDocument
+        {
+            ["_id"] = new BsonDocument("$ne", playerId),
+            ["$or"] = new BsonArray
+            {
+                new BsonDocument
+                {
+                    ["gameNameNorm"] = gameNameNorm,
+                    ["tagLineNorm"] = tagLineNorm,
+                },
+                new BsonDocument(
+                    "riotIdAliases",
+                    new BsonDocument(
+                        "$elemMatch",
+                        new BsonDocument
+                        {
+                            ["gameNameNorm"] = gameNameNorm,
+                            ["tagLineNorm"] = tagLineNorm,
+                        })),
+                new BsonDocument("puuid", identity.Puuid),
+            },
+        };
+        var collision = await _players
+            .Find(canonicalCollision)
+            .Project(Builders<BsonDocument>.Projection.Include("_id"))
+            .FirstOrDefaultAsync(cancellationToken);
+        if (collision is not null)
+        {
+            throw new StaleRiotIdentityException(
+                "The current Riot identity already belongs to another tracked profile. Review and merge it manually.");
+        }
+
+        var aliases = BuildCanonicalRiotIdAliases(
+            player,
+            identity.GameName,
+            identity.TagLine,
+            DateTime.UtcNow);
+        var update = Builders<BsonDocument>.Update
+            .Set("gameName", identity.GameName)
+            .Set("tagLine", identity.TagLine)
+            .Set("gameNameNorm", gameNameNorm)
+            .Set("tagLineNorm", tagLineNorm)
+            .Set("riotIdAliases", aliases)
+            .Set("puuid", identity.Puuid)
+            .Set("updatedAt", DateTime.UtcNow);
+
+        try
+        {
+            await _players.UpdateOneAsync(
+                Builders<BsonDocument>.Filter.Eq("_id", playerId),
+                update,
+                cancellationToken: cancellationToken);
+        }
+        catch (MongoWriteException ex) when (ex.WriteError?.Code == 11000)
+        {
+            throw new StaleRiotIdentityException(
+                "The current Riot identity conflicts with another tracked profile. Review and merge it manually.",
+                ex);
+        }
+
+        await SyncDiscordLinkRiotIdAsync(
+            playerId,
+            identity.GameName,
+            identity.TagLine,
+            cancellationToken);
+
+        player["gameName"] = identity.GameName;
+        player["tagLine"] = identity.TagLine;
+        player["gameNameNorm"] = gameNameNorm;
+        player["tagLineNorm"] = tagLineNorm;
+        player["riotIdAliases"] = aliases;
+        player["puuid"] = identity.Puuid;
+    }
+
+    private async Task SyncDiscordLinkRiotIdAsync(
+        ObjectId playerId,
+        string gameName,
+        string tagLine,
+        CancellationToken cancellationToken)
+    {
+        await _discordLinks.UpdateManyAsync(
+            Builders<BsonDocument>.Filter.Eq("playerId", playerId) &
+            (
+                Builders<BsonDocument>.Filter.Ne("gameName", gameName) |
+                Builders<BsonDocument>.Filter.Ne("tagLine", tagLine)
+            ),
+            Builders<BsonDocument>.Update
+                .Set("gameName", gameName)
+                .Set("tagLine", tagLine)
+                .Set("updatedAt", DateTime.UtcNow),
+            cancellationToken: cancellationToken);
+    }
+
+    internal static BsonArray BuildCanonicalRiotIdAliases(
+        BsonDocument player,
+        string canonicalGameName,
+        string canonicalTagLine,
+        DateTime observedAt)
+    {
+        var canonicalGameNameNorm = NormalizeRiotIdPart(canonicalGameName);
+        var canonicalTagLineNorm = NormalizeRiotIdPart(canonicalTagLine);
+        var aliases = new Dictionary<string, BsonDocument>(
+            StringComparer.Ordinal);
+
+        void AddAlias(
+            string? gameName,
+            string? tagLine,
+            BsonValue? storedObservedAt = null)
+        {
+            var cleanGameName = CleanRiotIdPart(gameName);
+            var cleanTagLine = CleanRiotIdPart(tagLine);
+            var gameNameNorm = NormalizeRiotIdPart(cleanGameName);
+            var tagLineNorm = NormalizeRiotIdPart(cleanTagLine);
+            if (
+                string.IsNullOrWhiteSpace(gameNameNorm) ||
+                string.IsNullOrWhiteSpace(tagLineNorm) ||
+                gameNameNorm == canonicalGameNameNorm &&
+                tagLineNorm == canonicalTagLineNorm)
+            {
+                return;
+            }
+
+            var key = $"{gameNameNorm}#{tagLineNorm}";
+            if (aliases.ContainsKey(key))
+            {
+                return;
+            }
+
+            aliases[key] = new BsonDocument
+            {
+                ["gameName"] = cleanGameName,
+                ["tagLine"] = cleanTagLine,
+                ["gameNameNorm"] = gameNameNorm,
+                ["tagLineNorm"] = tagLineNorm,
+                ["observedAt"] = storedObservedAt is { IsBsonDateTime: true }
+                    ? storedObservedAt
+                    : new BsonDateTime(observedAt),
+            };
+        }
+
+        if (
+            player.TryGetValue("riotIdAliases", out var storedAliases) &&
+            storedAliases.IsBsonArray)
+        {
+            foreach (var rawAlias in storedAliases.AsBsonArray)
+            {
+                if (!rawAlias.IsBsonDocument)
+                {
+                    continue;
+                }
+
+                var alias = rawAlias.AsBsonDocument;
+                AddAlias(
+                    ReadString(alias, "gameName"),
+                    ReadString(alias, "tagLine"),
+                    alias.TryGetValue("observedAt", out var aliasObservedAt)
+                        ? aliasObservedAt
+                        : null);
+            }
+        }
+
+        AddAlias(
+            ReadString(player, "gameName"),
+            ReadString(player, "tagLine"));
+        return new BsonArray(aliases.Values);
+    }
+
+    private static string CleanRiotIdPart(string? value)
+    {
+        var normalized = (value ?? "").Normalize(
+            System.Text.NormalizationForm.FormKC);
+        return new string(
+                normalized
+                    .Where(character =>
+                        char.GetUnicodeCategory(character) !=
+                        System.Globalization.UnicodeCategory.Format)
+                    .ToArray())
+            .Trim();
+    }
+
+    private static string NormalizeRiotIdPart(string? value)
+    {
+        return CleanRiotIdPart(value).ToLowerInvariant();
+    }
+
     private async Task<(string Platform, JsonElement Summoner)> FindSeaSummonerByPuuidAsync(string puuid, CancellationToken cancellationToken)
     {
         var sawDecryptFailure = false;
+        var sawProviderResponse = false;
+        RiotTransportException? missingHostFailure = null;
         foreach (var platform in SeaPlatforms)
         {
             try
@@ -4553,10 +5144,18 @@ internal sealed class CSharpRefreshService
             }
             catch (RiotApiException ex) when (ex.Status == 404)
             {
+                sawProviderResponse = true;
             }
             catch (RiotApiException ex) when (IsDecryptingBadRequest(ex))
             {
                 sawDecryptFailure = true;
+                sawProviderResponse = true;
+            }
+            catch (RiotTransportException ex) when (IsMissingPlatformHost(ex))
+            {
+                // Some retired SEA platform hostnames no longer resolve. Skip
+                // only that hostname and retain any confirmed identity signal.
+                missingHostFailure = ex;
             }
         }
 
@@ -4564,6 +5163,11 @@ internal sealed class CSharpRefreshService
         {
             throw new StaleRiotIdentityException(
                 "Riot could not resolve the saved LoL account identity.");
+        }
+
+        if (!sawProviderResponse && missingHostFailure is not null)
+        {
+            throw missingHostFailure;
         }
 
         throw new PlayerNotFoundException("LoL account not found on SEA platforms.");
@@ -4579,6 +5183,8 @@ internal sealed class CSharpRefreshService
         platforms.AddRange(SeaPlatforms.Where(p => !platforms.Contains(p)));
 
         var sawDecryptFailure = false;
+        var sawProviderResponse = false;
+        RiotTransportException? missingHostFailure = null;
         foreach (var platform in platforms)
         {
             try
@@ -4587,10 +5193,18 @@ internal sealed class CSharpRefreshService
             }
             catch (RiotApiException ex) when (ex.Status == 404)
             {
+                sawProviderResponse = true;
             }
             catch (RiotApiException ex) when (IsDecryptingBadRequest(ex))
             {
                 sawDecryptFailure = true;
+                sawProviderResponse = true;
+            }
+            catch (RiotTransportException ex) when (IsMissingPlatformHost(ex))
+            {
+                // Missing optional shard host; continue through the remaining
+                // SEA platforms instead of reporting a global network outage.
+                missingHostFailure = ex;
             }
         }
 
@@ -4600,13 +5214,24 @@ internal sealed class CSharpRefreshService
                 "Riot could not resolve the saved TFT account identity.");
         }
 
-        return JsonDocument.Parse("[]").RootElement.Clone();
+        if (!sawProviderResponse && missingHostFailure is not null)
+        {
+            throw missingHostFailure;
+        }
+
+        // A real unranked account returns HTTP 200 with an empty array. If
+        // every platform returned 404, this was an unavailable lookup and must
+        // not overwrite a previously saved rank as a fresh unranked result.
+        throw new PlayerNotFoundException(
+            "TFT account was not found on a SEA platform.");
     }
 
     private async Task<(string Platform, JsonElement Game)?> FindActiveGameAsync(string puuid, string? preferredPlatform, CancellationToken cancellationToken)
     {
         var preferred = preferredPlatform?.Trim().ToLowerInvariant();
         var sawDecryptFailure = false;
+        var sawProviderResponse = false;
+        RiotTransportException? missingHostFailure = null;
         if (!string.IsNullOrWhiteSpace(preferred) && preferred != "auto")
         {
             try
@@ -4623,9 +5248,16 @@ internal sealed class CSharpRefreshService
             catch (RiotApiException ex) when (IsDecryptingBadRequest(ex))
             {
                 sawDecryptFailure = true;
+                sawProviderResponse = true;
                 // A decrypting error means the stored platform may be stale. Fall
                 // back to the remaining shards so a moved/misclassified player is
                 // not incorrectly reported as offline.
+            }
+            catch (RiotTransportException ex) when (IsMissingPlatformHost(ex))
+            {
+                // The preferred legacy shard hostname is unavailable; try the
+                // remaining SEA platforms.
+                missingHostFailure = ex;
             }
         }
 
@@ -4641,10 +5273,17 @@ internal sealed class CSharpRefreshService
             }
             catch (RiotApiException ex) when (ex.Status == 404)
             {
+                sawProviderResponse = true;
             }
             catch (RiotApiException ex) when (IsDecryptingBadRequest(ex))
             {
                 sawDecryptFailure = true;
+                sawProviderResponse = true;
+            }
+            catch (RiotTransportException ex) when (IsMissingPlatformHost(ex))
+            {
+                // Missing optional shard host; continue.
+                missingHostFailure = ex;
             }
         }
 
@@ -4652,6 +5291,11 @@ internal sealed class CSharpRefreshService
         {
             throw new StaleRiotIdentityException(
                 "Riot could not resolve the saved account identity for live-game checks.");
+        }
+
+        if (!sawProviderResponse && missingHostFailure is not null)
+        {
+            throw missingHostFailure;
         }
 
         return null;
@@ -4721,7 +5365,8 @@ internal sealed class CSharpRefreshService
                     throw new RiotApiException(
                         status,
                         ParseRiotError(text, response.ReasonPhrase ?? "Riot API error"),
-                        retryAfterMs);
+                        retryAfterMs,
+                        new Uri(url).Host);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -4739,7 +5384,16 @@ internal sealed class CSharpRefreshService
                     BlockRiotRequestsFor((int)TimeSpan.FromMinutes(15).TotalMilliseconds);
                     throw new TimeoutException("Riot's API request timed out.", ex);
                 }
-                catch (HttpRequestException)
+                catch (HttpRequestException ex) when (IsMissingPlatformHost(ex))
+                {
+                    // A hostname that does not exist will not recover by retrying
+                    // the same retired shard, and must not start a global
+                    // fifteen-minute Riot cooldown before fallback can continue.
+                    throw new RiotTransportException(
+                        new Uri(url).Host,
+                        ex);
+                }
+                catch (HttpRequestException ex)
                 {
                     if (attempt < RiotMaxAttempts - 1)
                     {
@@ -4749,7 +5403,9 @@ internal sealed class CSharpRefreshService
                     }
 
                     BlockRiotRequestsFor((int)TimeSpan.FromMinutes(15).TotalMilliseconds);
-                    throw;
+                    throw new RiotTransportException(
+                        new Uri(url).Host,
+                        ex);
                 }
                 finally
                 {
@@ -5103,6 +5759,12 @@ internal sealed class CSharpRefreshService
         RefreshFailureInfo failure)
     {
         var failedAt = DateTime.UtcNow;
+        var stage = failure.Code is
+            RefreshErrorCodes.PlayerNotFound or
+            RefreshErrorCodes.StaleIdentity or
+            RefreshErrorCodes.PlayerData
+                ? "identity"
+                : "matches";
         await _players.UpdateOneAsync(
             Builders<BsonDocument>.Filter.Eq("_id", playerId),
             Builders<BsonDocument>.Update
@@ -5112,6 +5774,7 @@ internal sealed class CSharpRefreshService
                     failedAt.Add(PlayerFailureBackoff(failure)))
                 .Set("tftMatchSync.lastError", failure.Message)
                 .Set("tftMatchSync.lastErrorCode", failure.Code)
+                .Set("tftMatchSync.lastErrorStage", stage)
                 .Inc("tftMatchSync.consecutiveFailures", 1),
             cancellationToken: CancellationToken.None);
     }
@@ -5140,6 +5803,30 @@ internal sealed class CSharpRefreshService
         }
 
         return MustEnv("RIOT_API_KEY");
+    }
+
+    private bool HasSeparateTftIdentityScope()
+    {
+        return HasSeparateTftIdentityScope(
+            Env("RIOT_API_KEY"),
+            Env("RIOT_TFT_API_KEY"),
+            Env("TFT_API_KEY"));
+    }
+
+    internal static bool HasSeparateTftIdentityScope(
+        string? lolKey,
+        string? tftKey,
+        string? legacyTftKey)
+    {
+        var normalizedLolKey = (lolKey ?? "").Trim();
+        var normalizedTftKey = !string.IsNullOrWhiteSpace(tftKey)
+            ? tftKey.Trim()
+            : (legacyTftKey ?? "").Trim();
+        return normalizedTftKey.Length > 0 &&
+               !string.Equals(
+                   normalizedLolKey,
+                   normalizedTftKey,
+                   StringComparison.Ordinal);
     }
 
     private string PlatformToMatchRegion(string? platform)
@@ -5270,6 +5957,29 @@ internal sealed class CSharpRefreshService
         return ex.Status == 400 && ex.Message.Contains("decrypt", StringComparison.OrdinalIgnoreCase);
     }
 
+    internal static bool IsMissingPlatformHost(Exception exception)
+    {
+        var ex = exception is RiotTransportException transport
+            ? transport.InnerException
+            : exception;
+        if (ex is not HttpRequestException request)
+        {
+            return false;
+        }
+
+        if (
+            request.InnerException is System.Net.Sockets.SocketException socket &&
+            socket.SocketErrorCode is
+                System.Net.Sockets.SocketError.HostNotFound or
+                System.Net.Sockets.SocketError.NoData)
+        {
+            return true;
+        }
+
+        return request.HttpRequestError ==
+            HttpRequestError.NameResolutionError;
+    }
+
     private static int? RetryAfterMs(Exception ex)
     {
         return ex switch
@@ -5283,10 +5993,23 @@ internal sealed class CSharpRefreshService
 
 }
 
-internal sealed class RiotApiException(int status, string message, int? retryAfterMs = null) : Exception(message)
+internal sealed class RiotApiException(
+    int status,
+    string message,
+    int? retryAfterMs = null,
+    string? endpointHost = null) : Exception(message)
 {
     public int Status { get; } = status;
     public int? RetryAfterMs { get; } = retryAfterMs;
+    public string? EndpointHost { get; } = endpointHost;
+}
+
+internal sealed class RiotTransportException(
+    string endpointHost,
+    HttpRequestException innerException) :
+    Exception("Riot API transport failed.", innerException)
+{
+    public string EndpointHost { get; } = endpointHost;
 }
 
 internal sealed class CronApiException(
@@ -5421,6 +6144,11 @@ internal static class RefreshErrorClassifier
         if (ex is TimeoutException or TaskCanceledException)
         {
             return Known(RefreshErrorCodes.Timeout);
+        }
+
+        if (ex is RiotTransportException)
+        {
+            return Known(RefreshErrorCodes.Network);
         }
 
         if (ex is HttpRequestException requestException)
@@ -5622,7 +6350,8 @@ internal static class RefreshErrorClassifier
     public static string SafeDiagnostic(string operation, Exception exception)
     {
         var ex = Unwrap(exception);
-        var status = ex switch
+        var provider = FindProviderException(ex);
+        var status = provider switch
         {
             RiotApiException riot => $" HTTP {riot.Status}",
             CronApiException cron => $" HTTP {cron.Status}",
@@ -5630,8 +6359,16 @@ internal static class RefreshErrorClassifier
             HttpRequestException request when request.StatusCode is { } code => $" HTTP {(int)code}",
             _ => string.Empty,
         };
+        var host = provider switch
+        {
+            RiotApiException riot when !string.IsNullOrWhiteSpace(riot.EndpointHost) =>
+                $" host={riot.EndpointHost}",
+            RiotTransportException transport =>
+                $" host={transport.EndpointHost}",
+            _ => string.Empty,
+        };
         return SafeText(
-            $"{operation} failed ({ex.GetType().Name}{status}): {ex}",
+            $"{operation} failed ({ex.GetType().Name}{status}{host}): {ex}",
             5000);
     }
 
@@ -5658,6 +6395,24 @@ internal static class RefreshErrorClassifier
         if (exception is AggregateException aggregate)
         {
             return aggregate.Flatten().InnerExceptions.FirstOrDefault() ?? exception;
+        }
+
+        return exception;
+    }
+
+    private static Exception FindProviderException(Exception exception)
+    {
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (
+                current is RiotApiException or
+                RiotTransportException or
+                CronApiException or
+                DiscordApiException or
+                HttpRequestException)
+            {
+                return current;
+            }
         }
 
         return exception;
@@ -6039,7 +6794,8 @@ internal sealed record TickOutcome(
     string? PlayerSummary,
     string? ErrorSummary,
     int? RetryAfterMs = null,
-    RefreshFailureInfo? Failure = null)
+    RefreshFailureInfo? Failure = null,
+    string? DiagnosticSummary = null)
 {
     public string LogLine => $"Refreshed {Ok} players, failed {Fail}, skipped {Skipped}, scanned {Scanned}.{(string.IsNullOrWhiteSpace(ErrorSummary) ? string.Empty : $" Errors: {ErrorSummary}")}";
 }
@@ -6244,6 +7000,7 @@ internal sealed class CronError
     public string? PlayerId { get; init; }
     public string? Name { get; init; }
     public string Error { get; init; } = "Refresh failed";
+    public string? Diagnostic { get; init; }
     public string? Code { get; init; }
     public bool? Retryable { get; init; }
     public int? UpstreamStatus { get; init; }

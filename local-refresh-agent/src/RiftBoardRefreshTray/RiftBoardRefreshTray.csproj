@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <AssemblyName>RiftBoardRefreshTray</AssemblyName>
     <RootNamespace>RiftBoardRefreshTray</RootNamespace>
     <Platforms>x64</Platforms>
